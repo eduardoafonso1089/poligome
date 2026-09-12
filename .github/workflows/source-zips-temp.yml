@@ -1,0 +1,45 @@
+name: Temporary source ZIPs
+
+on:
+  push:
+    branches:
+      - tmp/source-zips-20260912-1625
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main snapshot
+        uses: actions/checkout@v4
+        with:
+          ref: dfe774dae2ec76df923e8fcf5f6adba5d90b6b9a
+          path: poligome-main
+          persist-credentials: false
+
+      - name: Checkout editor refactor snapshot
+        uses: actions/checkout@v4
+        with:
+          ref: 351f67129b397514b8476dfd7d1ceb44355b0c8b
+          path: poligome-refactor-editor-architecture
+          persist-credentials: false
+
+      - name: Remove Git metadata
+        run: |
+          rm -rf poligome-main/.git
+          rm -rf poligome-refactor-editor-architecture/.git
+
+      - name: Upload main source
+        uses: actions/upload-artifact@v4
+        with:
+          name: poligome-main-2026-09-12
+          path: poligome-main
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload refactor source
+        uses: actions/upload-artifact@v4
+        with:
+          name: poligome-refactor-editor-architecture-2026-09-12
+          path: poligome-refactor-editor-architecture
+          if-no-files-found: error
+          retention-days: 1
