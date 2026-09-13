@@ -206,14 +206,19 @@ try {
 
   await check("Merge unions two mobile-selected overlapping polygons", async () => {
     await loadDemo(page);
-    const first = await drawPolygon(page, [[.55,.58],[.68,.58],[.68,.72],[.55,.72]]);
-    const second = await drawPolygon(page, [[.62,.63],[.75,.63],[.75,.77],[.62,.77]]);
+    await drawPolygon(page, [[.50,.56],[.66,.56],[.66,.71],[.50,.71]]);
+    await drawPolygon(page, [[.62,.63],[.78,.63],[.78,.78],[.62,.78]]);
     const before = await count(page);
     await (await button(page, /Selecionar e mover \(V\)|Select/i)).tap();
     const multi = await button(page, /Selecionar várias|Select multiple/i);
     await multi.tap();
-    await page.locator(`[data-annotation-id="${first}"]`).tap({ force: true });
-    await page.locator(`[data-annotation-id="${second}"]`).tap({ force: true });
+    const { box } = await canvas(page);
+    const firstOnly = p(box, .53, .59);
+    const secondOnly = p(box, .75, .75);
+    await page.touchscreen.tap(firstOnly.x, firstOnly.y);
+    await page.waitForTimeout(50);
+    await page.touchscreen.tap(secondOnly.x, secondOnly.y);
+    await page.waitForTimeout(50);
     const merge = await button(page, /Unir polígonos selecionados|Merge/i);
     await merge.tap();
     await page.waitForTimeout(90);
