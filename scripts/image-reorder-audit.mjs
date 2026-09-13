@@ -52,6 +52,18 @@ try {
     return numbers.join(' · ');
   });
 
+  await check("reordered canonical sequence drives image status and navigation", async () => {
+    const status = (await page.locator('.status > div span').innerText()).replace(/\s+/g, ' ').trim();
+    if (!/3\s*\/\s*3/.test(status)) throw new Error(`active image did not move with its id: ${status}`);
+    const order = await imageNames(page);
+    const previous = page.locator('.status > div > button').first();
+    await previous.click();
+    await page.waitForTimeout(80);
+    const activeTitle = await page.locator('.asset-list > .asset-row.active .asset-main').getAttribute('title');
+    if (activeTitle !== order[1]) throw new Error(`previous selected ${activeTitle}; expected ${order[1]}`);
+    return `3/3 -> previous = ${activeTitle}`;
+  });
+
   await check("reorder handle keeps keyboard ArrowUp/ArrowDown accessibility", async () => {
     const before = await imageNames(page);
     const movedName = before.at(-1);
