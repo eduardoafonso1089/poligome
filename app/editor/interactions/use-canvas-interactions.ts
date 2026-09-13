@@ -18,6 +18,7 @@ export type CanvasInteractionOptions = {
   dispatch: (action: EditorAction) => void;
   makeId: (prefix: string) => string;
   activeAssetId?: string | null;
+  addToSelection?: boolean;
   snap?: { enabled: boolean; tolerance: number; annotations: EditorAnnotation[] };
 };
 
@@ -37,7 +38,7 @@ function eventPoint(svgRef: RefObject<SVGSVGElement | null>, imageSize: Size2D, 
   return svg ? clientPointToImage(svg, event.clientX, event.clientY, imageSize) : null;
 }
 
-export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, makeId, activeAssetId, snap }: CanvasInteractionOptions) {
+export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, makeId, activeAssetId, addToSelection = false, snap }: CanvasInteractionOptions) {
   const annotationDrag = useRef<DragState | null>(null);
   const vertexDrag = useRef<VertexDragState | null>(null);
   const boxTransform = useRef<BoxTransformState | null>(null);
@@ -48,8 +49,15 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
   const selectionScope = activeAssetId ? state.annotations.filter((annotation) => annotation.asset === activeAssetId) : state.annotations;
   const selectedIds = state.selection.multiSelected.length ? state.selection.multiSelected : state.selection.selected ? [state.selection.selected] : [];
 
+  const toggleOnly = useCallback((event: ReactPointerEvent<SVGElement>, annotationId: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dispatch({ type: "toggle-selection", id: annotationId });
+  }, [dispatch]);
+
   const beginAnnotationDrag = useCallback((event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation) => {
     if (event.button !== 0) return;
+    if (addToSelection) { toggleOnly(event, annotation.id); return; }
     const point = eventPoint(svgRef, imageSize, event);
     if (!point) return;
     event.stopPropagation();
@@ -67,7 +75,7 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     if (!selectedIds.includes(annotation.id)) dispatch({ type: "set-selection", selection: selectSingle(annotation.id) });
     dispatch({ type: "begin-gesture" });
     annotationDrag.current = { pointerId: event.pointerId, last: point, annotationIds: ids };
-  }, [dispatch, imageSize, selectedIds, selectionScope, state.selection, svgRef]);
+  }, [addToSelection, dispatch, imageSize, selectedIds, selectionScope, state.selection, svgRef, toggleOnly]);
 
   const moveAnnotation = useCallback((event: ReactPointerEvent<SVGElement>) => {
     const drag = annotationDrag.current;
@@ -90,12 +98,13 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
 
   const beginVertexDrag = useCallback((event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation, vertexId: string) => {
     if (annotation.type !== "polygon" && annotation.type !== "line") return;
+    if (addToSelection) { toggleOnly(event, annotation.id); return; }
     event.stopPropagation();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     dispatch({ type: "select-vertex", vertex: { annotationId: annotation.id, vertexId } });
     dispatch({ type: "begin-gesture" });
     vertexDrag.current = { pointerId: event.pointerId, annotationId: annotation.id, vertexId };
-  }, [dispatch]);
+  }, [addToSelection, dispatch, toggleOnly]);
 
   const moveVertex = useCallback((event: ReactPointerEvent<SVGElement>) => {
     const drag = vertexDrag.current;
@@ -116,14 +125,16 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
   }, [dispatch]);
 
   const insertVertex = useCallback((event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation, afterVertexId: string, x: number, y: number) => {
+    if (addToSelection) { toggleOnly(event, annotation.id); return; }
     event.stopPropagation();
     const raw = { x, y };
     const point = snap?.enabled ? snapPointToAnnotations(raw, snap.annotations, annotation.id, snap.tolerance) : raw;
     dispatch({ type: "insert-vertex", annotationId: annotation.id, afterVertexId, vertexId: makeId(`${annotation.id}:v`), point });
-  }, [dispatch, makeId, snap]);
+  }, [addToSelection, dispatch, makeId, snap, toggleOnly]);
 
   const resizeStart = useCallback((event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation, corner: BoxCorner) => {
     if (annotation.type !== "box") return;
+    if (addToSelection) { toggleOnly(event, annotation.id); return; }
     event.stopPropagation();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     dispatch({ type: "begin-gesture" });
@@ -134,7 +145,7 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
       corner,
       center: { x: annotation.x + annotation.width / 2, y: annotation.y + annotation.height / 2 },
     };
-  }, [dispatch]);
+  }, [addToSelection, dispatch, toggleOnly]);
 
   const resizeMove = useCallback((event: ReactPointerEvent<SVGElement>) => {
     const transform = boxTransform.current;
@@ -146,6 +157,7 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
 
   const rotateStart = useCallback((event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation) => {
     if (annotation.type !== "box") return;
+    if (addToSelection) { toggleOnly(event, annotation.id); return; }
     const point = eventPoint(svgRef, imageSize, event);
     if (!point) return;
     event.stopPropagation();
@@ -159,7 +171,7 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
       center,
       startAngle: Math.atan2(point.y - center.y, point.x - center.x) - (annotation.rotation ?? 0),
     };
-  }, [dispatch, imageSize, svgRef]);
+  }, [addToSelection, dispatch, imageSize, svgRef, toggleOnly]);
 
   const transformMove = useCallback((event: ReactPointerEvent<SVGElement>) => {
     const transform = boxTransform.current;
@@ -180,7 +192,8 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
   const selectAtCanvas = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
     if (event.target !== event.currentTarget || event.button !== 0) return;
     const point = clientPointToImage(event.currentTarget, event.clientX, event.clientY, imageSize);
-    const additiveIds = event.ctrlKey || event.metaKey || event.shiftKey
+    const additive = addToSelection || event.ctrlKey || event.metaKey || event.shiftKey;
+    const additiveIds = additive
       ? [...new Set(state.selection.multiSelected.length ? state.selection.multiSelected : state.selection.selected ? [state.selection.selected] : [])]
       : [];
     const marquee: SelectionMarquee = { startX: point.x, startY: point.y, currentX: point.x, currentY: point.y, additiveIds };
@@ -188,7 +201,7 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     marqueeRef.current = marquee;
     setSelectionMarquee(marquee);
     event.currentTarget.setPointerCapture?.(event.pointerId);
-  }, [imageSize, state.selection.multiSelected, state.selection.selected]);
+  }, [addToSelection, imageSize, state.selection.multiSelected, state.selection.selected]);
 
   const moveCanvasSelection = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
     if (marqueePointerRef.current !== event.pointerId || !marqueeRef.current) return;

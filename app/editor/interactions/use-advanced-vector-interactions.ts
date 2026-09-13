@@ -63,12 +63,21 @@ export function useAdvancedVectorInteractions({ svgRef, imageSize, tool, activeP
   const strokeRef = useRef<PointerStroke>(null);
 
   const canFinish = useMemo(() => draft?.type === "hole" && draft.points.length >= 3, [draft]);
+  const canRemoveLastPoint = useMemo(() => draft?.type === "hole" && draft.points.length > 0, [draft]);
 
   const cancel = useCallback(() => {
     if (isTransformStroke(strokeRef.current)) dispatch({ type: "cancel-gesture" });
     strokeRef.current = null;
     setDraft(null);
   }, [dispatch]);
+
+  const removeLastPoint = useCallback(() => {
+    setDraft((current) => {
+      if (current?.type !== "hole") return current;
+      if (current.points.length <= 1) return null;
+      return { type: "hole", points: current.points.slice(0, -1) };
+    });
+  }, []);
 
   const finishHole = useCallback(() => {
     if (!activePolygon || draft?.type !== "hole" || draft.points.length < 3) return false;
@@ -93,7 +102,10 @@ export function useAdvancedVectorInteractions({ svgRef, imageSize, tool, activeP
 
   const onPointerDown = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
     if (!tool || !activePolygon || event.button !== 0) return;
-    if (tool !== "transform" && event.target !== event.currentTarget) return;
+    // During an advanced vector mode the canvas router has already decided that
+    // this gesture belongs to this hook. The original target may still be a
+    // rendered annotation/handle, so rejecting non-SVG targets made Hole, Split
+    // and Reshape silently ignore valid gestures over the polygon itself.
     const point = pointFor(event, tool === "split" || tool === "reshape");
     if (!point) return;
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -190,5 +202,16 @@ export function useAdvancedVectorInteractions({ svgRef, imageSize, tool, activeP
     }
   }, [activePolygon, dispatch, imageSize, makeId, onResult, pointFor, tool]);
 
-  return { draft, canFinish, finishHole, cancel, onPointerDown, onPointerMove, onPointerUp };
+  return {
+    draft,
+    canFinish,
+    canRemoveLastPoint,
+    hasDraft: Boolean(draft),
+    finishHole,
+    removeLastPoint,
+    cancel,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+  };
 }

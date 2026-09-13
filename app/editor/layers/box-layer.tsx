@@ -48,7 +48,15 @@ export function BoxLayer({
   const showHandles = selecting && selected && active;
 
   return (
-    <g data-annotation-id={annotation.id} className={selecting ? "movable-annotation" : ""} onPointerDown={(event) => onPointerDown(event, annotation)} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}>
+    <g
+      data-annotation-id={annotation.id}
+      className={selecting ? "movable-annotation" : ""}
+      pointerEvents={selecting ? undefined : "none"}
+      onPointerDown={(event) => onPointerDown(event, annotation)}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+    >
       <g transform={`rotate(${degrees} ${centerX} ${centerY})`}>
         <rect x={x} y={y} width={width} height={height} fill={`${color}28`} stroke={color} strokeWidth={selected ? lineThickness + 2 : lineThickness} vectorEffect="non-scaling-stroke" />
         {showHandles && <>

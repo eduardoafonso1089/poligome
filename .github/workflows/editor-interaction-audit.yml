@@ -1,0 +1,54 @@
+name: Editor Interaction Audit
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  interaction-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: npm
+      - name: Install app
+        run: npm ci
+      - name: Build static editor
+        run: npm run build:pages
+      - name: Install Chromium
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Serve editor
+        run: |
+          nohup python3 -m http.server 4174 --bind 127.0.0.1 --directory "$GITHUB_WORKSPACE/out" >/tmp/poligome-audit-server.log 2>&1 &
+          for i in {1..40}; do curl -LfsS http://127.0.0.1:4174/annotate/ >/dev/null && exit 0; sleep 1; done
+          cat /tmp/poligome-audit-server.log
+          exit 1
+      - name: Audit real Demo entry flow
+        run: node scripts/demo-entry-audit.mjs
+      - name: Audit desktop and mobile interactions
+        run: node scripts/run-editor-interaction-audit.mjs
+      - name: Audit full mobile tool interactions
+        run: node scripts/mobile-full-interaction-audit.mjs
+      - name: Audit mobile command interactions
+        run: node scripts/mobile-command-interaction-audit.mjs
+      - name: Audit mobile toolbar responsiveness
+        run: node scripts/mobile-toolbar-layout-audit.mjs
+      - name: Audit advanced geometry interactions
+        run: node scripts/editor-advanced-interaction-audit.mjs
+      - name: Upload audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-interaction-audit
+          path: interaction-audit/
+          retention-days: 2

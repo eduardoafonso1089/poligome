@@ -22,6 +22,7 @@ export function PointLayer({ annotation, color, selected, selecting, markerRadiu
     <g
       data-annotation-id={annotation.id}
       className={selecting ? "movable-annotation" : ""}
+      pointerEvents={selecting ? undefined : "none"}
       onPointerDown={(event) => onPointerDown(event, annotation)}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

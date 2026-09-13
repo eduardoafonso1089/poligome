@@ -59,12 +59,13 @@ export function PolygonLayer({
   onFinishVertex,
   onInsertVertex,
 }: PolygonLayerProps) {
-  const showHandles = tool === "select" && selected && primarySelected;
+  const selecting = tool === "select";
+  const showHandles = selecting && selected && primarySelected;
 
-  return <g data-annotation-id={annotation.id}>
+  return <g data-annotation-id={annotation.id} pointerEvents={selecting ? undefined : "none"}>
     <path
       fillRule="evenodd"
-      className={`${tool === "select" ? "movable-annotation" : ""} ${tool === "reshape" && primarySelected ? "reshape-target" : ""}`.trim()}
+      className={`${selecting ? "movable-annotation" : ""} ${tool === "reshape" && primarySelected ? "reshape-target" : ""}`.trim()}
       onPointerDown={onBeginAnnotationDrag}
       onPointerMove={onMoveAnnotation}
       onPointerUp={onFinishAnnotation}

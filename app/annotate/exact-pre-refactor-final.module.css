@@ -60,3 +60,95 @@
 .contract :global(.project-pop .canonical-file-extras > button:disabled small) {
   color: var(--muted) !important;
 }
+
+/* Mobile parity: pre-refactor kept every tool in one continuous horizontal
+   strip. Functional touch actions added during the canonical refactor must join
+   that same strip rather than creating a second toolbar row. */
+@media (max-width: 860px) {
+  .contract :global(.editor-controls) {
+    display: flex !important;
+    align-items: stretch !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+    scrollbar-width: thin;
+    scrollbar-color: var(--tool-active-border) var(--surface-soft);
+    background: var(--surface-soft);
+    border-bottom: 1px solid var(--line);
+  }
+  .contract :global(.editor-controls::-webkit-scrollbar) {
+    height: 5px;
+  }
+  .contract :global(.editor-controls::-webkit-scrollbar-track) {
+    background: var(--surface-soft);
+  }
+  .contract :global(.editor-controls::-webkit-scrollbar-thumb) {
+    background: var(--tool-active-border);
+    border-radius: 999px;
+  }
+  .contract :global(.tools) {
+    flex: 0 0 auto !important;
+    width: max-content !important;
+    min-width: max-content !important;
+    overflow: visible !important;
+    flex-wrap: nowrap !important;
+    border-bottom: 0 !important;
+  }
+  .contract :global(.tools > div),
+  .contract :global(.tools > i),
+  .contract :global(.tools > .tool-btn),
+  .contract :global(.tools > label),
+  .contract :global(.tools > .zoom) {
+    flex: 0 0 auto !important;
+  }
+  .contract :global(.tools .spacer) {
+    flex: 0 0 4px !important;
+    min-width: 4px !important;
+  }
+  .contract :global(.drawing-actions) {
+    flex: 0 0 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 3px !important;
+    min-width: max-content !important;
+    padding: 0 10px 0 2px !important;
+    margin: 0 !important;
+    background: var(--surface-soft) !important;
+    border: 0 !important;
+  }
+  .contract :global(.drawing-actions .touch-instructions) {
+    display: none !important;
+  }
+  .contract :global(.drawing-actions button) {
+    width: 33px !important;
+    min-width: 33px !important;
+    height: 33px !important;
+    min-height: 33px !important;
+    padding: 0 !important;
+    border: 1px solid transparent !important;
+    border-radius: 7px !important;
+    background: transparent !important;
+    color: var(--tool-ink) !important;
+    display: grid !important;
+    place-items: center !important;
+    font-size: 0 !important;
+    line-height: 1 !important;
+  }
+  .contract :global(.drawing-actions button[aria-pressed="true"]) {
+    background: var(--tool-active-bg) !important;
+    color: var(--tool-active-ink) !important;
+    border-color: var(--tool-active-border) !important;
+  }
+  .contract :global(.drawing-actions button:disabled) {
+    color: var(--tool-disabled-ink) !important;
+    opacity: 1 !important;
+  }
+  .contract :global(.drawing-actions button svg) {
+    width: 17px !important;
+    height: 17px !important;
+  }
+}
