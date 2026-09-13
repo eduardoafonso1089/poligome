@@ -35,6 +35,8 @@ jobs:
         run: node scripts/demo-entry-audit.mjs
       - name: Audit desktop and mobile interactions
         run: node scripts/run-editor-interaction-audit.mjs
+      - name: Audit full mobile tool interactions
+        run: node scripts/mobile-full-interaction-audit.mjs
       - name: Audit mobile toolbar responsiveness
         run: node scripts/mobile-toolbar-layout-audit.mjs
       - name: Diagnose delete routing
