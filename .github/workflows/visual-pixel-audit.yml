@@ -1,0 +1,114 @@
+name: Visual Pixel Audit
+
+on:
+  push:
+    branches:
+      - audit/visual-pixel-parity
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NPM_CONFIG_CACHE: /tmp/npm-cache-${{ github.run_id }}
+    steps:
+      - name: Checkout current
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+
+      - name: Create reference worktree
+        run: git worktree add /tmp/poligome-reference dfe774dae2ec76df923e8fcf5f6adba5d90b6b9a
+
+      - name: Install current dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install reference dependencies
+        working-directory: /tmp/poligome-reference
+        run: npm ci --no-audit --no-fund
+
+      - name: Build current
+        run: npm run build:pages
+
+      - name: Build reference
+        working-directory: /tmp/poligome-reference
+        run: npm run build:pages
+
+      - name: Install browser tooling
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.55.0
+          npx playwright install chromium
+          python -m pip install --user pillow
+
+      - name: Start both applications
+        run: |
+          nohup python -m http.server 3101 --directory out > /tmp/current.log 2>&1 &
+          nohup python -m http.server 3102 --directory /tmp/poligome-reference/out > /tmp/reference.log 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:3101/annotate/index.html >/dev/null && curl -fsS http://127.0.0.1:3102/annotate/index.html >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/current.log || true
+          cat /tmp/reference.log || true
+          exit 1
+
+      - name: Capture desktop and mobile screenshots
+        run: |
+          mkdir -p visual-audit
+          cat > visual-audit/capture.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs/promises';
+          const browser = await chromium.launch({headless:true});
+          const cases = [['desktop', 1440, 1000], ['mobile', 390, 844]];
+          const dom = {};
+          for (const [name, width, height] of cases) {
+            for (const [label, port] of [['reference',3102], ['current',3101]]) {
+              const context = await browser.newContext({viewport:{width,height}, deviceScaleFactor:1, colorScheme:'light'});
+              const page = await context.newPage();
+              await page.goto(`http://127.0.0.1:${port}/annotate/index.html?demo=1`, {waitUntil:'networkidle'});
+              await page.waitForTimeout(2000);
+              const bodyText = await page.locator('body').innerText();
+              if (!/Selecionar|Select|Sélectionner|Seleccionar/i.test(bodyText)) throw new Error(`${label}/${name} did not load annotate UI`);
+              dom[`${name}-${label}`] = {title: await page.title(), url: page.url(), text: bodyText.slice(0,700)};
+              await page.screenshot({path:`visual-audit/${name}-${label}.png`, fullPage:false, animations:'disabled'});
+              await context.close();
+            }
+          }
+          await fs.writeFile('visual-audit/dom.json', JSON.stringify(dom, null, 2));
+          await browser.close();
+          EOF
+          node visual-audit/capture.mjs
+
+      - name: Calculate pixel differences
+        run: |
+          cat > /tmp/diff.py <<'EOF'
+          from PIL import Image, ImageChops, ImageEnhance
+          import json
+          result = {}
+          for name in ('desktop','mobile'):
+              a = Image.open(f'visual-audit/{name}-reference.png').convert('RGB')
+              b = Image.open(f'visual-audit/{name}-current.png').convert('RGB')
+              diff = ImageChops.difference(a,b)
+              pixels = list(diff.getdata())
+              changed = sum(1 for p in pixels if p != (0,0,0))
+              total = a.width*a.height
+              result[name] = {'changed_pixels':changed,'total_pixels':total,'ratio':changed/total,'bbox':diff.getbbox(),'extrema':diff.getextrema()}
+              ImageEnhance.Contrast(diff).enhance(4).save(f'visual-audit/{name}-diff.png')
+          with open('visual-audit/metrics.json','w') as f: json.dump(result,f,indent=2)
+          print(json.dumps(result,indent=2))
+          EOF
+          python /tmp/diff.py
+
+      - name: Upload visual audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-pixel-audit-current-main
+          path: visual-audit
+          retention-days: 3
