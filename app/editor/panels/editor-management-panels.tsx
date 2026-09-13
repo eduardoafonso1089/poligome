@@ -34,7 +34,6 @@ type Props = {
   onLoadDemo?: () => void;
   onSelectAsset: (id: string) => void;
   onMoveAsset: (id: string, delta: -1 | 1) => void;
-  onReorderAsset: (sourceId: string, targetId: string, position: "before" | "after") => void;
   onDeleteAsset: (id: string) => void;
   onSelectAnnotation: (id: string, modifiers: { shift: boolean; additive: boolean }) => void;
   onMoveAnnotation: (id: string, delta: -1 | 1) => void;
@@ -144,9 +143,24 @@ export function EditorManagementPanels(props: Props) {
   function dropAsset(event: DragEvent<HTMLDivElement>, targetId: string) {
     event.preventDefault();
     event.stopPropagation();
-    if (!assetReorder) return;
+    if (!assetReorder || assetReorder.sourceId === targetId) {
+      setAssetReorder(null);
+      return;
+    }
     const position = dragPosition(event);
-    props.onReorderAsset(assetReorder.sourceId, targetId, position);
+    const sourceIndex = assets.findIndex((item) => item.id === assetReorder.sourceId);
+    const targetIndex = assets.findIndex((item) => item.id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0) {
+      setAssetReorder(null);
+      return;
+    }
+    const desiredIndex = position === "before"
+      ? sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
+      : sourceIndex < targetIndex ? targetIndex : targetIndex + 1;
+    const delta: -1 | 1 = desiredIndex < sourceIndex ? -1 : 1;
+    for (let index = sourceIndex; index !== desiredIndex; index += delta) {
+      props.onMoveAsset(assetReorder.sourceId, delta);
+    }
     setAssetReorder(null);
   }
 
