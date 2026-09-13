@@ -53,11 +53,12 @@ export function PolylineLayer({
   onInsertVertex,
 }: PolylineLayerProps) {
   const points = verticesToSvg(annotation);
-  const showHandles = tool === "select" && selected && primarySelected;
+  const selecting = tool === "select";
+  const showHandles = selecting && selected && primarySelected;
 
-  return <g data-annotation-id={annotation.id}>
+  return <g data-annotation-id={annotation.id} pointerEvents={selecting ? undefined : "none"}>
     <polyline
-      className={`line-hit ${tool === "select" ? "movable-annotation" : ""}`}
+      className={`line-hit ${selecting ? "movable-annotation" : ""}`}
       onPointerDown={onBeginAnnotationDrag}
       onPointerMove={onMoveAnnotation}
       onPointerUp={onFinishAnnotation}
