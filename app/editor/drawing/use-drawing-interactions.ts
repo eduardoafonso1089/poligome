@@ -69,6 +69,11 @@ export function useDrawingInteractions({
     return false;
   }, [draft]);
 
+  const canRemoveLastPoint = useMemo(
+    () => (draft?.type === "polygon" || draft?.type === "line") && draft.points.length >= 2,
+    [draft],
+  );
+
   const commit = useCallback((annotation: EditorAnnotation | null) => {
     if (!annotation) return false;
     addAnnotation(annotation, true);
@@ -78,6 +83,14 @@ export function useDrawingInteractions({
   const cancelDraft = useCallback(() => {
     startRef.current = null;
     setDraft(null);
+  }, []);
+
+  const removeLastPoint = useCallback(() => {
+    setDraft((current) => {
+      if (current?.type !== "polygon" && current?.type !== "line") return current;
+      if (current.points.length <= 2) return null;
+      return { ...current, points: current.points.slice(0, -2) };
+    });
   }, []);
 
   const finishDraft = useCallback(() => {
@@ -186,5 +199,16 @@ export function useDrawingInteractions({
     }
   }, [appendDiscretePoint, assetId, commit, draft, labelId, makeId, tool]);
 
-  return { draft, canFinish, onPointerDown, onPointerMove, onPointerUp, finishDraft, cancelDraft };
+  return {
+    draft,
+    canFinish,
+    canRemoveLastPoint,
+    hasDraft: Boolean(draft),
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+    finishDraft,
+    removeLastPoint,
+    cancelDraft,
+  };
 }
