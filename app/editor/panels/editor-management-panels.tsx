@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 import {
   BarChart3, Check, ClipboardCheck, Eye, EyeOff, FileText, GripVertical,
   ImagePlus, LoaderCircle, Menu, MoreHorizontal, Palette, PanelLeftClose, PanelLeftOpen,
@@ -16,6 +16,7 @@ import premerge from "./premerge-panel-refinement.module.css";
 
 type Copy = ReturnType<typeof getCopy>;
 type RightTab = "annotations" | "quality" | "review";
+type ReorderDrag = { sourceId: string; targetId: string | null; position: "before" | "after" };
 
 type Props = {
   assets: Asset[];
@@ -33,6 +34,7 @@ type Props = {
   onLoadDemo?: () => void;
   onSelectAsset: (id: string) => void;
   onMoveAsset: (id: string, delta: -1 | 1) => void;
+  onReorderAsset: (sourceId: string, targetId: string, position: "before" | "after") => void;
   onDeleteAsset: (id: string) => void;
   onSelectAnnotation: (id: string, modifiers: { shift: boolean; additive: boolean }) => void;
   onMoveAnnotation: (id: string, delta: -1 | 1) => void;
@@ -67,6 +69,7 @@ export function EditorManagementPanels(props: Props) {
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [rightTab, setRightTab] = useState<RightTab>("annotations");
   const [classManagerOpen, setClassManagerOpen] = useState(false);
+  const [assetReorder, setAssetReorder] = useState<ReorderDrag | null>(null);
 
   useEffect(() => {
     const openImages = () => { setLeftPanelCollapsed(false); setLeftOpen(true); setRightOpen(false); };
@@ -127,6 +130,32 @@ export function EditorManagementPanels(props: Props) {
     });
   }
 
+  function dragPosition(event: DragEvent<HTMLElement>): "before" | "after" {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return event.clientY < bounds.top + bounds.height / 2 ? "before" : "after";
+  }
+
+  function beginAssetReorder(event: DragEvent<HTMLButtonElement>, id: string) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+    setAssetReorder({ sourceId: id, targetId: null, position: "before" });
+  }
+
+  function dropAsset(event: DragEvent<HTMLDivElement>, targetId: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!assetReorder) return;
+    const position = dragPosition(event);
+    props.onReorderAsset(assetReorder.sourceId, targetId, position);
+    setAssetReorder(null);
+  }
+
+  function moveAssetByKeyboard(event: KeyboardEvent<HTMLButtonElement>, id: string) {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    props.onMoveAsset(id, event.key === "ArrowUp" ? -1 : 1);
+  }
+
   return <section aria-label={`${copy.appTitle} · ${copy.images} · ${copy.annotations}`} className={`${ui.managementGrid} canonical-management-panels`}>
     <button data-mobile-toggle="images" aria-label={copy.openImages} onClick={() => { setLeftPanelCollapsed(false); setLeftOpen(true); setRightOpen(false); }}><Menu size={19} /></button>
     <button data-mobile-toggle="right" aria-label={copy.annotations} onClick={() => { setRightPanelCollapsed(false); setRightOpen(true); setLeftOpen(false); }}><MoreHorizontal size={19} /></button>
@@ -155,8 +184,31 @@ export function EditorManagementPanels(props: Props) {
           const count = annotations.filter((annotation) => annotation.asset === item.id).length;
           const details = item.width && item.height ? `${item.width} × ${item.height}` : `${count} ${copy.projectAnnotations}`;
           const active = item.id === currentAssetId;
-          return <div key={item.id} className={classes("asset-row", active && "active")}>
-            <button className="reorder-handle" title={copy.reorderImage} aria-label={`${copy.reorderImage}: ${item.name}`} disabled={assets.length < 2} onClick={() => props.onMoveAsset(item.id, index === 0 ? 1 : -1)}><GripVertical size={13} /></button>
+          const dropClass = assetReorder?.targetId === item.id ? `drop-${assetReorder.position}` : "";
+          return <div
+            key={item.id}
+            className={classes("asset-row", active && "active", assetReorder?.sourceId === item.id && "dragging", dropClass)}
+            onDragOver={(event) => {
+              if (!assetReorder) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              const position = dragPosition(event);
+              if (assetReorder.targetId !== item.id || assetReorder.position !== position) {
+                setAssetReorder({ ...assetReorder, targetId: item.id, position });
+              }
+            }}
+            onDrop={(event) => dropAsset(event, item.id)}
+          >
+            <button
+              className="reorder-handle"
+              draggable={assets.length > 1 && !props.loading}
+              title={copy.reorderImage}
+              aria-label={`${copy.reorderImage}: ${item.name}`}
+              disabled={assets.length < 2 || props.loading}
+              onDragStart={(event) => beginAssetReorder(event, item.id)}
+              onDragEnd={() => setAssetReorder(null)}
+              onKeyDown={(event) => moveAssetByKeyboard(event, item.id)}
+            ><GripVertical size={14} /></button>
             <span className={classes("asset-selector", active && "selected")} aria-hidden="true">{active ? <Check size={11} /> : null}</span>
             <button className="asset-main" onClick={() => { props.onSelectAsset(item.id); setLeftOpen(false); }} title={item.name}>
               <div className="thumb" style={{ backgroundImage: item.src ? `url(${item.src})` : "none" }}><span>{String(index + 1).padStart(2, "0")}</span></div>
