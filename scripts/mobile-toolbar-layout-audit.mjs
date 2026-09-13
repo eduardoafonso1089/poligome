@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import fs from "node:fs/promises";
+import { openDemoDataset } from "./demo-audit-helpers.mjs";
 
 const BASE = process.env.AUDIT_BASE_URL ?? "http://127.0.0.1:4174";
 await fs.mkdir("interaction-audit", { recursive: true });
@@ -15,11 +16,11 @@ function record(width, name, ok, detail = "") {
 async function audit(browser, width) {
   const context = await browser.newContext({ viewport: { width, height: 844 }, isMobile: true, hasTouch: true });
   const page = await context.newPage();
-  await page.goto(`${BASE}/annotate/?demo=1`, { waitUntil: "networkidle", timeout: 90000 });
-  await page.waitForFunction(() => document.querySelectorAll("[data-annotation-id]").length > 0, null, { timeout: 30000 });
+  await openDemoDataset(page, BASE);
 
   const box = page.getByRole("button", { name: /Caixa \(B\)|Box \(B\)/i }).first();
   await box.waitFor({ state: "visible" });
+  await box.scrollIntoViewIfNeeded().catch(() => undefined);
   await box.tap();
   await page.waitForTimeout(100);
 
