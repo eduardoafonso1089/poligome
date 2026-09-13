@@ -245,8 +245,6 @@ export function CanonicalEditorWorkbench() {
       setCurrent(demo.assets[0]?.id ?? "");
       setProjectName(demo.name);
       demoAnnotationsRef.current = demo.annotations;
-      // Exact pre-refactor behavior: the guided Demo starts with a clean canvas.
-      // Reference annotations are introduced only when each tutorial task needs them.
       editor.replaceAnnotations([], true);
       resetTransientVisibility();
       setSessionDirty(false);
@@ -422,6 +420,7 @@ export function CanonicalEditorWorkbench() {
     if (!result.labels.some((label) => label.id === activeLabel)) setActiveLabel(result.labels[0]?.id ?? EMPTY_LABELS[0].id);
     editor.replaceAnnotations(result.annotations, false);
     resetTransientVisibility();
+    resetDemoTutorial();
     setSessionDirty(true);
     setMessage(result.message);
     drawing.cancelDraft();
@@ -935,7 +934,7 @@ export function CanonicalEditorWorkbench() {
       />
 
       <section className={`editor ${touch.touchMode ? "touch-editor" : ""}`}>
-        <div className="editor-controls"><PreRefactorToolbar {...chromeProps} projectName={demoTutorialStep !== null ? "Tutorial" : projectName} /></div>
+        <div className="editor-controls"><PreRefactorToolbar {...chromeProps} projectName={/^Demo\b/.test(projectName) ? "Tutorial" : projectName} /></div>
         <div className="stage">
           <section ref={viewport.scrollRef} onScroll={viewport.onScroll} onWheel={viewport.onWheel} className={exact.stageScroll}>
             <div style={{ position: "relative", width: viewport.layout.surfaceWidth, height: viewport.layout.surfaceHeight }}>
