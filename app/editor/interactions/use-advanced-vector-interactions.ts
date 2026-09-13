@@ -63,12 +63,21 @@ export function useAdvancedVectorInteractions({ svgRef, imageSize, tool, activeP
   const strokeRef = useRef<PointerStroke>(null);
 
   const canFinish = useMemo(() => draft?.type === "hole" && draft.points.length >= 3, [draft]);
+  const canRemoveLastPoint = useMemo(() => draft?.type === "hole" && draft.points.length > 0, [draft]);
 
   const cancel = useCallback(() => {
     if (isTransformStroke(strokeRef.current)) dispatch({ type: "cancel-gesture" });
     strokeRef.current = null;
     setDraft(null);
   }, [dispatch]);
+
+  const removeLastPoint = useCallback(() => {
+    setDraft((current) => {
+      if (current?.type !== "hole") return current;
+      if (current.points.length <= 1) return null;
+      return { type: "hole", points: current.points.slice(0, -1) };
+    });
+  }, []);
 
   const finishHole = useCallback(() => {
     if (!activePolygon || draft?.type !== "hole" || draft.points.length < 3) return false;
@@ -190,5 +199,16 @@ export function useAdvancedVectorInteractions({ svgRef, imageSize, tool, activeP
     }
   }, [activePolygon, dispatch, imageSize, makeId, onResult, pointFor, tool]);
 
-  return { draft, canFinish, finishHole, cancel, onPointerDown, onPointerMove, onPointerUp };
+  return {
+    draft,
+    canFinish,
+    canRemoveLastPoint,
+    hasDraft: Boolean(draft),
+    finishHole,
+    removeLastPoint,
+    cancel,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+  };
 }
