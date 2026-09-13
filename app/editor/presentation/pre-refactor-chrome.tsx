@@ -283,7 +283,7 @@ export function PreRefactorToolbar(props: PreRefactorChromeProps) {
       <div>
         <ToolButton title={copy.undo} disabled={!props.canUndo} onClick={props.onUndo}><Undo2 size={18} /></ToolButton>
         <ToolButton title={copy.redo} disabled={!props.canRedo} onClick={props.onRedo}><Redo2 size={18} /></ToolButton>
-        <ToolButton title={copy.deleteShape} disabled={!props.hasSelection && !props.canRemoveDraftPoint} onClick={props.canRemoveDraftPoint ? props.onRemoveLastPoint : props.onDelete}><Trash2 size={18} /></ToolButton>
+        <ToolButton title={copy.deleteShape} disabled={!props.hasSelection} onClick={props.onDelete}><Trash2 size={18} /></ToolButton>
       </div>
       <span className="spacer" />
       <label className={`stroke-control ${!canEdit ? "disabled" : ""}`} title={copy.lineThickness}><PenLine size={14} /><input aria-label={copy.lineThickness} disabled={!canEdit} type="range" min="1" max="10" step="1" value={props.strokePx} onChange={(event) => props.onStrokeChange(Number(event.target.value))} /><output>{props.strokePx}px</output></label>
