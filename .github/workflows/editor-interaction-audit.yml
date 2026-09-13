@@ -34,7 +34,7 @@ jobs:
           cat /tmp/poligome-audit-server.log
           exit 1
       - name: Audit exact guided Demo walkthrough
-        run: node scripts/demo-entry-audit.mjs
+        run: node scripts/run-demo-entry-audit.mjs
       - name: Audit image drag-and-drop ordering
         run: node scripts/image-reorder-audit.mjs
       - name: Audit desktop and mobile interactions
