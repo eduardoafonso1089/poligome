@@ -32,6 +32,19 @@ import { selectRange } from "../selection/selection-model";
 import { commandFromKeyboard, isEditableShortcutTarget, type VectorTool } from "../commands/editor-shortcuts";
 import { simplifyPolygonAnnotation, unionPolygonAnnotations } from "../geometry/vector-operations";
 import { PreRefactorStatus, PreRefactorToolbar, PreRefactorTopbar, type PreRefactorChromeProps, type ProjectSaveMode } from "../presentation/pre-refactor-chrome";
+import {
+  DemoTutorialChrome,
+  DemoTutorialOverlay,
+  annotationIntersectsDemoRoof,
+  isTutorialModelPoint,
+  tutorialEditBox,
+  tutorialEditBoxChanged,
+  tutorialModelSuggestion,
+  tutorialSuccessTitle,
+  tutorialWrongDraw,
+  type DemoTutorialStep,
+  type DemoTutorialToolPrompt,
+} from "../demo/pre-refactor-demo-tutorial";
 import exact from "../presentation/pre-refactor-canonical.module.css";
 
 const EMPTY_LABELS: Label[] = [{ id: UNLABELED_ID, name: "Sem label", color: "#929a95", key: "" }];
@@ -60,12 +73,15 @@ export function CanonicalEditorWorkbench() {
   const [loading, setLoading] = useState(false);
   const [sessionDirty, setSessionDirty] = useState(false);
   const [message, setMessage] = useState("");
+  const [demoTutorialStep, setDemoTutorialStep] = useState<DemoTutorialStep | null>(null);
+  const [demoTutorialToolPrompt, setDemoTutorialToolPrompt] = useState<DemoTutorialToolPrompt>(null);
   const objectUrls = useRef<string[]>([]);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const relinkInputRef = useRef<HTMLInputElement>(null);
   const idCounter = useRef(0);
   const demoQueryHandled = useRef(false);
+  const demoAnnotationsRef = useRef<EditorAnnotation[]>([]);
   const mousePanRef = useRef<MousePanState>(null);
   const editor = useEditorState();
   const copy = getCopy(language);
@@ -189,6 +205,12 @@ export function CanonicalEditorWorkbench() {
     setHiddenLabelIds(new Set());
   }
 
+  function resetDemoTutorial() {
+    demoAnnotationsRef.current = [];
+    setDemoTutorialStep(null);
+    setDemoTutorialToolPrompt(null);
+  }
+
   function resetProjectState() {
     replaceObjectUrls([]);
     const unlabeled = { ...EMPTY_LABELS[0], name: copy.unlabeled };
@@ -200,6 +222,7 @@ export function CanonicalEditorWorkbench() {
     setSaveMode("complete");
     editor.replaceAnnotations([], true);
     resetTransientVisibility();
+    resetDemoTutorial();
     setSessionDirty(false);
     resetInteractionState();
   }
@@ -221,16 +244,69 @@ export function CanonicalEditorWorkbench() {
       setActiveLabel(demo.labels[0]?.id ?? EMPTY_LABELS[0].id);
       setCurrent(demo.assets[0]?.id ?? "");
       setProjectName(demo.name);
-      editor.replaceAnnotations(demo.annotations, true);
+      demoAnnotationsRef.current = demo.annotations;
+      // Exact pre-refactor behavior: the guided Demo starts with a clean canvas.
+      // Reference annotations are introduced only when each tutorial task needs them.
+      editor.replaceAnnotations([], true);
       resetTransientVisibility();
       setSessionDirty(false);
       resetInteractionState();
+      setDemoTutorialStep(0);
+      setDemoTutorialToolPrompt("box");
       setMessage(getCopy(requestedLanguage).demoReady);
     } catch (error) {
       setMessage(translateErrorCode(error, copy, copy.demoError));
     } finally {
       setLoading(false);
     }
+  }
+
+  function exitDemoTutorial() {
+    if (demoAnnotationsRef.current.length) {
+      editor.replaceAnnotations([...demoAnnotationsRef.current], editor.saved);
+      setCurrent("demo-urban");
+      setTool("select");
+      setVectorTool(null);
+      setAddToSelection(false);
+      setCursorPoint(null);
+      viewport.zoomTo(92);
+    }
+    setDemoTutorialStep(null);
+    setDemoTutorialToolPrompt(null);
+  }
+
+  function advanceDemoToEdit() {
+    const park = assets.find((item) => item.id === "demo-park");
+    const parkSize = { width: park?.width ?? 1000, height: park?.height ?? 650 };
+    const reference = demoAnnotationsRef.current.find((annotation) => annotation.id === "demo-b4");
+    const box = tutorialEditBox(reference, parkSize);
+    editor.replaceAnnotations(box ? [box] : [], editor.saved);
+    setCurrent("demo-park");
+    setTool("pan");
+    setVectorTool(null);
+    setAddToSelection(false);
+    setCursorPoint(null);
+    if (box) editor.setSelection({ selected: box.id, multiSelected: [box.id], anchorId: box.id });
+    setDemoTutorialToolPrompt("select");
+    setDemoTutorialStep(2);
+    viewport.zoomTo(92);
+  }
+
+  function advanceDemoToModel() {
+    editor.replaceAnnotations([], editor.saved);
+    setCurrent("demo-rural");
+    setTool("select");
+    setVectorTool(null);
+    setAddToSelection(false);
+    setCursorPoint(null);
+    setDemoTutorialToolPrompt(null);
+    setDemoTutorialStep(4);
+    viewport.zoomTo(92);
+  }
+
+  function exploreDemoModels() {
+    exitDemoTutorial();
+    window.dispatchEvent(new CustomEvent("poligome:open-sam"));
   }
 
   useEffect(() => {
@@ -241,6 +317,37 @@ export function CanonicalEditorWorkbench() {
     window.history.replaceState(window.history.state, "", target);
     void loadDemo(storedLanguage());
   }, []);
+
+  useEffect(() => {
+    if (demoTutorialToolPrompt === "box" && tool === "box") setDemoTutorialToolPrompt(null);
+    if (demoTutorialToolPrompt === "select" && tool === "select") setDemoTutorialToolPrompt(null);
+  }, [demoTutorialToolPrompt, tool]);
+
+  useEffect(() => {
+    if (demoTutorialStep === 0) {
+      const drawn = editor.annotations.find((annotation) => annotation.asset === "demo-urban");
+      if (drawn && annotationIntersectsDemoRoof(drawn, imageSize)) {
+        setDemoTutorialStep(1);
+        setTool("select");
+        setVectorTool(null);
+        setMessage(tutorialSuccessTitle[language]);
+      } else if (drawn) {
+        editor.replaceAnnotations(editor.annotations.filter((annotation) => annotation.id !== drawn.id), false);
+        setTool("select");
+        setVectorTool(null);
+        setDemoTutorialToolPrompt("box");
+        setMessage(tutorialWrongDraw[language]);
+      }
+    }
+    if (demoTutorialStep === 2) {
+      const box = editor.annotations.find((annotation) => annotation.id === "demo-b4");
+      if (tutorialEditBoxChanged(box, imageSize)) {
+        setDemoTutorialStep(3);
+        setTool("select");
+        setVectorTool(null);
+      }
+    }
+  }, [demoTutorialStep, editor.annotations, imageSize.height, imageSize.width, language]);
 
   async function openProject(file: File) {
     setLoading(true);
@@ -254,6 +361,7 @@ export function CanonicalEditorWorkbench() {
       setProjectName(loaded.projectName);
       editor.replaceAnnotations(loaded.annotations, true);
       resetTransientVisibility();
+      resetDemoTutorial();
       setSessionDirty(false);
       resetInteractionState();
       setMessage(`${copy.projectOpened}: ${file.name}${loaded.missingImages ? ` · ${loaded.missingImages} ${copy.projectImagesNeedReload}` : ""}`);
@@ -630,6 +738,7 @@ export function CanonicalEditorWorkbench() {
   const overlay = <>
     <DrawingDraftLayer draft={drawing.draft} color={activeColor} lineThickness={lineThickness} />
     <AdvancedVectorDraftLayer draft={advanced.draft} color={activeColor} lineThickness={lineThickness} />
+    <DemoTutorialOverlay step={demoTutorialStep} toolPrompt={demoTutorialToolPrompt} imageSize={imageSize} />
     {coordinatesGuide && cursorPoint && <g className="coordinate-guide" pointerEvents="none">
       <line x1={cursorPoint.x} y1={0} x2={cursorPoint.x} y2={imageSize.height} stroke="rgba(255,255,255,.82)" strokeWidth={guideUnit} vectorEffect="non-scaling-stroke" />
       <line x1={0} y1={cursorPoint.y} x2={imageSize.width} y2={cursorPoint.y} stroke="rgba(255,255,255,.82)" strokeWidth={guideUnit} vectorEffect="non-scaling-stroke" />
@@ -641,6 +750,21 @@ export function CanonicalEditorWorkbench() {
   </>;
 
   function routePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
+    const imagePoint = clientPointToImage(event.currentTarget, event.clientX, event.clientY, imageSize);
+    if (demoTutorialStep === 4 && current === "demo-rural" && isTutorialModelPoint(imagePoint, imageSize)) {
+      event.preventDefault();
+      const id = makeId("annotation");
+      const reference = demoAnnotationsRef.current.find((annotation) => annotation.id === "demo-c3");
+      const suggestion = tutorialModelSuggestion(reference, id);
+      if (suggestion) {
+        editor.addAnnotation(suggestion, true);
+        setDemoTutorialStep(5);
+        setTool("select");
+        setVectorTool(null);
+        setAddToSelection(false);
+      }
+      return;
+    }
     if ((panning && event.button === 0) || event.button === 1) {
       event.preventDefault();
       mousePanRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
@@ -648,7 +772,7 @@ export function CanonicalEditorWorkbench() {
       event.currentTarget.setPointerCapture?.(event.pointerId);
       return;
     }
-    if (coordinatesGuide) setCursorPoint(clientPointToImage(event.currentTarget, event.clientX, event.clientY, imageSize));
+    if (coordinatesGuide) setCursorPoint(imagePoint);
     if (vectorEditing) advanced.onPointerDown(event);
     else if (selecting) interactions.selectAtCanvas(event);
     else drawing.onPointerDown(event);
@@ -811,7 +935,7 @@ export function CanonicalEditorWorkbench() {
       />
 
       <section className={`editor ${touch.touchMode ? "touch-editor" : ""}`}>
-        <div className="editor-controls"><PreRefactorToolbar {...chromeProps} /></div>
+        <div className="editor-controls"><PreRefactorToolbar {...chromeProps} projectName={demoTutorialStep !== null ? "Tutorial" : projectName} /></div>
         <div className="stage">
           <section ref={viewport.scrollRef} onScroll={viewport.onScroll} onWheel={viewport.onWheel} className={exact.stageScroll}>
             <div style={{ position: "relative", width: viewport.layout.surfaceWidth, height: viewport.layout.surfaceHeight }}>
@@ -870,6 +994,16 @@ export function CanonicalEditorWorkbench() {
         <PreRefactorStatus {...chromeProps} />
       </section>
     </div>
+
+    <DemoTutorialChrome
+      step={demoTutorialStep}
+      toolPrompt={demoTutorialToolPrompt}
+      language={language}
+      onNextToEdit={advanceDemoToEdit}
+      onNextToModel={advanceDemoToModel}
+      onExploreModels={exploreDemoModels}
+      onClose={exitDemoTutorial}
+    />
 
     <div className={exact.reviewHidden}>
       <QualityReviewPanel
