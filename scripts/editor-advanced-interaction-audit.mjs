@@ -127,8 +127,6 @@ try {
     const first = await drawPolygon(page, [[.40,.56],[.54,.56],[.54,.72],[.40,.72]]);
     await drawPolygon(page, [[.48,.62],[.62,.62],[.62,.78],[.48,.78]]);
     const before = await annotationCount(page);
-    // The second polygon is already the primary selection after drawing. Add only
-    // the first polygon; clicking the second again would correctly toggle it off.
     await (await button(page, /Selecionar e mover \(V\)|Select/i)).click();
     const multi = await button(page, /Selecionar várias|Select multiple/i);
     await multi.click();
@@ -168,8 +166,6 @@ try {
     const before = await annotationCount(page);
     await (await button(page, /Cortar polígono com linha|Split/i)).click();
     const { box } = await canvas(page);
-    // Starts over another existing annotation on purpose. Vector-tool routing must
-    // still give the split gesture to the canvas instead of moving that annotation.
     const start = screenPoint(box, .31, .25);
     const end = screenPoint(box, .62, .25);
     await page.mouse.move(start.x, start.y);
@@ -258,16 +254,18 @@ try {
     return `${before} -> ${after}`;
   });
 
-  await check("Delete removes a freshly selected shape", async () => {
+  await check("Delete toolbar removes a freshly selected shape", async () => {
     await loadDemo(page);
-    // addAnnotation(..., true) selects the new polygon and leaves no vertex selected,
-    // making this a deterministic whole-shape delete test.
     await drawPolygon(page, [[.70,.55],[.78,.55],[.78,.65],[.70,.65]]);
     const before = await annotationCount(page);
-    await (await button(page, /Excluir forma inteira|Delete shape/i)).click();
+    const deleteTool = page.locator(".tools").getByRole("button", { name: /^Excluir forma inteira$|^Delete shape$/i }).first();
+    await deleteTool.waitFor({ state: "visible", timeout: 8000 });
+    if (await deleteTool.isDisabled()) throw new Error("toolbar delete is disabled despite an active selection");
+    await deleteTool.click();
     await page.waitForTimeout(60);
     const after = await annotationCount(page);
     if (after !== before - 1) throw new Error(`delete count ${before} -> ${after}`);
+    return `${before} -> ${after}`;
   });
 
   await check("Line thickness control changes rendered stroke", async () => {
