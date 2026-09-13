@@ -210,7 +210,7 @@ try {
     await drawPolygon(page, [[.62,.63],[.78,.63],[.78,.78],[.62,.78]]);
     const before = await count(page);
     await (await button(page, /Selecionar e mover \(V\)|Select/i)).tap();
-    const rightToggle = page.locator('[data-mobile-toggle="right"]').first();
+    const rightToggle = page.locator('.topbar button.mobile').last();
     await rightToggle.tap();
     const rows = page.locator('[data-panel="right"] .instances .instance-row');
     const rowCount = await rows.count();
