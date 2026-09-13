@@ -1,3 +1,30 @@
 .contract :global(.pre-refactor-demo-card) {
   display: none !important;
 }
+
+/* The restored walkthrough owns the Demo mask now. The temporary one-card
+   compatibility guide still exists in the presentation DOM, so neutralize the
+   old :has(.pre-refactor-demo-card) visual side effects that would otherwise
+   stay active even while that card is hidden. */
+.contract :global(.editor:has(.pre-refactor-demo-card) .stage) > section > div > div::after {
+  content: none !important;
+  display: none !important;
+  background: transparent !important;
+  pointer-events: none !important;
+}
+.contract :global(.shell:has(.pre-refactor-demo-card) .status p svg) {
+  display: block !important;
+}
+.contract :global(.shell:has(.pre-refactor-demo-card) .status p)::before {
+  content: none !important;
+  display: none !important;
+}
+
+/* If the guided tutorial is explicitly closed before selecting Box, the old
+   compatibility toolbar state can still carry the historical target class.
+   Do not leave a permanent halo after the real tutorial has gone away. */
+.contract:not(:has(:global(.demo-tutorial-tool-hint))) :global(.demo-tutorial-tool-target) {
+  box-shadow: none !important;
+  animation: none !important;
+  border-color: transparent !important;
+}
