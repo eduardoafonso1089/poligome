@@ -49,28 +49,40 @@ async function select(page, id) {
   await page.waitForTimeout(50);
 }
 
-async function touchDrag(locator, from, to, steps = 8, pointerId = 41) {
-  await locator.dispatchEvent("pointerdown", { pointerId, pointerType: "touch", isPrimary: true, button: 0, buttons: 1, clientX: from.x, clientY: from.y, pressure: .5, bubbles: true, composed: true });
-  for (let i = 1; i <= steps; i += 1) {
-    const t = i / steps;
-    await locator.dispatchEvent("pointermove", { pointerId, pointerType: "touch", isPrimary: true, button: -1, buttons: 1, clientX: from.x + (to.x - from.x) * t, clientY: from.y + (to.y - from.y) * t, pressure: .5, bubbles: true, composed: true });
+function touchPoint(p) {
+  return { x: p.x, y: p.y, radiusX: 2, radiusY: 2, force: .6 };
+}
+async function nativeTouchTrace(cdp, points) {
+  if (points.length < 2) throw new Error("touch trace needs at least two points");
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touchPoint(points[0])] });
+  for (const p of points.slice(1)) {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [touchPoint(p)] });
+    await new Promise((resolve) => setTimeout(resolve, 8));
   }
-  await locator.dispatchEvent("pointerup", { pointerId, pointerType: "touch", isPrimary: true, button: 0, buttons: 0, clientX: to.x, clientY: to.y, pressure: 0, bubbles: true, composed: true });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+}
+async function nativeTouchDrag(cdp, from, to, steps = 8) {
+  const points = Array.from({ length: steps + 1 }, (_, index) => {
+    const t = index / steps;
+    return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+  });
+  await nativeTouchTrace(cdp, points);
 }
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const page = await context.newPage();
+const cdp = await context.newCDPSession(page);
 const pageErrors = [];
 page.on("pageerror", (error) => pageErrors.push(error.message));
 
 try {
-  await check("Box draws with touch pointer drag", async () => {
+  await check("Box draws with native touch drag", async () => {
     await loadDemo(page);
     await (await button(page, /Caixa \(B\)|Box \(B\)/i)).tap();
     const before = await count(page);
-    const { svg, box } = await canvas(page);
-    await touchDrag(svg, point(box, .55, .55), point(box, .72, .70));
+    const { box } = await canvas(page);
+    await nativeTouchDrag(cdp, point(box, .55, .55), point(box, .72, .70));
     await page.waitForTimeout(80);
     const after = await count(page);
     if (after !== before + 1) throw new Error(`${before} -> ${after}`);
@@ -88,14 +100,12 @@ try {
     if (after !== before + 1) throw new Error(`${before} -> ${after}`);
   });
 
-  await check("Freehand draws with touch pointer trace", async () => {
+  await check("Freehand draws with native touch trace", async () => {
     await loadDemo(page);
     await (await button(page, /mão livre \(F\)|Freehand/i)).tap();
     const before = await count(page);
-    const { svg, box } = await canvas(page);
-    const start = point(box, .68, .68);
-    const end = point(box, .78, .78);
-    await touchDrag(svg, start, end, 14, 42);
+    const { box } = await canvas(page);
+    await nativeTouchDrag(cdp, point(box, .68, .68), point(box, .78, .78), 14);
     await page.waitForTimeout(80);
     const after = await count(page);
     if (after !== before + 1) throw new Error(`${before} -> ${after}`);
@@ -119,44 +129,40 @@ try {
     if (!before || !after || after === before || (after.match(/M /g) ?? []).length < 2) throw new Error("hole ring not committed");
   });
 
-  await check("Split executes from a touch pointer drag", async () => {
+  await check("Split executes from native touch drag", async () => {
     await loadDemo(page);
     await select(page, "demo-a2");
     const before = await count(page);
     await (await button(page, /Cortar polígono com linha|Split/i)).tap();
-    const { svg, box } = await canvas(page);
-    await touchDrag(svg, point(box, .31, .25), point(box, .62, .25), 10, 43);
+    const { box } = await canvas(page);
+    await nativeTouchDrag(cdp, point(box, .31, .25), point(box, .62, .25), 10);
     await page.waitForTimeout(100);
     const after = await count(page);
     if (after !== before + 1) throw new Error(`${before} -> ${after}`);
   });
 
-  await check("Transform executes from touch pointer drag", async () => {
+  await check("Transform executes from native touch drag", async () => {
     await loadDemo(page);
     await select(page, "demo-a1");
     const path = page.locator('[data-annotation-id="demo-a1"] path').first();
     const before = await path.getAttribute("d");
     await (await button(page, /Rotacionar e redimensionar \(T\)|Transform/i)).tap();
-    const { svg, box } = await canvas(page);
-    await touchDrag(svg, point(box, .24, .33), point(box, .31, .25), 8, 44);
+    const { box } = await canvas(page);
+    await nativeTouchDrag(cdp, point(box, .24, .33), point(box, .31, .25), 8);
     await page.waitForTimeout(90);
     const after = await path.getAttribute("d");
     if (!before || !after || after === before) throw new Error("polygon path unchanged");
   });
 
-  await check("Reshape executes from touch pointer trace", async () => {
+  await check("Reshape executes from native touch trace", async () => {
     await loadDemo(page);
     await select(page, "demo-a1");
     const path = page.locator('[data-annotation-id="demo-a1"] path').first();
     const before = await path.getAttribute("d");
     await (await button(page, /Remodelar borda à mão livre \(R\)|Reshape/i)).tap();
-    const { svg, box } = await canvas(page);
+    const { box } = await canvas(page);
     const points = [[.29,.31],[.36,.30],[.39,.34],[.37,.39],[.29,.39]].map(([x,y]) => point(box,x,y));
-    const pointerId = 45;
-    await svg.dispatchEvent("pointerdown", { pointerId, pointerType: "touch", isPrimary: true, button: 0, buttons: 1, clientX: points[0].x, clientY: points[0].y, pressure: .5, bubbles: true, composed: true });
-    for (const p of points.slice(1)) await svg.dispatchEvent("pointermove", { pointerId, pointerType: "touch", isPrimary: true, button: -1, buttons: 1, clientX: p.x, clientY: p.y, pressure: .5, bubbles: true, composed: true });
-    const end = points.at(-1);
-    await svg.dispatchEvent("pointerup", { pointerId, pointerType: "touch", isPrimary: true, button: 0, buttons: 0, clientX: end.x, clientY: end.y, pressure: 0, bubbles: true, composed: true });
+    await nativeTouchTrace(cdp, points);
     await page.waitForTimeout(100);
     const after = await path.getAttribute("d");
     if (!before || !after || after === before) throw new Error("polygon path unchanged");
