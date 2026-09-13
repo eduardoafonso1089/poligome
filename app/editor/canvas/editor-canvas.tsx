@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, Ref } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Ref } from "react";
 import type { EditorAnnotation } from "../models/annotation-model";
 import type { Label } from "../../lib/types";
 import type { Size2D } from "../../lib/editor-viewport";
@@ -39,6 +39,9 @@ export type EditorCanvasProps = {
   onPointerMove: (event: ReactPointerEvent<SVGSVGElement>) => void;
   onPointerUp: (event: ReactPointerEvent<SVGSVGElement>) => void;
   onPointerCancel: () => void;
+  onPointerLeave?: (event: ReactPointerEvent<SVGSVGElement>) => void;
+  onContextMenu?: (event: ReactMouseEvent<SVGSVGElement>) => void;
+  onDoubleClick?: (event: ReactMouseEvent<SVGSVGElement>) => void;
   onBeginAnnotationDrag: (event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation) => void;
   onMoveAnnotation: (event: ReactPointerEvent<SVGElement>) => void;
   onFinishAnnotation: (event: ReactPointerEvent<SVGElement>) => void;
@@ -75,6 +78,9 @@ export function EditorCanvas(props: EditorCanvasProps) {
     onPointerMove={props.onPointerMove}
     onPointerUp={props.onPointerUp}
     onPointerCancel={props.onPointerCancel}
+    onPointerLeave={props.onPointerLeave}
+    onContextMenu={props.onContextMenu}
+    onDoubleClick={props.onDoubleClick}
   >
     {props.annotations.map((annotation) => {
       const label = labelById.get(annotation.label);
