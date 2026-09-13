@@ -32,7 +32,7 @@ jobs:
           cat /tmp/poligome-audit-server.log
           exit 1
       - name: Audit desktop and mobile interactions
-        run: node scripts/editor-interaction-audit.mjs
+        run: node scripts/run-editor-interaction-audit.mjs
       - name: Upload audit artifacts
         if: always()
         uses: actions/upload-artifact@v4
