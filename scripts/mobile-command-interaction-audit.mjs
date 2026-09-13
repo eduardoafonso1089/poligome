@@ -206,18 +206,20 @@ try {
 
   await check("Merge unions two selected polygons on mobile", async () => {
     await loadDemo(page);
-    const first = await drawPolygon(page, [[.50,.56],[.66,.56],[.66,.71],[.50,.71]]);
-    const second = await drawPolygon(page, [[.62,.63],[.78,.63],[.78,.78],[.62,.78]]);
+    await drawPolygon(page, [[.50,.56],[.66,.56],[.66,.71],[.50,.71]]);
+    await drawPolygon(page, [[.62,.63],[.78,.63],[.78,.78],[.62,.78]]);
     const before = await count(page);
     await (await button(page, /Selecionar e mover \(V\)|Select/i)).tap();
-    const multi = await button(page, /Selecionar várias|Select multiple/i);
-    await multi.tap();
-    for (const [id, pointerId] of [[first, 61], [second, 62]]) {
-      const target = page.locator(`[data-annotation-id="${id}"] path`).first();
-      await target.dispatchEvent("pointerdown", { pointerId, pointerType: "touch", isPrimary: true, button: 0, buttons: 1, clientX: 0, clientY: 0, bubbles: true, composed: true });
-      await target.dispatchEvent("pointerup", { pointerId, pointerType: "touch", isPrimary: true, button: 0, buttons: 0, clientX: 0, clientY: 0, bubbles: true, composed: true });
-      await page.waitForTimeout(40);
-    }
+    const rightToggle = page.locator('[data-mobile-toggle="right"]').first();
+    await rightToggle.tap();
+    const rows = page.locator('[data-panel="right"] .instances .instance-row');
+    const rowCount = await rows.count();
+    if (rowCount < 2) throw new Error(`annotation rows=${rowCount}`);
+    await rows.nth(rowCount - 2).locator('.annotation-selector').tap();
+    await rows.nth(rowCount - 1).locator('.annotation-selector').tap();
+    const closeDrawer = page.locator('[data-panel="right"] [data-drawer-header="true"] button').first();
+    await closeDrawer.tap();
+    await page.waitForTimeout(60);
     const merge = await button(page, /Unir polígonos selecionados|Merge/i);
     await merge.tap();
     await page.waitForTimeout(90);
