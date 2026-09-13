@@ -2,13 +2,15 @@ name: Editor Interaction Audit
 
 on:
   pull_request:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   interaction-audit:
-    if: github.head_ref == 'fix/editor-interactions-audit'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
