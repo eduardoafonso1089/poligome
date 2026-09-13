@@ -33,18 +33,18 @@ jobs:
           for i in {1..40}; do curl -LfsS http://127.0.0.1:4174/annotate/ >/dev/null && exit 0; sleep 1; done
           cat /tmp/poligome-audit-server.log
           exit 1
-      - name: Audit real Demo entry flow
+      - name: Audit exact guided Demo walkthrough
         run: node scripts/demo-entry-audit.mjs
       - name: Audit desktop and mobile interactions
         run: node scripts/run-editor-interaction-audit.mjs
       - name: Audit full mobile tool interactions
-        run: node scripts/mobile-full-interaction-audit.mjs
+        run: node scripts/run-audit-with-full-demo.mjs mobile-full-interaction-audit.mjs
       - name: Audit mobile command interactions
-        run: node scripts/mobile-command-interaction-audit.mjs
+        run: node scripts/run-audit-with-full-demo.mjs mobile-command-interaction-audit.mjs
       - name: Audit mobile toolbar responsiveness
         run: node scripts/mobile-toolbar-layout-audit.mjs
       - name: Audit advanced geometry interactions
-        run: node scripts/editor-advanced-interaction-audit.mjs
+        run: node scripts/run-audit-with-full-demo.mjs editor-advanced-interaction-audit.mjs
       - name: Upload audit artifacts
         if: always()
         uses: actions/upload-artifact@v4
