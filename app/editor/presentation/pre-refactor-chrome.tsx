@@ -60,6 +60,12 @@ export type PreRefactorChromeProps = {
   tool: DrawingTool;
   vectorTool: VectorTool;
   snapEnabled: boolean;
+  touchMode: boolean;
+  addToSelection: boolean;
+  coordinatesGuide: boolean;
+  canFinishDraft: boolean;
+  canRemoveDraftPoint: boolean;
+  hasDraft: boolean;
   canSimplify: boolean;
   canDuplicate: boolean;
   canMerge: boolean;
@@ -85,6 +91,11 @@ export type PreRefactorChromeProps = {
   onDuplicate: () => void;
   onMerge: () => void;
   onToggleSnap: () => void;
+  onToggleCoordinatesGuide: () => void;
+  onToggleMultiSelect: () => void;
+  onFinishDrawing: () => void;
+  onRemoveLastPoint: () => void;
+  onCancelDrawing: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onDelete: () => void;
@@ -118,6 +129,11 @@ export function PreRefactorTopbar(props: PreRefactorChromeProps) {
   useEffect(() => setDraft(projectLabel), [projectLabel]);
   useEffect(() => setThemeModeState(storedTheme()), []);
   useEffect(() => {
+    const open = () => setSamOpen(true);
+    window.addEventListener("poligome:open-sam", open);
+    return () => window.removeEventListener("poligome:open-sam", open);
+  }, []);
+  useEffect(() => {
     if (!renameNotice) return;
     const timeout = window.setTimeout(() => setRenameNotice(""), 2500);
     return () => window.clearTimeout(timeout);
@@ -146,7 +162,6 @@ export function PreRefactorTopbar(props: PreRefactorChromeProps) {
   }
 
   function openSam() {
-    props.onSamSettings?.();
     setSamOpen(true);
   }
 
@@ -234,19 +249,21 @@ export function PreRefactorToolbar(props: PreRefactorChromeProps) {
   const canEdit = props.hasAsset;
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [demoGuideOpen, setDemoGuideOpen] = useState(true);
-  const [coordinatesGuide, setCoordinatesGuide] = useState(false);
   const isDemo = props.hasAssets && /^Demo\b/.test(props.projectName);
   useEffect(() => setDemoGuideOpen(true), [props.projectName]);
+
+  const finishableTool = props.tool === "polygon" || props.tool === "line" || props.vectorTool === "hole";
+  const cancellableTool = props.tool === "polygon" || props.tool === "line" || props.tool === "freehand" || props.vectorTool === "hole" || props.vectorTool === "reshape" || props.vectorTool === "split";
 
   return <>
     <div className="tools">
       <div>
         <ToolButton title={copy.select} keyHint="V" disabled={!canEdit} active={props.tool === "select" && !props.vectorTool} onClick={() => props.onTool("select")}><MousePointer2 size={18} /></ToolButton>
         <ToolButton title={copy.pan} keyHint="H" disabled={!canEdit} active={props.tool === "pan" && !props.vectorTool} onClick={() => props.onTool("pan")}><Hand size={18} /></ToolButton>
-        <ToolButton title="Guias de coordenadas X/Y" disabled={!canEdit} active={coordinatesGuide} onClick={() => setCoordinatesGuide((value) => !value)}><Crosshair size={18} /></ToolButton>
+        <ToolButton title="Guias de coordenadas X/Y" disabled={!canEdit} active={props.coordinatesGuide} onClick={props.onToggleCoordinatesGuide}><Crosshair size={18} /></ToolButton>
       </div><i />
       <div>
-        <ToolButton title={copy.box} keyHint="B" disabled={!canEdit} className={isDemo && demoGuideOpen ? "demo-tutorial-tool-target" : ""} active={props.tool === "box" && !props.vectorTool} onClick={() => props.onTool("box")}><Square size={18} /></ToolButton>
+        <ToolButton title={copy.box} keyHint="B" disabled={!canEdit} className={isDemo && demoGuideOpen ? "demo-tutorial-tool-target" : ""} active={props.tool === "box" && !props.vectorTool} onClick={() => { props.onTool("box"); if (isDemo && demoGuideOpen) setDemoGuideOpen(false); }}><Square size={18} /></ToolButton>
         <ToolButton title={copy.polygon} keyHint="P" disabled={!canEdit} active={props.tool === "polygon" && !props.vectorTool} onClick={() => props.onTool("polygon")}><Pentagon size={18} /></ToolButton>
         <ToolButton title={copy.freehand} keyHint="F" disabled={!canEdit} active={props.tool === "freehand" && !props.vectorTool} onClick={() => props.onTool("freehand")}><PenLine size={18} /></ToolButton>
         <ToolButton title={copy.line} keyHint="L" disabled={!canEdit} active={props.tool === "line" && !props.vectorTool} onClick={() => props.onTool("line")}><Spline size={18} /></ToolButton>
@@ -266,7 +283,7 @@ export function PreRefactorToolbar(props: PreRefactorChromeProps) {
       <div>
         <ToolButton title={copy.undo} disabled={!props.canUndo} onClick={props.onUndo}><Undo2 size={18} /></ToolButton>
         <ToolButton title={copy.redo} disabled={!props.canRedo} onClick={props.onRedo}><Redo2 size={18} /></ToolButton>
-        <ToolButton title={copy.deleteShape} disabled={!props.hasSelection} onClick={props.onDelete}><Trash2 size={18} /></ToolButton>
+        <ToolButton title={copy.deleteShape} disabled={!props.hasSelection && !props.canRemoveDraftPoint} onClick={props.canRemoveDraftPoint ? props.onRemoveLastPoint : props.onDelete}><Trash2 size={18} /></ToolButton>
       </div>
       <span className="spacer" />
       <label className={`stroke-control ${!canEdit ? "disabled" : ""}`} title={copy.lineThickness}><PenLine size={14} /><input aria-label={copy.lineThickness} disabled={!canEdit} type="range" min="1" max="10" step="1" value={props.strokePx} onChange={(event) => props.onStrokeChange(Number(event.target.value))} /><output>{props.strokePx}px</output></label>
@@ -276,14 +293,26 @@ export function PreRefactorToolbar(props: PreRefactorChromeProps) {
       <ToolButton title={copy.shortcuts} onClick={() => setTutorialOpen(true)}><Keyboard size={16} /></ToolButton>
     </div>
 
-    {canEdit && <div className="drawing-actions"><span className="touch-instructions">{props.tool === "select" ? copy.touchEdit : props.tool === "freehand" || props.vectorTool === "reshape" ? copy.touchTrace : copy.touchDraw}</span><button onClick={props.onSelectAllAnnotations}><Combine size={14} />{copy.multipleSelection}</button><button disabled={!props.hasSelection} onClick={props.onDelete}><Trash2 size={14} />{copy.deleteSelectedAnnotations}</button></div>}
+    {canEdit && <div className="drawing-actions">
+      <span className="touch-instructions">{props.tool === "select" ? copy.touchEdit : props.tool === "freehand" || props.vectorTool === "reshape" ? copy.touchTrace : copy.touchDraw}</span>
+      {props.touchMode && <button aria-pressed={props.tool === "pan"} onClick={() => props.onTool(props.tool === "pan" ? "select" : "pan")}><Hand size={16} />{copy.pan}</button>}
+      {finishableTool && <>
+        <button disabled={!props.canFinishDraft} onClick={props.onFinishDrawing}><Check size={16} />{copy.finishDrawing}</button>
+        <button disabled={!props.canRemoveDraftPoint} onClick={props.onRemoveLastPoint}><Undo2 size={16} />{copy.removeLastPointTitle}</button>
+      </>}
+      {cancellableTool && <button disabled={!props.hasDraft} onClick={props.onCancelDrawing}><X size={16} />{copy.cancel}</button>}
+      {props.tool === "select" && !props.vectorTool && <>
+        <button aria-pressed={props.addToSelection} onClick={props.onToggleMultiSelect}><Combine size={16} />{copy.multipleSelection}</button>
+        <button disabled={!props.hasSelection} onClick={props.onDelete}><Trash2 size={16} />{copy.deleteSelectedAnnotations}</button>
+      </>}
+    </div>}
 
     {!props.hasAssets && <div className="pre-refactor-empty-overlay">
       <div className="pre-refactor-empty-card">
         <span><Images size={30} /></span>
         <h2>{copy.emptyProjectTitle}</h2>
         <p>{copy.emptyProjectHint}</p>
-        <div><button disabled={props.loading} onClick={props.onImportImages}><ImagePlus size={16} />{copy.importImages}</button><button disabled={props.loading} onClick={props.onOpenProject}><FolderUp size={16} />{copy.openProject}</button></div>
+        <div><button disabled={props.loading} onClick={props.onImportImages}><ImagePlus size={16} />{copy.importImages}</button><button disabled={props.loading} onClick={props.onOpenProject}><FolderUp size={16} />{copy.openProject}</button><button disabled={props.loading} onClick={props.onDemo}><WandSparkles size={16} />{copy.tryDemo}</button></div>
         <small>{copy.privacy}</small>
       </div>
     </div>}
