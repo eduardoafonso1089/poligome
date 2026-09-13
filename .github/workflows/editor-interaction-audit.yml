@@ -37,6 +37,8 @@ jobs:
         run: node scripts/run-demo-entry-audit.mjs
       - name: Audit image drag-and-drop ordering
         run: node scripts/image-reorder-audit.mjs
+      - name: Inspect restored Demo mobile canvas
+        run: node scripts/mobile-restored-demo-state-audit.mjs
       - name: Audit desktop and mobile interactions
         run: node scripts/run-editor-interaction-audit.mjs
       - name: Audit full mobile tool interactions
