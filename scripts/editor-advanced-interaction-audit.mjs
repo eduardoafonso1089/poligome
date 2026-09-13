@@ -125,13 +125,14 @@ try {
   await check("Merge unions two overlapping selected polygons", async () => {
     await loadDemo(page);
     const first = await drawPolygon(page, [[.40,.56],[.54,.56],[.54,.72],[.40,.72]]);
-    const second = await drawPolygon(page, [[.48,.62],[.62,.62],[.62,.78],[.48,.78]]);
+    await drawPolygon(page, [[.48,.62],[.62,.62],[.62,.78],[.48,.78]]);
     const before = await annotationCount(page);
+    // The second polygon is already the primary selection after drawing. Add only
+    // the first polygon; clicking the second again would correctly toggle it off.
     await (await button(page, /Selecionar e mover \(V\)|Select/i)).click();
     const multi = await button(page, /Selecionar várias|Select multiple/i);
     await multi.click();
     await page.locator(`[data-annotation-id="${first}"]`).click({ force: true });
-    await page.locator(`[data-annotation-id="${second}"]`).click({ force: true });
     const merge = await button(page, /Unir polígonos selecionados|Merge/i);
     await merge.click();
     await page.waitForTimeout(80);
@@ -167,6 +168,8 @@ try {
     const before = await annotationCount(page);
     await (await button(page, /Cortar polígono com linha|Split/i)).click();
     const { box } = await canvas(page);
+    // Starts over another existing annotation on purpose. Vector-tool routing must
+    // still give the split gesture to the canvas instead of moving that annotation.
     const start = screenPoint(box, .31, .25);
     const end = screenPoint(box, .62, .25);
     await page.mouse.move(start.x, start.y);
@@ -255,9 +258,11 @@ try {
     return `${before} -> ${after}`;
   });
 
-  await check("Delete removes the selected shape", async () => {
+  await check("Delete removes a freshly selected shape", async () => {
     await loadDemo(page);
-    await selectAnnotation(page, "demo-a1");
+    // addAnnotation(..., true) selects the new polygon and leaves no vertex selected,
+    // making this a deterministic whole-shape delete test.
+    await drawPolygon(page, [[.70,.55],[.78,.55],[.78,.65],[.70,.65]]);
     const before = await annotationCount(page);
     await (await button(page, /Excluir forma inteira|Delete shape/i)).click();
     await page.waitForTimeout(60);
@@ -269,11 +274,9 @@ try {
     await loadDemo(page);
     const input = page.getByRole("slider", { name: /Espessura das linhas|Line thickness/i }).first();
     await input.waitFor({ state: "visible" });
-    await input.evaluate((element) => {
-      element.value = "8";
-      element.dispatchEvent(new Event("input", { bubbles: true }));
-      element.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    await input.focus();
+    await input.press("Home");
+    for (let value = 1; value < 8; value += 1) await input.press("ArrowRight");
     await page.waitForTimeout(80);
     const output = await page.locator(".stroke-control output").innerText();
     if (!/8px/.test(output)) throw new Error(`unexpected output ${output}`);
