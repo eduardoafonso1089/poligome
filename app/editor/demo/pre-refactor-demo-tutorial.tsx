@@ -206,8 +206,10 @@ export function DemoTutorialChrome({ step, toolPrompt, language, onNextToEdit, o
   }, [step]);
 
   if (step === null) return null;
-  const title = toolPrompt ? tutorialToolCopy[language][toolPrompt][0] : tutorialCopy[language][Math.min(step, 4)][0];
-  const detail = toolPrompt ? tutorialToolCopy[language][toolPrompt][1] : step < 5 ? tutorialCopy[language][step][1] : copy.sam;
+  const stepIndex = Math.min(step, 4) as 0 | 1 | 2 | 3 | 4;
+  const stepCopy = tutorialCopy[language][stepIndex];
+  const title = toolPrompt ? tutorialToolCopy[language][toolPrompt][0] : stepCopy[0];
+  const detail = toolPrompt ? tutorialToolCopy[language][toolPrompt][1] : step === 5 ? copy.sam : stepCopy[1];
   return <>
     {toolPrompt && <div className="demo-tutorial-tool-hint" aria-hidden="true"><span>{tutorialClickHere[language]}</span></div>}
     <section className="demo-tutorial-card" role="dialog" aria-live="polite" data-demo-tutorial-step={step}>
