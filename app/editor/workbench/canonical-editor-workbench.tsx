@@ -31,7 +31,8 @@ import { createLabel as createPanelLabel, moveItemById, recolorLabel, renameLabe
 import { selectRange } from "../selection/selection-model";
 import { commandFromKeyboard, isEditableShortcutTarget, type VectorTool } from "../commands/editor-shortcuts";
 import { simplifyPolygonAnnotation, unionPolygonAnnotations } from "../geometry/vector-operations";
-import { VectorToolbar } from "../vector/vector-toolbar";
+import { PreRefactorStatus, PreRefactorToolbar, PreRefactorTopbar, type PreRefactorChromeProps, type ProjectSaveMode } from "../presentation/pre-refactor-chrome";
+import exact from "../presentation/pre-refactor-canonical.module.css";
 
 const EMPTY_LABELS: Label[] = [{ id: UNLABELED_ID, name: "Sem label", color: "#929a95", key: "" }];
 
@@ -43,9 +44,10 @@ export function CanonicalEditorWorkbench() {
   const [vectorTool, setVectorTool] = useState<VectorTool>(null);
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [current, setCurrent] = useState("");
-  const [projectName, setProjectName] = useState("Poligome V4");
+  const [projectName, setProjectName] = useState(() => getCopy(storedLanguage()).newProject);
   const [language, setLanguage] = useState<Language>("pt");
-  const [saveMode, setSaveMode] = useState<"annotations" | "complete">("complete");
+  const [saveMode, setSaveMode] = useState<ProjectSaveMode>("complete");
+  const [strokePx, setStrokePx] = useState(3);
   const [reviewMode, setReviewMode] = useState<"quality" | "review">("quality");
   const [hiddenAnnotationIds, setHiddenAnnotationIds] = useState<Set<string>>(() => new Set());
   const [hiddenLabelIds, setHiddenLabelIds] = useState<Set<string>>(() => new Set());
@@ -60,15 +62,6 @@ export function CanonicalEditorWorkbench() {
   const demoQueryHandled = useRef(false);
   const editor = useEditorState();
   const copy = getCopy(language);
-  const tools: Array<{ id: DrawingTool; label: string }> = [
-    { id: "select", label: copy.select },
-    { id: "pan", label: copy.pan },
-    { id: "box", label: copy.box },
-    { id: "polygon", label: copy.polygon },
-    { id: "line", label: copy.line },
-    { id: "point", label: copy.point },
-    { id: "freehand", label: copy.freehand },
-  ];
   const asset = assets.find((item) => item.id === current) ?? assets[0] ?? null;
   const imageSize = { width: asset?.width ?? 1, height: asset?.height ?? 1 };
   const viewport = useEditorViewport({ image: imageSize, initialZoom: 92 });
@@ -193,7 +186,7 @@ export function CanonicalEditorWorkbench() {
     setLabels([unlabeled]);
     setActiveLabel(unlabeled.id);
     setCurrent("");
-    setProjectName(copy.defaultProjectName);
+    setProjectName(copy.newProject);
     setSaveMode("complete");
     editor.replaceAnnotations([], true);
     resetTransientVisibility();
@@ -206,14 +199,6 @@ export function CanonicalEditorWorkbench() {
     if (hasCurrentData && !window.confirm(copy.replaceUnsavedWithNewProject)) return;
     resetProjectState();
     setMessage(copy.newProjectReady);
-  }
-
-  function renameCurrentProject() {
-    const next = window.prompt(copy.renameProject, projectName)?.trim();
-    if (!next || next === projectName) return;
-    setProjectName(next);
-    setSessionDirty(true);
-    setMessage(copy.toastProjectRenamed);
   }
 
   async function loadDemo(requestedLanguage: Language = language) {
@@ -230,7 +215,7 @@ export function CanonicalEditorWorkbench() {
       resetTransientVisibility();
       setSessionDirty(false);
       resetInteractionState();
-      setMessage(copy.demoReady);
+      setMessage(getCopy(requestedLanguage).demoReady);
     } catch (error) {
       setMessage(translateErrorCode(error, copy, copy.demoError));
     } finally {
@@ -424,6 +409,14 @@ export function CanonicalEditorWorkbench() {
     setHiddenAnnotationIds((currentHidden) => new Set([...currentHidden].filter((id) => !ids.includes(id))));
   }
 
+  function clearAllAnnotations() {
+    const ids = editor.annotations.map((annotation) => annotation.id);
+    if (!ids.length) return;
+    if (!window.confirm(`${copy.confirmDeleteAnnotations}\n${copy.deleteAnnotationsWarning}`)) return;
+    deleteAnnotations(ids);
+    setMessage(`${ids.length} ${copy.annotationsDeleted}`);
+  }
+
   function batchReclassify(ids: string[], labelId: string) {
     if (!ids.length || !labels.some((label) => label.id === labelId)) return;
     editor.dispatch({ type: "reclassify-annotations", ids, labelId });
@@ -524,11 +517,12 @@ export function CanonicalEditorWorkbench() {
     editor.dispatch({ type: "replace-annotation", annotation: { ...editor.selectedAnnotation, reviewScore: score } });
   }
 
-  async function saveProject() {
+  async function saveProject(mode: ProjectSaveMode = saveMode) {
     if (!assets.length) return;
+    setSaveMode(mode);
     setLoading(true);
     try {
-      const name = await saveEditorProject(projectName, assets, labels, editor.annotations, saveMode, copy);
+      const name = await saveEditorProject(projectName, assets, labels, editor.annotations, mode, copy);
       editor.markSaved();
       setSessionDirty(false);
       setMessage(`${copy.projectSaved}: ${name}`);
@@ -584,7 +578,7 @@ export function CanonicalEditorWorkbench() {
   const vectorEditing = Boolean(vectorTool);
   const panning = tool === "pan";
   const markerRadius = screenPixelsToImageUnits(4.6, imageSize, viewport.layout.width);
-  const lineThickness = screenPixelsToImageUnits(3, imageSize, viewport.layout.width);
+  const lineThickness = screenPixelsToImageUnits(strokePx, imageSize, viewport.layout.width);
   const touchRadius = screenPixelsToImageUnits(22, imageSize, viewport.layout.width);
   const boxTouchRadius = screenPixelsToImageUnits(28, imageSize, viewport.layout.width);
   const boxRotationTouchRadius = screenPixelsToImageUnits(20, imageSize, viewport.layout.width);
@@ -594,119 +588,71 @@ export function CanonicalEditorWorkbench() {
     <AdvancedVectorDraftLayer draft={advanced.draft} color={activeColor} lineThickness={lineThickness} />
   </>;
 
-  return <main aria-label={`${copy.appTitle}: ${projectName}`} style={{ minHeight: "100vh", background: "var(--paper)", color: "var(--ink)", padding: 16, fontFamily: "var(--sans), system-ui, sans-serif" }}>
+  const chromeProps = {
+    projectName,
+    assetsCount: assets.length,
+    annotationsCount: editor.annotations.length,
+    language,
+    loading,
+    dirty: projectDirty,
+    hasAsset: Boolean(asset && !asset.missing),
+    hasAssets: assets.length > 0,
+    imageIndex,
+    zoom: viewport.state.zoom,
+    tool,
+    vectorTool,
+    snapEnabled,
+    canSimplify: Boolean(activePolygon),
+    canDuplicate: Boolean(activePolygon),
+    canMerge: selectedPolygons.length >= 2,
+    canEditPolygon: Boolean(activePolygon),
+    canUndo: editor.history.length > 0,
+    canRedo: editor.redoHistory.length > 0,
+    hasSelection: selectedIds.length > 0,
+    strokePx,
+    statusMessage: asset ? (message || `${activeAssetAnnotations.length} ${copy.imageAnnotations}`) : copy.emptyProjectTitle,
+    onHome: () => { if (!projectDirty || window.confirm(copy.confirmLeaveHome)) window.location.assign("/"); },
+    onNewProject: startNewProject,
+    onRenameProject: (name: string) => { setProjectName(name); setSessionDirty(true); },
+    onDemo: () => { if (!projectDirty || window.confirm(copy.replaceUnsavedProject)) void loadDemo(); },
+    onOpenProject: () => projectInputRef.current?.click(),
+    onImportImages: () => imageInputRef.current?.click(),
+    onSaveProject: (mode: ProjectSaveMode) => void saveProject(mode),
+    onLanguageChange: changeLanguage,
+    onSamSettings: () => window.dispatchEvent(new CustomEvent("poligome:open-sam")),
+    onTool: chooseTool,
+    onVectorTool: chooseVectorTool,
+    onSimplify: simplifySelected,
+    onDuplicate: duplicateSelected,
+    onMerge: mergeSelected,
+    onToggleSnap: () => setSnapEnabled((value) => !value),
+    onUndo: () => editor.undo(),
+    onRedo: () => editor.redo(),
+    onDelete: () => deleteAnnotations(selectedIds),
+    onClearAnnotations: clearAllAnnotations,
+    onSelectAllAnnotations: selectAllActiveAnnotations,
+    onStrokeChange: setStrokePx,
+    onZoomOut: () => viewport.zoomBy(-10),
+    onZoomIn: () => viewport.zoomBy(10),
+    onFit: () => viewport.zoomTo(92),
+    onPreviousImage: () => stepImage(-1),
+    onNextImage: () => stepImage(1),
+    onOpenImagesPanel: () => window.dispatchEvent(new CustomEvent("poligome:open-images")),
+    onOpenRightPanel: () => window.dispatchEvent(new CustomEvent("poligome:open-right")),
+  } satisfies PreRefactorChromeProps;
+
+  return <main className="shell" aria-label={`${copy.appTitle}: ${projectName}`}>
     <input ref={projectInputRef} type="file" accept=".plgm,application/vnd.poligome.project+zip" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file && (!projectDirty || window.confirm(copy.replaceUnsavedProject))) void openProject(file); event.currentTarget.value = ""; }} />
     <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/bmp,image/gif" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />
     <input ref={relinkInputRef} type="file" accept="image/*,.tif,.tiff" multiple hidden onChange={(event) => { void relinkProjectImages(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />
 
-    <div style={{ maxWidth: 1280, margin: "0 auto" }}>
-      <header style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-        <strong style={{ marginRight: 8 }}>{projectName}</strong>
-        <button onClick={startNewProject} disabled={loading} title={copy.newProjectHint}>{copy.newProject}</button>
-        <button onClick={renameCurrentProject} disabled={loading}>{copy.renameProject}</button>
-        <button onClick={() => { if (!projectDirty || window.confirm(copy.replaceUnsavedProject)) void loadDemo(); }} disabled={loading}>{copy.tryDemo}</button>
-        <button onClick={() => projectInputRef.current?.click()} disabled={loading} title={copy.openProjectHint}>{copy.openProject}</button>
-        <button onClick={() => imageInputRef.current?.click()} disabled={loading}>{copy.importImages}</button>
-        {missingImageCount > 0 && <button onClick={() => relinkInputRef.current?.click()} disabled={loading}>{copy.reloadProjectImages} ({missingImageCount})</button>}
-        <RasterImportControl makeId={makeId} language={language} disabled={loading} onImported={applyRasterImport} onMessage={setMessage} />
-        <CocoImportControl assets={assets} labels={labels} annotations={editor.annotations} makeId={makeId} language={language} disabled={loading} onImported={applyCocoImport} />
-        <ExportControls assets={assets} labels={labels} annotations={editor.annotations} language={language} disabled={loading} onMessage={setMessage} />
-        <button onClick={() => editor.undo()} disabled={!editor.history.length}>{copy.undo}</button>
-        <button onClick={() => editor.redo()} disabled={!editor.redoHistory.length}>{copy.redo}</button>
-        <select aria-label={copy.saveProjectDescription} value={saveMode} onChange={(event) => setSaveMode(event.target.value as "annotations" | "complete")} disabled={loading}>
-          <option value="complete">{copy.imagesAndAnnotations}</option>
-          <option value="annotations">{copy.annotationsOnly}</option>
-        </select>
-        <button onClick={saveProject} disabled={loading || !assets.length}>{copy.saveProject}</button>
-        <button onClick={() => stepImage(-1)} disabled={imageIndex <= 0}>← {copy.images}</button>
-        <button onClick={() => stepImage(1)} disabled={imageIndex < 0 || imageIndex >= assets.length - 1}>{copy.images} →</button>
-        <select aria-label={copy.language} value={language} onChange={(event) => changeLanguage(event.target.value as Language)}>
-          <option value="pt">PT</option><option value="en">EN</option><option value="fr">FR</option><option value="es">ES</option>
-        </select>
-        <span style={{ opacity: .7, marginLeft: "auto" }}>{asset ? `${imageIndex + 1}/${assets.length} · ${activeAssetAnnotations.length} ${copy.imageAnnotations}` : copy.imageNotLoaded}</span>
-      </header>
+    <PreRefactorTopbar {...chromeProps} fileMenuExtras={<div className="canonical-file-extras">
+      <RasterImportControl makeId={makeId} language={language} disabled={loading} onImported={applyRasterImport} onMessage={setMessage} />
+      <CocoImportControl assets={assets} labels={labels} annotations={editor.annotations} makeId={makeId} language={language} disabled={loading} onImported={applyCocoImport} />
+      <ExportControls assets={assets} labels={labels} annotations={editor.annotations} language={language} disabled={loading} onMessage={setMessage} />
+    </div>} />
 
-      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-        {tools.map((entry) => <button key={entry.id} onClick={() => chooseTool(entry.id)} aria-pressed={tool === entry.id && !vectorTool} style={{ fontWeight: tool === entry.id && !vectorTool ? 700 : 400 }}>{entry.label}</button>)}
-        <select value={activeLabel} onChange={(event) => setActiveLabel(event.target.value)} disabled={!labels.length}>{labels.map((label) => <option key={label.id} value={label.id}>{label.id === UNLABELED_ID ? copy.unlabeled : label.name}</option>)}</select>
-        {(tool === "polygon" || tool === "line") && drawing.draft && <><button onClick={() => drawing.finishDraft()} disabled={!drawing.canFinish}>{copy.finishDrawing}</button><button onClick={drawing.cancelDraft}>{copy.cancel}</button></>}
-        {vectorTool === "hole" && advanced.draft && <><button onClick={() => advanced.finishHole()} disabled={!advanced.canFinish}>{copy.finishDrawing}</button><button onClick={advanced.cancel}>{copy.cancel}</button></>}
-        <span style={{ marginLeft: 8 }} />
-        <button title={copy.zoomOut} onClick={() => viewport.zoomBy(-10)} disabled={!asset}>−</button>
-        <button title={copy.fitImage} onClick={() => viewport.zoomTo(92)} disabled={!asset}>{viewport.state.zoom}%</button>
-        <button title={copy.zoomIn} onClick={() => viewport.zoomBy(10)} disabled={!asset}>+</button>
-      </div>
-
-      <VectorToolbar
-        copy={copy}
-        snapEnabled={snapEnabled}
-        vectorTool={vectorTool}
-        canSimplify={Boolean(activePolygon)}
-        canDuplicate={Boolean(activePolygon)}
-        canMerge={selectedPolygons.length >= 2}
-        canEditPolygon={Boolean(activePolygon)}
-        onToggleSnap={() => setSnapEnabled((value) => !value)}
-        onSimplify={simplifySelected}
-        onDuplicate={duplicateSelected}
-        onMerge={mergeSelected}
-        onVectorTool={chooseVectorTool}
-      />
-
-      <div style={{ fontSize: 13, opacity: .75, margin: "8px 0" }}>
-        {message} <span style={{ opacity: .7 }}>{touch.touchMode ? copy.touchDraw : `${copy.shortcuts}: V H B P F L K · O · X · R · Enter · Esc · Delete.`}</span>
-      </div>
-
-      <section ref={viewport.scrollRef} onScroll={viewport.onScroll} onWheel={viewport.onWheel} style={{ position: "relative", width: "100%", height: "72vh", minHeight: 360, margin: "0 auto", background: "var(--canvas-bg)", overflow: "auto", border: "1px solid var(--line)", borderRadius: 8, overscrollBehavior: "contain" }}>
-        <div style={{ position: "relative", width: viewport.layout.surfaceWidth, height: viewport.layout.surfaceHeight }}>
-          <div style={{ position: "absolute", left: viewport.layout.left, top: viewport.layout.top, width: viewport.layout.width, height: viewport.layout.height }}>
-            {asset?.raster?.mode === "tiled" ? <CogTiledLayer asset={asset} viewport={viewport.state} layout={viewport.layout} copy={copy} onError={setMessage} />
-              : asset?.src ? <img src={asset.src} alt={asset.name} draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "fill", userSelect: "none", pointerEvents: "none" }} />
-              : <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", gap: 8, opacity: .75 }}><span>{asset?.missing ? copy.imageMissingHint : copy.imageNotLoaded}</span>{asset?.missing && <button onClick={() => relinkInputRef.current?.click()}>{copy.reloadProjectImages}</button>}</div>}
-            {asset && !asset.missing && <EditorCanvas
-              imageSize={imageSize}
-              svgRef={viewport.canvasRef}
-              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", touchAction: "none", cursor: canvasCursor }}
-              annotations={visibleAnnotations}
-              labels={labels}
-              tool={tool}
-              selectedId={editor.selection.selected}
-              selectedIds={selectedIds}
-              selectedVertex={editor.selectedVertex}
-              selectionMarquee={interactions.selectionMarquee}
-              overlay={overlay}
-              lineThickness={lineThickness}
-              touchMode={touch.touchMode}
-              touchRadius={touchRadius}
-              markerRadius={markerRadius}
-              markerAspect={1}
-              boxTouchRadius={boxTouchRadius}
-              boxRotationTouchRadius={boxRotationTouchRadius}
-              onPointerDownCapture={touch.onPointerDownCapture}
-              onPointerMoveCapture={touch.onPointerMoveCapture}
-              onPointerUpCapture={touch.onPointerUpCapture}
-              onPointerCancelCapture={touch.onPointerCancelCapture}
-              onPointerDown={vectorEditing ? advanced.onPointerDown : selecting ? interactions.selectAtCanvas : drawing.onPointerDown}
-              onPointerMove={vectorEditing ? advanced.onPointerMove : selecting ? interactions.moveCanvasSelection : drawing.onPointerMove}
-              onPointerUp={vectorEditing ? advanced.onPointerUp : selecting ? interactions.finishCanvasSelection : drawing.onPointerUp}
-              onPointerCancel={vectorEditing ? advanced.cancel : selecting ? interactions.cancel : drawing.cancelDraft}
-              onBeginAnnotationDrag={selecting ? interactions.beginAnnotationDrag : noopAnnotation}
-              onMoveAnnotation={selecting ? interactions.moveAnnotation : noopElement}
-              onFinishAnnotation={selecting ? interactions.finishAnnotation : noopElement}
-              onBeginVertexDrag={selecting ? interactions.beginVertexDrag : noopVertex}
-              onMoveVertex={selecting ? interactions.moveVertex : noopElement}
-              onFinishVertex={selecting ? interactions.finishVertex : noopElement}
-              onInsertVertex={selecting ? interactions.insertVertex : noopInsert}
-              onResizeStart={selecting ? interactions.resizeStart : noopResize}
-              onResizeMove={selecting ? interactions.resizeMove : noopElement}
-              onResizeEnd={selecting ? interactions.resizeEnd : noopElement}
-              onRotateStart={selecting ? interactions.rotateStart : noopAnnotation}
-              onTransformMove={selecting ? interactions.transformMove : noopElement}
-              onTransformEnd={selecting ? interactions.transformEnd : noopElement}
-            />}
-          </div>
-        </div>
-      </section>
-
+    <div className="workspace">
       <EditorManagementPanels
         assets={assets}
         currentAssetId={asset?.id ?? ""}
@@ -718,6 +664,9 @@ export function CanonicalEditorWorkbench() {
         hiddenAnnotationIds={hiddenAnnotationIds}
         hiddenLabelIds={hiddenLabelIds}
         copy={copy}
+        loading={loading}
+        onImportImages={() => imageInputRef.current?.click()}
+        onLoadDemo={() => { if (!projectDirty || window.confirm(copy.replaceUnsavedProject)) void loadDemo(); }}
         onSelectAsset={selectAsset}
         onMoveAsset={moveAsset}
         onDeleteAsset={deleteAsset}
@@ -736,6 +685,65 @@ export function CanonicalEditorWorkbench() {
         onDeleteLabel={deleteLabel}
       />
 
+      <section className={`editor ${touch.touchMode ? "touch-editor" : ""}`}>
+        <div className="editor-controls"><PreRefactorToolbar {...chromeProps} /></div>
+        <div className="stage">
+          <section ref={viewport.scrollRef} onScroll={viewport.onScroll} onWheel={viewport.onWheel} className={exact.stageScroll}>
+            <div style={{ position: "relative", width: viewport.layout.surfaceWidth, height: viewport.layout.surfaceHeight }}>
+              <div style={{ position: "absolute", left: viewport.layout.left, top: viewport.layout.top, width: viewport.layout.width, height: viewport.layout.height }}>
+                {asset?.raster?.mode === "tiled" ? <CogTiledLayer asset={asset} viewport={viewport.state} layout={viewport.layout} copy={copy} onError={setMessage} />
+                  : asset?.src ? <img src={asset.src} alt={asset.name} draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "fill", userSelect: "none", pointerEvents: "none" }} />
+                  : <div className="empty-project"><span>{asset?.missing ? copy.imageMissingHint : copy.imageNotLoaded}</span>{asset?.missing && <button onClick={() => relinkInputRef.current?.click()}>{copy.reloadProjectImages}</button>}</div>}
+                {asset && !asset.missing && <EditorCanvas
+                  imageSize={imageSize}
+                  svgRef={viewport.canvasRef}
+                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", touchAction: "none", cursor: canvasCursor }}
+                  annotations={visibleAnnotations}
+                  labels={labels}
+                  tool={tool}
+                  selectedId={editor.selection.selected}
+                  selectedIds={selectedIds}
+                  selectedVertex={editor.selectedVertex}
+                  selectionMarquee={interactions.selectionMarquee}
+                  overlay={overlay}
+                  lineThickness={lineThickness}
+                  touchMode={touch.touchMode}
+                  touchRadius={touchRadius}
+                  markerRadius={markerRadius}
+                  markerAspect={1}
+                  boxTouchRadius={boxTouchRadius}
+                  boxRotationTouchRadius={boxRotationTouchRadius}
+                  onPointerDownCapture={touch.onPointerDownCapture}
+                  onPointerMoveCapture={touch.onPointerMoveCapture}
+                  onPointerUpCapture={touch.onPointerUpCapture}
+                  onPointerCancelCapture={touch.onPointerCancelCapture}
+                  onPointerDown={vectorEditing ? advanced.onPointerDown : selecting ? interactions.selectAtCanvas : drawing.onPointerDown}
+                  onPointerMove={vectorEditing ? advanced.onPointerMove : selecting ? interactions.moveCanvasSelection : drawing.onPointerMove}
+                  onPointerUp={vectorEditing ? advanced.onPointerUp : selecting ? interactions.finishCanvasSelection : drawing.onPointerUp}
+                  onPointerCancel={vectorEditing ? advanced.cancel : selecting ? interactions.cancel : drawing.cancelDraft}
+                  onBeginAnnotationDrag={selecting ? interactions.beginAnnotationDrag : noopAnnotation}
+                  onMoveAnnotation={selecting ? interactions.moveAnnotation : noopElement}
+                  onFinishAnnotation={selecting ? interactions.finishAnnotation : noopElement}
+                  onBeginVertexDrag={selecting ? interactions.beginVertexDrag : noopVertex}
+                  onMoveVertex={selecting ? interactions.moveVertex : noopElement}
+                  onFinishVertex={selecting ? interactions.finishVertex : noopElement}
+                  onInsertVertex={selecting ? interactions.insertVertex : noopInsert}
+                  onResizeStart={selecting ? interactions.resizeStart : noopResize}
+                  onResizeMove={selecting ? interactions.resizeMove : noopElement}
+                  onResizeEnd={selecting ? interactions.resizeEnd : noopElement}
+                  onRotateStart={selecting ? interactions.rotateStart : noopAnnotation}
+                  onTransformMove={selecting ? interactions.transformMove : noopElement}
+                  onTransformEnd={selecting ? interactions.transformEnd : noopElement}
+                />}
+              </div>
+            </div>
+          </section>
+        </div>
+        <PreRefactorStatus {...chromeProps} />
+      </section>
+    </div>
+
+    <div className={exact.reviewHidden}>
       <QualityReviewPanel
         mode={reviewMode}
         assets={assets}
@@ -752,15 +760,6 @@ export function CanonicalEditorWorkbench() {
         onAnnotationReview={reviewAnnotation}
         onLabelReview={reviewLabel}
       />
-
-      <footer style={{ display: "flex", gap: 16, marginTop: 10, fontSize: 12, opacity: .65, flexWrap: "wrap" }}>
-        <span>{tools.find((entry) => entry.id === tool)?.label ?? tool}</span>
-        <span>{snapEnabled ? copy.snapStateOn : copy.snapStateOff}</span>
-        <span>Zoom: {viewport.state.zoom}%</span>
-        <span>{copy.localOnly}</span>
-        {asset?.raster?.mode === "tiled" && <span>COG tiled</span>}
-        <span>{projectDirty ? copy.saving : copy.saved}</span>
-      </footer>
     </div>
   </main>;
 }

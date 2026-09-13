@@ -1,0 +1,265 @@
+.contract { display: contents; }
+
+/* The canonical workbench still renders its missing-image placeholder when no
+   asset exists. The pre-refactor editor showed only the centered welcome card. */
+.contract :global(.editor:has(.pre-refactor-empty-overlay) .stage .empty-project) {
+  display: none !important;
+}
+
+/* The canonical scroll surface used to be absolutely stretched across the
+   stage, bypassing the historical stage padding. The old editor measured the
+   scroll viewport inside that padding; restore that geometry exactly. */
+.contract :global(.stage) > section {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+.contract :global(.editor-controls) { overflow: visible !important; }
+
+/* The welcome card is intentionally restated from dfe774 rather than visually
+   approximated. It is a large fraction of the empty mobile viewport, so tiny
+   differences in its fill, border, spacing or shadow create a large diff. */
+.contract :global(.pre-refactor-empty-card) {
+  width: min(520px, calc(100% - 32px)) !important;
+  min-height: 0 !important;
+  padding: 38px 30px !important;
+  border: 1px dashed color-mix(in srgb, var(--green) 45%, var(--line)) !important;
+  border-radius: 18px !important;
+  background: color-mix(in srgb, var(--surface) 88%, transparent) !important;
+  color: var(--ink) !important;
+  text-align: center !important;
+  box-shadow: 0 14px 35px rgba(32,54,40,.08) !important;
+  display: block !important;
+}
+.contract :global(.pre-refactor-empty-card > span) {
+  width: 58px !important;
+  height: 58px !important;
+  margin: 0 auto 15px !important;
+  border-radius: 16px !important;
+  display: grid !important;
+  place-items: center !important;
+  background: color-mix(in srgb, var(--green) 14%, var(--surface)) !important;
+  color: var(--green) !important;
+}
+.contract :global(.pre-refactor-empty-card h2) {
+  margin: 0 !important;
+  font-size: 20px !important;
+}
+.contract :global(.pre-refactor-empty-card p) {
+  max-width: 390px !important;
+  margin: 8px auto 19px !important;
+  color: var(--muted) !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+}
+.contract :global(.pre-refactor-empty-card > div) {
+  display: flex !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  flex-wrap: wrap !important;
+}
+.contract :global(.pre-refactor-empty-card button) {
+  height: 38px !important;
+  min-height: 38px !important;
+  padding: 0 14px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 9px !important;
+  background: var(--control-bg) !important;
+  color: var(--ink) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+.contract :global(.pre-refactor-empty-card small) {
+  display: block !important;
+  margin-top: 18px !important;
+  color: var(--muted) !important;
+  font-size: 10px !important;
+}
+
+/* Initial demo tutorial: mask only the image rectangle, as the historical
+   guided flow did. Canonical demo annotations stay loaded for later use, but
+   are visually suppressed until the first tutorial task is completed. */
+.contract :global(.editor:has(.pre-refactor-demo-card)) :global(.stage) > section > div > div::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  background: rgba(11, 16, 20, .58);
+  pointer-events: none;
+}
+.contract :global(.editor:has(.pre-refactor-demo-card) .stage svg) {
+  visibility: hidden !important;
+}
+.contract :global(.pre-refactor-demo-card) { z-index: 121 !important; }
+
+/* Match the historical tutorial close affordance: the old control rendered a
+   typographic multiplication sign rather than the smaller Lucide glyph. */
+.contract :global(.pre-refactor-demo-close) {
+  position: absolute !important;
+  top: 8px !important;
+  right: 8px !important;
+  width: 27px !important;
+  height: 27px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--muted) !important;
+  font-size: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+}
+.contract :global(.pre-refactor-demo-close svg) { display: none !important; }
+.contract :global(.pre-refactor-demo-close)::after {
+  content: "×";
+  font-size: 21px;
+  line-height: 1;
+}
+
+/* Exact first-step tool cue from the pre-refactor tutorial. Desktop can anchor
+   the bubble to the highlighted button directly. Mobile's toolbar scroll box
+   clips overflowing descendants, so the cue is fixed at the historical first
+   viewport position (the Box tool position itself is fixed in the initial row). */
+.contract :global(.demo-tutorial-tool-target) {
+  overflow: visible;
+  position: relative;
+  z-index: 122;
+  box-shadow: 0 0 0 3px #8BE3BD, 0 0 24px rgba(139,227,189,.9) !important;
+  animation: tutorial-pulse 1.4s ease-in-out infinite;
+}
+.contract :global(.demo-tutorial-tool-target)::after {
+  content: "Clique aqui";
+  position: absolute;
+  z-index: 125;
+  left: 50%;
+  top: calc(100% + 14px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 6px 10px;
+  border: 2px solid #8BE3BD;
+  border-radius: 15px;
+  background: #0C0F0E;
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: normal;
+  box-shadow: 0 5px 18px rgba(0,0,0,.32);
+  pointer-events: none;
+  animation: tutorial-pulse 1.15s ease-in-out infinite;
+}
+.contract :global(.demo-tutorial-tool-target)::before {
+  content: "";
+  position: absolute;
+  z-index: 126;
+  left: 50%;
+  top: calc(100% + 5px);
+  transform: translateX(-50%);
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 9px solid #8BE3BD;
+  pointer-events: none;
+  animation: tutorial-pulse 1.15s ease-in-out infinite;
+}
+
+/* During onboarding the historical UI deliberately starts at zero reviewed
+   images and an empty annotation list, even though the demo data is available
+   in memory for subsequent steps. */
+.contract :global(.workspace:has(.pre-refactor-demo-card) .progress b) { font-size: 0; }
+.contract :global(.workspace:has(.pre-refactor-demo-card) .progress b)::after {
+  content: "0 de 3";
+  font-size: 11px;
+}
+.contract :global(.workspace:has(.pre-refactor-demo-card) .progress em) { width: 0 !important; }
+.contract :global(.workspace:has(.pre-refactor-demo-card) .asset-selector.selected) {
+  background: var(--control-bg) !important;
+  border-color: var(--line) !important;
+  color: transparent !important;
+}
+.contract :global(.workspace:has(.pre-refactor-demo-card) .asset-selector.selected svg),
+.contract :global(.workspace:has(.pre-refactor-demo-card) .asset-main i.checked svg) { display: none; }
+.contract :global(.workspace:has(.pre-refactor-demo-card) .asset-main i.checked) {
+  background: transparent !important;
+  border-color: var(--line) !important;
+}
+.contract :global(.workspace:has(.pre-refactor-demo-card) .annotation-editor .instances),
+.contract :global(.workspace:has(.pre-refactor-demo-card) .annotation-editor .batch-class) { display: none !important; }
+.contract :global(.workspace:has(.pre-refactor-demo-card) .annotation-panel-head > div:first-child b) { font-size: 0; }
+.contract :global(.workspace:has(.pre-refactor-demo-card) .annotation-panel-head > div:first-child b)::after {
+  content: "ANOTAÇÕES · 0";
+  font-size: 11px;
+}
+.contract :global(.workspace:has(.pre-refactor-demo-card) .annotation-panel-actions button:first-child) {
+  opacity: .5;
+  pointer-events: none;
+}
+
+/* The File menu still owns technical raster/COCO controls for functionality,
+   but the historical dropdown exposed only the four export rows. */
+.contract :global(.canonical-file-extras > button:nth-of-type(-n+4)) { display: none !important; }
+.contract :global(.project-pop .canonical-file-extras > button) {
+  width: 100%;
+  min-height: 45px;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 7px 9px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+}
+.contract :global(.project-pop .canonical-file-extras > button:hover:not(:disabled)) {
+  background: var(--theme-hover);
+}
+.contract :global(.project-pop .canonical-file-extras > button:disabled) {
+  opacity: .45;
+  cursor: default;
+}
+.contract :global(.project-pop .canonical-file-extras > button > span) { min-width: 0; }
+.contract :global(.project-pop .canonical-file-extras > button b),
+.contract :global(.project-pop .canonical-file-extras > button small) { display: block; }
+.contract :global(.project-pop .canonical-file-extras > button b) { font-size: 12px; }
+.contract :global(.project-pop .canonical-file-extras > button small) {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* Collapsed rails must also release their old column width. */
+@media (min-width: 861px) {
+  .contract :global(.workspace:has(.assets.collapsed)) { grid-template-columns: 34px minmax(0, 1fr) 288px; }
+  .contract :global(.workspace:has(.labels.collapsed)) { grid-template-columns: 256px minmax(0, 1fr) 34px; }
+  .contract :global(.workspace:has(.assets.collapsed):has(.labels.collapsed)) { grid-template-columns: 34px minmax(0, 1fr) 34px; }
+}
+@media (min-width: 861px) and (max-width: 1080px) {
+  .contract :global(.workspace:has(.assets.collapsed)) { grid-template-columns: 34px minmax(0, 1fr) 252px; }
+  .contract :global(.workspace:has(.labels.collapsed)) { grid-template-columns: 222px minmax(0, 1fr) 34px; }
+}
+
+@media (max-width: 860px) {
+  .contract :global(.pre-refactor-empty-overlay) { padding-top: 6px !important; }
+  .contract :global(.pre-refactor-empty-card) { width: min(346px, 100%) !important; }
+  .contract :global(.demo-tutorial-tool-target)::after {
+    position: fixed;
+    left: 175px;
+    top: 151px;
+    transform: translateX(-50%);
+  }
+  .contract :global(.demo-tutorial-tool-target)::before {
+    position: fixed;
+    left: 175px;
+    top: 142px;
+    transform: translateX(-50%);
+  }
+}

@@ -4,25 +4,26 @@ import fs from 'node:fs/promises';
 
 const read = (path) => fs.readFile(new URL(path, import.meta.url), 'utf8');
 
-test('annotate route owns the canonical editor inside the restored responsive frame', async () => {
-  const [page, css, drawerCss] = await Promise.all([
+test('annotate route delegates directly to the canonical workbench while presentation lives in editor chrome', async () => {
+  const [page, workbench, chrome, exactCss] = await Promise.all([
     read('../app/annotate/page.tsx'),
-    read('../app/annotate/annotate-interface.module.css'),
-    read('../app/annotate/annotate-drawer-state.module.css'),
+    read('../app/editor/workbench/canonical-editor-workbench.tsx'),
+    read('../app/editor/presentation/pre-refactor-chrome.tsx'),
+    read('../app/editor/presentation/pre-refactor-canonical.module.css'),
   ]);
-  assert.match(page, /annotate-interface\.module\.css/);
-  assert.match(page, /annotate-drawer-state\.module\.css/);
-  assert.match(page, /styles\.routeRoot/);
-  assert.match(page, /drawer\.routeRoot/);
-  assert.match(css, /\.routeRoot/);
-  assert.match(css, /@media \(max-width: 860px\)/);
-  assert.match(css, /@media \(max-width: 560px\)/);
-  assert.match(css, /var\(--paper\)/);
-  assert.match(css, /var\(--surface\)/);
-  assert.match(drawerCss, /data-open="true"/);
+  assert.match(page, /CanonicalEditorWorkbench/);
+  assert.doesNotMatch(page, /annotate-interface\.module\.css|annotate-drawer-state\.module\.css/);
+  assert.match(workbench, /PreRefactorTopbar/);
+  assert.match(workbench, /PreRefactorToolbar/);
+  assert.match(workbench, /PreRefactorStatus/);
+  assert.match(chrome, /className="topbar"/);
+  assert.match(chrome, /className="menubar"/);
+  assert.match(chrome, /className="tools"/);
+  assert.match(exactCss, /canonical-management-panels/);
+  assert.match(exactCss, /@media \(max-width: 860px\)/);
 });
 
-test('management, vector and review surfaces use the canonical editor interface module', async () => {
+test('management, vector and review surfaces keep canonical editor behavior modules', async () => {
   const [panels, vector, review, css] = await Promise.all([
     read('../app/editor/panels/editor-management-panels.tsx'),
     read('../app/editor/vector/vector-toolbar.tsx'),

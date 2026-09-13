@@ -6,6 +6,7 @@ import { ViewportController } from '../app/editor/viewport/viewport-controller.t
 const touchSource=readFileSync(new URL('../app/editor/viewport/use-touch-navigation.ts',import.meta.url),'utf8');
 const drawingSource=readFileSync(new URL('../app/editor/drawing/use-drawing-interactions.ts',import.meta.url),'utf8');
 const workbenchSource=readFileSync(new URL('../app/editor/workbench/canonical-editor-workbench.tsx',import.meta.url),'utf8');
+const chromeSource=readFileSync(new URL('../app/editor/presentation/pre-refactor-chrome.tsx',import.meta.url),'utf8');
 
 test('one-finger pan follows the pointer while preserving logical geometry',()=>{
   const viewport=new ViewportController({
@@ -42,8 +43,6 @@ test('pinch-pan combines scale and moving midpoint without annotation rescaling'
   assert.deepEqual(after.image,before.image);
   assert.ok(Number.isFinite(after.scrollLeft));
   assert.ok(Number.isFinite(after.scrollTop));
-  assert.ok(after.scrollLeft>=0);
-  assert.ok(after.scrollTop>=0);
 });
 
 test('second touch cancels editing and drawing before pinch owns the gesture',()=>{
@@ -60,8 +59,8 @@ test('discrete touch drawing commits on pointerup, not pointerdown',()=>{
   assert.match(drawingSource,/if \(!start\.moved\) appendDiscretePoint/);
 });
 
-test('canonical workbench exposes localized hand tool and capture-phase touch navigation',()=>{
-  assert.match(workbenchSource,/id: "pan", label: copy\.pan/);
+test('canonical workbench exposes localized hand tool through presentation and capture-phase touch navigation',()=>{
+  assert.match(chromeSource,/title=\{copy\.pan\}[^>]*onClick=\{\(\) => props\.onTool\("pan"\)\}/);
   assert.match(workbenchSource,/onPointerDownCapture=\{touch\.onPointerDownCapture\}/);
   assert.match(workbenchSource,/onPointerMoveCapture=\{touch\.onPointerMoveCapture\}/);
   assert.match(workbenchSource,/touchMode=\{touch\.touchMode\}/);

@@ -1,0 +1,135 @@
+name: Exact UI Baseline
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    if: github.head_ref == 'fix/exact-pre-refactor-ui' || github.ref_name == 'fix/exact-pre-refactor-ui'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Prepare reference worktree
+        run: git worktree add /tmp/poligome-reference dfe774dae2ec76df923e8fcf5f6adba5d90b6b9a
+
+      - name: Install candidate
+        run: npm ci
+
+      - name: Install reference
+        working-directory: /tmp/poligome-reference
+        run: npm ci
+
+      - name: Build candidate static export
+        run: npm run build:pages
+
+      - name: Build reference static export
+        working-directory: /tmp/poligome-reference
+        run: npm run build:pages
+
+      - name: Capture candidate test diagnostics
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          node --import tsx --test tests/*.test.mjs 2>&1 | tee exact-ui-tests.log
+
+      - name: Install browser
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Start reference and candidate
+        run: |
+          nohup python3 -m http.server 4173 --bind 127.0.0.1 --directory /tmp/poligome-reference/out >/tmp/reference.log 2>&1 &
+          nohup python3 -m http.server 4174 --bind 127.0.0.1 --directory "$GITHUB_WORKSPACE/out" >/tmp/candidate.log 2>&1 &
+          ready() { for i in {1..30}; do curl -LfsS "$1" >/dev/null && return 0; sleep 1; done; return 1; }
+          ready http://127.0.0.1:4173/annotate/ || { cat /tmp/reference.log; exit 1; }
+          ready http://127.0.0.1:4174/annotate/ || { cat /tmp/candidate.log; exit 1; }
+
+      - name: Capture exact baseline and candidate
+        run: |
+          cat > capture-exact-ui.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs/promises';
+          const browser = await chromium.launch({ headless: true });
+          await fs.mkdir('exact-ui', { recursive: true });
+          async function openPage(base, viewport, demo = false) {
+            const context = await browser.newContext({ viewport });
+            const page = await context.newPage();
+            await page.goto(`${base}/annotate/${demo ? '?demo=1' : ''}`, { waitUntil: 'networkidle', timeout: 90000 });
+            await page.waitForTimeout(demo ? 2500 : 800);
+            return { context, page };
+          }
+          async function save(page, prefix, viewport, suffix) {
+            await page.waitForTimeout(180);
+            await page.screenshot({ path: `exact-ui/${prefix}-${viewport.width}x${viewport.height}-${suffix}.png`, fullPage: false });
+          }
+          async function shot(base, prefix, viewport, demo = false) {
+            const { context, page } = await openPage(base, viewport, demo);
+            await page.screenshot({ path: `exact-ui/${prefix}-${viewport.width}x${viewport.height}${demo ? '-demo' : ''}.png`, fullPage: false });
+            await context.close();
+          }
+          async function fileMenuShot(base, prefix, viewport) {
+            const { context, page } = await openPage(base, viewport, false);
+            await page.locator('.menu-trigger').first().click();
+            await save(page, prefix, viewport, 'file-menu');
+            await context.close();
+          }
+          async function preferencesShot(base, prefix, viewport) {
+            const { context, page } = await openPage(base, viewport, false);
+            await page.locator('.menu-trigger').first().click();
+            await page.getByRole('menuitem').filter({ hasText: 'Preferências' }).click();
+            await save(page, prefix, viewport, 'preferences');
+            await context.close();
+          }
+          async function saveProjectShot(base, prefix, viewport) {
+            const { context, page } = await openPage(base, viewport, true);
+            await page.locator('.menu-trigger').first().click();
+            await page.getByRole('menuitem').filter({ hasText: 'Salvar projeto' }).click();
+            await save(page, prefix, viewport, 'save-project');
+            await context.close();
+          }
+          for (const viewport of [{width:1440,height:900},{width:390,height:844}]) {
+            await shot('http://127.0.0.1:4173','reference',viewport,false);
+            await shot('http://127.0.0.1:4173','reference',viewport,true);
+            await shot('http://127.0.0.1:4174','candidate',viewport,false);
+            await shot('http://127.0.0.1:4174','candidate',viewport,true);
+            await fileMenuShot('http://127.0.0.1:4173','reference',viewport);
+            await fileMenuShot('http://127.0.0.1:4174','candidate',viewport);
+            await preferencesShot('http://127.0.0.1:4173','reference',viewport);
+            await preferencesShot('http://127.0.0.1:4174','candidate',viewport);
+            await saveProjectShot('http://127.0.0.1:4173','reference',viewport);
+            await saveProjectShot('http://127.0.0.1:4174','candidate',viewport);
+          }
+          await browser.close();
+          EOF
+          node capture-exact-ui.mjs
+
+      - name: Upload comparison screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-ui-baseline
+          path: exact-ui/*.png
+          retention-days: 2
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-ui-test-log
+          path: exact-ui-tests.log
+          if-no-files-found: ignore
+          retention-days: 2

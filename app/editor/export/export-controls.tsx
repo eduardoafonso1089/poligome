@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Download, FileText, Globe, HardDriveDownload } from "lucide-react";
 import type { Asset, Label } from "../../lib/types";
 import { getCopy, storedLanguage, type Language } from "../../lib/i18n";
 import { translateErrorCode } from "../../lib/error-message";
@@ -53,10 +54,25 @@ export function ExportControls({
     }
   }
 
+  function project() {
+    const saveRow = Array.from(document.querySelectorAll<HTMLButtonElement>(".project-pop button"))
+      .find((button) => button.querySelector("b")?.textContent === copy.saveProject);
+    saveRow?.click();
+  }
+
   const blocked = disabled || busy !== null || !assets.length;
   return <>
-    <button title={`${copy.export}: COCO · ${copy.cocoDesc}`} onClick={coco} disabled={blocked}>COCO</button>
-    <button title={`${copy.export}: YOLO · ${copy.yoloDesc}`} onClick={() => void yolo()} disabled={blocked}>{busy === "yolo" ? "YOLO…" : "YOLO"}</button>
-    <button title={`${copy.export}: GeoJSON · ${copy.geojsonDesc}`} onClick={geojson} disabled={blocked || !annotations.length}>GeoJSON</button>
+    <button role="menuitem" title={`${copy.export}: COCO · ${copy.cocoDesc}`} onClick={coco} disabled={blocked}>
+      <FileText size={14} /><span><b>COCO JSON</b><small>{copy.cocoDesc}</small></span>
+    </button>
+    <button role="menuitem" title={`${copy.export}: YOLO · ${copy.yoloDesc}`} onClick={() => void yolo()} disabled={blocked}>
+      <HardDriveDownload size={14} /><span><b>{busy === "yolo" ? "YOLO ZIP…" : "YOLO ZIP"}</b><small>{copy.yoloDesc}</small></span>
+    </button>
+    <button role="menuitem" title={`${copy.export}: GeoJSON · ${copy.geojsonDesc}`} onClick={geojson} disabled={blocked || !annotations.length}>
+      <Globe size={14} /><span><b>GeoJSON</b><small>{copy.geojsonDesc}</small></span>
+    </button>
+    <button role="menuitem" title={`${copy.export}: Poligome`} onClick={project} disabled={blocked}>
+      <Download size={14} /><span><b>Poligome</b><small>{copy.projectBackup}</small></span>
+    </button>
   </>;
 }

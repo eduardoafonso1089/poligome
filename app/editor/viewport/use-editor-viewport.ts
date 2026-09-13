@@ -10,6 +10,15 @@ export type UseEditorViewportOptions = {
   initialZoom?: number;
 };
 
+function historicalFitZoom(viewport: Size2D, image: Size2D) {
+  const imageWidth = Math.max(1, image.width);
+  const imageHeight = Math.max(1, image.height);
+  const widthAtHundred = Math.max(1, viewport.width);
+  const heightAtHundred = widthAtHundred * imageHeight / imageWidth;
+  const heightFit = Math.max(1, viewport.height) / Math.max(1, heightAtHundred) * 100;
+  return Math.max(10, Math.min(100, Math.floor(Math.min(100, heightFit) * 0.96)));
+}
+
 export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewportOptions) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<SVGSVGElement>(null);
@@ -36,6 +45,14 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
 
   useEffect(() => {
     controllerRef.current.setImage(image);
+    const scroller = scrollRef.current;
+    if (scroller) {
+      controllerRef.current.setViewport({ width: scroller.clientWidth || 1, height: scroller.clientHeight || 1 });
+      controllerRef.current.setZoom(historicalFitZoom(
+        { width: scroller.clientWidth || 1, height: scroller.clientHeight || 1 },
+        image,
+      ));
+    }
     setState(controllerRef.current.snapshot());
   }, [image.height, image.width]);
 
@@ -82,21 +99,28 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
 
   const zoomTo = useCallback((zoom: number, clientPoint?: { x: number; y: number }) => {
     syncBeforeGesture();
+    const scroller = scrollRef.current;
     const canvas = canvasRef.current;
+    const targetZoom = !clientPoint && zoom === initialZoom && scroller
+      ? historicalFitZoom(
+          { width: scroller.clientWidth || 1, height: scroller.clientHeight || 1 },
+          controllerRef.current.snapshot().image,
+        )
+      : zoom;
     let next: ViewportState;
     if (canvas && clientPoint) {
       const rect = canvas.getBoundingClientRect();
       next = controllerRef.current.zoomAt(
-        zoom,
+        targetZoom,
         { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
         clientPoint,
       );
     } else {
-      controllerRef.current.setZoom(zoom);
+      controllerRef.current.setZoom(targetZoom);
       next = controllerRef.current.snapshot();
     }
     publish(next);
-  }, [publish, syncBeforeGesture]);
+  }, [initialZoom, publish, syncBeforeGesture]);
 
   const zoomBy = useCallback((delta: number) => {
     const scroller = scrollRef.current;

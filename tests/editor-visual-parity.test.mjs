@@ -2,32 +2,40 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const routeCss = await readFile(new URL("../app/annotate/annotate-interface.module.css", import.meta.url), "utf8");
-const drawerCss = await readFile(new URL("../app/annotate/annotate-drawer-state.module.css", import.meta.url), "utf8");
+const chrome = await readFile(new URL("../app/editor/presentation/pre-refactor-chrome.tsx", import.meta.url), "utf8");
+const exactCss = await readFile(new URL("../app/editor/presentation/pre-refactor-canonical.module.css", import.meta.url), "utf8");
 const panels = await readFile(new URL("../app/editor/panels/editor-management-panels.tsx", import.meta.url), "utf8");
 
-test("annotate desktop keeps the pre-merge three-column workspace", () => {
-  assert.match(routeCss, /grid-template-columns:\s*256px minmax\(0, 1fr\) 288px/);
-  assert.match(routeCss, /grid-template-rows:\s*66px 50px minmax\(0, 1fr\) 42px/);
-  assert.match(routeCss, /min-height:\s*66px !important/);
-  assert.match(routeCss, /grid-template-columns:\s*222px minmax\(0, 1fr\) 252px/);
+test("desktop chrome restores the pre-refactor topbar, file menu, toolbar and status composition", () => {
+  assert.match(chrome, /className="topbar"/);
+  assert.match(chrome, /className="topbar-main"/);
+  assert.match(chrome, /className="menubar"/);
+  assert.match(chrome, /className="project-pop menu-pop"/);
+  assert.match(chrome, /className="tools"/);
+  assert.match(chrome, /className="status"/);
+  assert.match(chrome, /WandSparkles/);
+  assert.match(chrome, /MousePointer2/);
+  assert.match(chrome, /Pentagon/);
+  assert.match(chrome, /Scissors/);
+  assert.match(chrome, /Magnet/);
+  assert.match(chrome, /Undo2/);
+  assert.match(chrome, /Redo2/);
 });
 
-test("annotate responsive breakpoints preserve the pre-merge drawer composition", () => {
-  assert.match(routeCss, /@media \(max-width: 860px\)/);
-  assert.match(routeCss, /grid-template-rows:\s*66px 50px minmax\(0, 1fr\) 42px/);
-  assert.match(routeCss, /width:\s*min\(310px, 86vw\)/);
-  assert.match(routeCss, /transform:\s*translateX\(-105%\)/);
-  assert.match(routeCss, /transform:\s*translateX\(105%\)/);
-  assert.match(routeCss, /@media \(max-width: 560px\)/);
-  assert.match(routeCss, /grid-template-rows:\s*62px 48px minmax\(0, 1fr\) 38px/);
+test("canonical workspace preserves the old three-column desktop dimensions and mobile drawers", () => {
+  assert.match(exactCss, /grid-column:\s*1/);
+  assert.match(exactCss, /grid-column:\s*3/);
+  assert.match(exactCss, /@media \(max-width: 860px\)/);
+  assert.match(exactCss, /width:\s*min\(310px, 86vw\)/);
+  assert.match(exactCss, /translateX\(-105%\)/);
+  assert.match(exactCss, /translateX\(105%\)/);
 });
 
-test("mobile drawers are driven by explicit React state", () => {
+test("mobile drawers remain driven by explicit React state", () => {
   assert.match(panels, /data-panel="images" data-open=\{leftOpen/);
   assert.match(panels, /data-panel="right" data-open=\{rightOpen/);
   assert.match(panels, /data-mobile-toggle="images"/);
   assert.match(panels, /data-mobile-toggle="right"/);
-  assert.match(drawerCss, /\[data-panel="images"\]\[data-open="true"\]/);
-  assert.match(drawerCss, /\[data-panel="right"\]\[data-open="true"\]/);
+  assert.match(panels, /poligome:open-images/);
+  assert.match(panels, /poligome:open-right/);
 });

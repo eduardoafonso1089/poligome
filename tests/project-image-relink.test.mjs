@@ -55,7 +55,8 @@ test('annotation-only relink refuses a same-named image with incompatible dimens
 test('canonical workbench exposes relink only for missing project assets', () => {
   const source = readFileSync(new URL('../app/editor/workbench/canonical-editor-workbench.tsx', import.meta.url), 'utf8');
   assert.match(source, /relinkMissingAssets/);
-  assert.match(source, /missingImageCount > 0/);
+  assert.match(source, /!missingImageCount/);
+  assert.match(source, /asset\?\.missing/);
   assert.match(source, /copy\.reloadProjectImages/);
   assert.match(source, /relinkInputRef/);
 });
