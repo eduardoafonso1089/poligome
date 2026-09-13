@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { ChevronRight, WandSparkles } from "lucide-react";
-import { getCopy, type Language } from "../../lib/i18n";
+import { getCopy, storedLanguage, type Language } from "../../lib/i18n";
 import type { EditorAnnotation } from "../models/annotation-model";
 
 export type DemoTutorialStep = 0 | 1 | 2 | 3 | 4 | 5;
@@ -18,7 +18,7 @@ const tutorialCopy = {
   ],
   en: [["Draw a box", "The Box tool is highlighted above. Use it to mark the illuminated roof."], ["Great!", "Your box was created. Move on when you are ready to edit a box."], ["Edit a box", "Drag a corner or the rotation control of the highlighted box."], ["Next image", "The box is adjusted. Move on to try a model suggestion."], ["Try a local model", "Click the highlighted area to simulate an automatic polygon suggestion."]],
   fr: [["Dessinez une boîte", "L’outil Boîte est mis en évidence. Utilisez-le sur le toit éclairé."], ["Très bien !", "Votre boîte est créée. Passez à l’image suivante lorsque vous êtes prêt."], ["Modifiez une boîte", "Faites glisser un sommet ou le contrôle de rotation de la boîte."], ["Image suivante", "La boîte est ajustée. Passez à la suggestion du modèle."], ["Essayez un modèle local", "Cliquez sur la zone mise en évidence pour simuler une suggestion automatique."]],
-  es: [["Dibuja una caja", "La herramienta Caja está resaltada arriba. Úsala sobre el tejado iluminado."], ["¡Muy bien!", "Tu caja fue creada. Avanza cuando quieras editar una caja."], ["Edita una caja", "Arrastra un vértice o el control de rotación de la caja resaltada."], ["Siguiente imagen", "La caja está ajustada. Avanza para probar una sugerencia."], ["Prueba un modelo local", "Haz clic en el área resaltada para simular una sugerencia automática."]],
+  es: [["Dibuja una caja", "La herramienta Caja está resaltada arriba. Úsala sobre el tejado iluminado."], ["¡Muy bien!", "Tu caja fue creada. Avanza cuando quieras editar una caja."], ["Edita una caja", "Arrastra un vértice o el control de rotación de la caja resaltada."], ["Siguiente imagen", "La caja está ajustada. Avanza para probar una sugerencia."], ["Prueba un modelo local", "Haz clic en la zona resaltada para simular una sugerencia automática."]],
 } as const;
 
 const tutorialNext = { pt: "Próximo", en: "Next", fr: "Suivant", es: "Siguiente" } as const;
@@ -34,6 +34,7 @@ const tutorialToolCopy = {
   es: { box: ["Selecciona la herramienta Caja", "Haz clic en la herramienta resaltada para empezar."], select: ["Selecciona la herramienta de movimiento", "Haz clic en la herramienta Seleccionar resaltada para editar la caja."] },
 } as const;
 
+export const tutorialSuccessTitle = { pt: "Muito bem!", en: "Great!", fr: "Très bien !", es: "¡Muy bien!" } as const;
 export const tutorialWrongDraw = {
   pt: "A anotação ficou fora do telhado destacado. Tente novamente.",
   en: "The annotation is outside the highlighted roof. Try again.",
@@ -115,10 +116,11 @@ export function isTutorialModelPoint(point: { x: number; y: number }, imageSize:
   return point.x >= 460 * sx && point.x <= 580 * sx && point.y >= 340 * sy && point.y <= 515 * sy;
 }
 
-export function DemoTutorialOverlay({ step, toolPrompt, imageSize }: {
+export function DemoTutorialOverlay({ step, toolPrompt, imageSize, language = storedLanguage() }: {
   step: DemoTutorialStep | null;
   toolPrompt: DemoTutorialToolPrompt;
   imageSize: { width: number; height: number };
+  language?: Language;
 }) {
   if (step === null) return null;
   const { sx, sy } = scales(imageSize);
@@ -139,7 +141,7 @@ export function DemoTutorialOverlay({ step, toolPrompt, imageSize }: {
       {step === 4 && <><rect className="demo-tutorial-model-region" x={460 * sx} y={340 * sy} width={120 * sx} height={175 * sy} rx={10 * fontScale} /><circle className="demo-tutorial-model-point" cx={525 * sx} cy={422 * sy} r={10 * fontScale} /></>}
       <g className="demo-tutorial-click-hint" transform={`translate(${hint.x * sx} ${hint.y * sy})`}>
         <rect x="0" y="0" width={120 * sx} height={30 * sy} rx={15 * fontScale} />
-        <text x={60 * sx} y={20 * sy} textAnchor="middle" fontSize={12 * fontScale}>{hint.text.pt}</text>
+        <text x={60 * sx} y={20 * sy} textAnchor="middle" fontSize={12 * fontScale}>{hint.text[language]}</text>
       </g>
     </>}
   </>;
