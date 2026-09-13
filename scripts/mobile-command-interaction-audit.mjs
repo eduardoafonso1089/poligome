@@ -215,8 +215,10 @@ try {
     const rows = page.locator('[data-panel="right"] .instances .instance-row');
     const rowCount = await rows.count();
     if (rowCount < 2) throw new Error(`annotation rows=${rowCount}`);
-    await rows.nth(rowCount - 2).locator('.annotation-selector').tap();
-    await rows.nth(rowCount - 1).locator('.annotation-selector').tap();
+    const firstSelector = rows.nth(rowCount - 2).locator('.annotation-selector');
+    const secondSelector = rows.nth(rowCount - 1).locator('.annotation-selector');
+    if (await firstSelector.getAttribute('aria-pressed') !== 'true') await firstSelector.tap();
+    if (await secondSelector.getAttribute('aria-pressed') !== 'true') await secondSelector.tap();
     const closeDrawer = page.locator('[data-panel="right"] [data-drawer-header="true"] button').first();
     await closeDrawer.tap();
     await page.waitForTimeout(60);
