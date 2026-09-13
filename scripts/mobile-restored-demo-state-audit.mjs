@@ -46,6 +46,9 @@ try {
   if (!state.rect || state.rect.width <= 0 || state.rect.height <= 0 || state.display === "none" || state.visibility === "hidden") {
     throw new Error(`Editor SVG hidden after leaving guided Demo: ${JSON.stringify(state)}`);
   }
+  if (state.staleLegacyCard) throw new Error("Obsolete simplified Demo card reappeared after the guided walkthrough");
+  if (state.guidedCard) throw new Error("Guided Demo card remained mounted after closing the walkthrough");
+  if (state.legacyTargetCount) throw new Error(`Stale Demo tool highlight remained after walkthrough: ${state.legacyTargetCount}`);
 } finally {
   await context.close();
   await browser.close();
