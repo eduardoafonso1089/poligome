@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { Asset, Label } from "../../lib/types";
 import { getCopy, storedLanguage, storedTheme, type Language } from "../../lib/i18n";
 import { translateErrorCode } from "../../lib/error-message";
@@ -21,7 +21,7 @@ import { useDrawingInteractions, type DrawingTool } from "../drawing/use-drawing
 import { AdvancedVectorDraftLayer } from "../layers/advanced-vector-draft-layer";
 import { useEditorViewport } from "../viewport/use-editor-viewport";
 import { useTouchNavigation } from "../viewport/use-touch-navigation";
-import { screenPixelsToImageUnits } from "../viewport/svg-image-space";
+import { clientPointToImage, screenPixelsToImageUnits } from "../viewport/svg-image-space";
 import { CogTiledLayer } from "../raster/cog-tiled-layer";
 import { demoRouteTarget } from "../session/demo-route";
 import { QualityReviewPanel } from "../review/quality-review-panel";
@@ -36,6 +36,8 @@ import exact from "../presentation/pre-refactor-canonical.module.css";
 
 const EMPTY_LABELS: Label[] = [{ id: UNLABELED_ID, name: "Sem label", color: "#929a95", key: "" }];
 
+type MousePanState = { pointerId: number; x: number; y: number } | null;
+
 export function CanonicalEditorWorkbench() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [labels, setLabels] = useState<Label[]>(EMPTY_LABELS);
@@ -43,6 +45,10 @@ export function CanonicalEditorWorkbench() {
   const [tool, setTool] = useState<DrawingTool>("select");
   const [vectorTool, setVectorTool] = useState<VectorTool>(null);
   const [snapEnabled, setSnapEnabled] = useState(true);
+  const [addToSelection, setAddToSelection] = useState(false);
+  const [coordinatesGuide, setCoordinatesGuide] = useState(false);
+  const [cursorPoint, setCursorPoint] = useState<{ x: number; y: number } | null>(null);
+  const [mousePanning, setMousePanning] = useState(false);
   const [current, setCurrent] = useState("");
   const [projectName, setProjectName] = useState(() => getCopy(storedLanguage()).newProject);
   const [language, setLanguage] = useState<Language>("pt");
@@ -60,6 +66,7 @@ export function CanonicalEditorWorkbench() {
   const relinkInputRef = useRef<HTMLInputElement>(null);
   const idCounter = useRef(0);
   const demoQueryHandled = useRef(false);
+  const mousePanRef = useRef<MousePanState>(null);
   const editor = useEditorState();
   const copy = getCopy(language);
   const asset = assets.find((item) => item.id === current) ?? assets[0] ?? null;
@@ -99,6 +106,7 @@ export function CanonicalEditorWorkbench() {
     dispatch: editor.dispatch,
     makeId,
     activeAssetId: current || null,
+    addToSelection,
     snap,
   });
   const drawing = useDrawingInteractions({
@@ -168,6 +176,8 @@ export function CanonicalEditorWorkbench() {
   function resetInteractionState() {
     setTool("select");
     setVectorTool(null);
+    setAddToSelection(false);
+    setCursorPoint(null);
     drawing.cancelDraft();
     advanced.cancel();
     editor.dispatch({ type: "clear-selection" });
@@ -310,6 +320,7 @@ export function CanonicalEditorWorkbench() {
     advanced.cancel();
     setVectorTool(null);
     setTool("select");
+    setAddToSelection(false);
   }
 
   function chooseTool(next: DrawingTool) {
@@ -317,13 +328,18 @@ export function CanonicalEditorWorkbench() {
     advanced.cancel();
     setVectorTool(null);
     setTool(next);
-    if (next !== "select") editor.dispatch({ type: "clear-selection" });
+    if (next !== "select") {
+      setAddToSelection(false);
+      editor.dispatch({ type: "clear-selection" });
+    }
+    if (next === "pan") setCursorPoint(null);
   }
 
   function chooseVectorTool(next: VectorTool) {
     drawing.cancelDraft();
     interactions.cancel();
     advanced.cancel();
+    setAddToSelection(false);
     setTool("select");
     setVectorTool(next);
   }
@@ -333,6 +349,8 @@ export function CanonicalEditorWorkbench() {
     drawing.cancelDraft();
     advanced.cancel();
     setVectorTool(null);
+    setAddToSelection(false);
+    setCursorPoint(null);
     setCurrent(id);
     editor.dispatch({ type: "clear-selection" });
     viewport.zoomTo(92);
@@ -407,6 +425,29 @@ export function CanonicalEditorWorkbench() {
     if (!ids.length) return;
     editor.deleteAnnotations(ids);
     setHiddenAnnotationIds((currentHidden) => new Set([...currentHidden].filter((id) => !ids.includes(id))));
+  }
+
+  function deleteCurrentSelection() {
+    if (editor.selectedVertex) {
+      editor.dispatch({ type: "delete-vertex", annotationId: editor.selectedVertex.annotationId, vertexId: editor.selectedVertex.vertexId });
+      return;
+    }
+    deleteAnnotations(selectedIds);
+  }
+
+  function finishActiveDraft() {
+    if (vectorTool === "hole") advanced.finishHole();
+    else drawing.finishDraft();
+  }
+
+  function removeLastDraftPoint() {
+    if (vectorTool === "hole") advanced.removeLastPoint();
+    else drawing.removeLastPoint();
+  }
+
+  function cancelActiveDraft() {
+    drawing.cancelDraft();
+    advanced.cancel();
   }
 
   function clearAllAnnotations() {
@@ -542,17 +583,15 @@ export function CanonicalEditorWorkbench() {
       if (command.type === "undo") { editor.undo(); return; }
       if (command.type === "redo") { editor.redo(); return; }
       if (command.type === "delete") {
-        if (editor.selectedVertex) editor.dispatch({ type: "delete-vertex", annotationId: editor.selectedVertex.annotationId, vertexId: editor.selectedVertex.vertexId });
+        if (editor.selectedVertex) deleteCurrentSelection();
+        else if (vectorTool === "hole" && advanced.canRemoveLastPoint) advanced.removeLastPoint();
+        else if (drawing.canRemoveLastPoint) drawing.removeLastPoint();
         else deleteAnnotations(selectedIds);
         return;
       }
-      if (command.type === "finish-draft") {
-        if (vectorTool === "hole") advanced.finishHole();
-        else drawing.finishDraft();
-        return;
-      }
+      if (command.type === "finish-draft") { finishActiveDraft(); return; }
       if (command.type === "escape") {
-        drawing.cancelDraft(); advanced.cancel(); interactions.cancel(); setVectorTool(null);
+        cancelActiveDraft(); interactions.cancel(); setVectorTool(null); setAddToSelection(false);
         if (tool !== "select") setTool("select"); else editor.dispatch({ type: "clear-selection" });
         return;
       }
@@ -582,11 +621,86 @@ export function CanonicalEditorWorkbench() {
   const touchRadius = screenPixelsToImageUnits(22, imageSize, viewport.layout.width);
   const boxTouchRadius = screenPixelsToImageUnits(28, imageSize, viewport.layout.width);
   const boxRotationTouchRadius = screenPixelsToImageUnits(20, imageSize, viewport.layout.width);
-  const canvasCursor = panning ? (touch.navigating ? "grabbing" : "grab") : vectorEditing || !selecting ? "crosshair" : "default";
+  const guideUnit = screenPixelsToImageUnits(1, imageSize, viewport.layout.width);
+  const guideLabelWidth = 132 * guideUnit;
+  const guideLabelHeight = 22 * guideUnit;
+  const guideLabelX = cursorPoint ? Math.max(0, Math.min(imageSize.width - guideLabelWidth, cursorPoint.x + 9 * guideUnit)) : 0;
+  const guideLabelY = cursorPoint ? Math.max(0, Math.min(imageSize.height - guideLabelHeight, cursorPoint.y + 9 * guideUnit)) : 0;
+  const canvasCursor = panning ? (touch.navigating || mousePanning ? "grabbing" : "grab") : vectorEditing || !selecting ? "crosshair" : "default";
   const overlay = <>
     <DrawingDraftLayer draft={drawing.draft} color={activeColor} lineThickness={lineThickness} />
     <AdvancedVectorDraftLayer draft={advanced.draft} color={activeColor} lineThickness={lineThickness} />
+    {coordinatesGuide && cursorPoint && <g className="coordinate-guide" pointerEvents="none">
+      <line x1={cursorPoint.x} y1={0} x2={cursorPoint.x} y2={imageSize.height} stroke="rgba(255,255,255,.82)" strokeWidth={guideUnit} vectorEffect="non-scaling-stroke" />
+      <line x1={0} y1={cursorPoint.y} x2={imageSize.width} y2={cursorPoint.y} stroke="rgba(255,255,255,.82)" strokeWidth={guideUnit} vectorEffect="non-scaling-stroke" />
+      <g transform={`translate(${guideLabelX} ${guideLabelY})`}>
+        <rect width={guideLabelWidth} height={guideLabelHeight} rx={4 * guideUnit} fill="rgba(12,15,14,.86)" stroke="rgba(139,227,189,.9)" strokeWidth={guideUnit} />
+        <text x={7 * guideUnit} y={15 * guideUnit} fill="#fff" fontSize={11 * guideUnit} fontFamily="system-ui, sans-serif">X {Math.round(cursorPoint.x)} · Y {Math.round(cursorPoint.y)}</text>
+      </g>
+    </g>}
   </>;
+
+  function routePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
+    if ((panning && event.button === 0) || event.button === 1) {
+      event.preventDefault();
+      mousePanRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+      setMousePanning(true);
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      return;
+    }
+    if (coordinatesGuide) setCursorPoint(clientPointToImage(event.currentTarget, event.clientX, event.clientY, imageSize));
+    if (vectorEditing) advanced.onPointerDown(event);
+    else if (selecting) interactions.selectAtCanvas(event);
+    else drawing.onPointerDown(event);
+  }
+
+  function routePointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    const pan = mousePanRef.current;
+    if (pan?.pointerId === event.pointerId) {
+      const dx = event.clientX - pan.x;
+      const dy = event.clientY - pan.y;
+      if (dx || dy) viewport.panBy(dx, dy);
+      pan.x = event.clientX;
+      pan.y = event.clientY;
+      return;
+    }
+    if (coordinatesGuide && event.pointerType !== "touch") setCursorPoint(clientPointToImage(event.currentTarget, event.clientX, event.clientY, imageSize));
+    if (vectorEditing) advanced.onPointerMove(event);
+    else if (selecting) interactions.moveCanvasSelection(event);
+    else drawing.onPointerMove(event);
+  }
+
+  function routePointerUp(event: ReactPointerEvent<SVGSVGElement>) {
+    const pan = mousePanRef.current;
+    if (pan?.pointerId === event.pointerId) {
+      mousePanRef.current = null;
+      setMousePanning(false);
+      return;
+    }
+    if (vectorEditing) advanced.onPointerUp(event);
+    else if (selecting) interactions.finishCanvasSelection(event);
+    else drawing.onPointerUp(event);
+  }
+
+  function routePointerCancel() {
+    mousePanRef.current = null;
+    setMousePanning(false);
+    if (vectorEditing) advanced.cancel();
+    else if (selecting) interactions.cancel();
+    else drawing.cancelDraft();
+  }
+
+  function finishWithContextMenu(event: ReactMouseEvent<SVGSVGElement>) {
+    event.preventDefault();
+    if ((vectorTool === "hole" && advanced.canFinish) || drawing.canFinish) finishActiveDraft();
+  }
+
+  function finishWithDoubleClick(event: ReactMouseEvent<SVGSVGElement>) {
+    if ((vectorTool === "hole" && advanced.canFinish) || drawing.canFinish) {
+      event.preventDefault();
+      finishActiveDraft();
+    }
+  }
 
   const chromeProps = {
     projectName,
@@ -602,6 +716,12 @@ export function CanonicalEditorWorkbench() {
     tool,
     vectorTool,
     snapEnabled,
+    touchMode: touch.touchMode,
+    addToSelection,
+    coordinatesGuide,
+    canFinishDraft: vectorTool === "hole" ? advanced.canFinish : drawing.canFinish,
+    canRemoveDraftPoint: vectorTool === "hole" ? advanced.canRemoveLastPoint : drawing.canRemoveLastPoint,
+    hasDraft: drawing.hasDraft || advanced.hasDraft,
     canSimplify: Boolean(activePolygon),
     canDuplicate: Boolean(activePolygon),
     canMerge: selectedPolygons.length >= 2,
@@ -626,9 +746,14 @@ export function CanonicalEditorWorkbench() {
     onDuplicate: duplicateSelected,
     onMerge: mergeSelected,
     onToggleSnap: () => setSnapEnabled((value) => !value),
+    onToggleCoordinatesGuide: () => { setCoordinatesGuide((value) => !value); setCursorPoint(null); },
+    onToggleMultiSelect: () => { setAddToSelection((value) => !value); editor.dispatch({ type: "select-vertex", vertex: null }); },
+    onFinishDrawing: finishActiveDraft,
+    onRemoveLastPoint: removeLastDraftPoint,
+    onCancelDrawing: cancelActiveDraft,
     onUndo: () => editor.undo(),
     onRedo: () => editor.redo(),
-    onDelete: () => deleteAnnotations(selectedIds),
+    onDelete: deleteCurrentSelection,
     onClearAnnotations: clearAllAnnotations,
     onSelectAllAnnotations: selectAllActiveAnnotations,
     onStrokeChange: setStrokePx,
@@ -717,10 +842,13 @@ export function CanonicalEditorWorkbench() {
                   onPointerMoveCapture={touch.onPointerMoveCapture}
                   onPointerUpCapture={touch.onPointerUpCapture}
                   onPointerCancelCapture={touch.onPointerCancelCapture}
-                  onPointerDown={vectorEditing ? advanced.onPointerDown : selecting ? interactions.selectAtCanvas : drawing.onPointerDown}
-                  onPointerMove={vectorEditing ? advanced.onPointerMove : selecting ? interactions.moveCanvasSelection : drawing.onPointerMove}
-                  onPointerUp={vectorEditing ? advanced.onPointerUp : selecting ? interactions.finishCanvasSelection : drawing.onPointerUp}
-                  onPointerCancel={vectorEditing ? advanced.cancel : selecting ? interactions.cancel : drawing.cancelDraft}
+                  onPointerDown={routePointerDown}
+                  onPointerMove={routePointerMove}
+                  onPointerUp={routePointerUp}
+                  onPointerCancel={routePointerCancel}
+                  onPointerLeave={() => setCursorPoint(null)}
+                  onContextMenu={finishWithContextMenu}
+                  onDoubleClick={finishWithDoubleClick}
                   onBeginAnnotationDrag={selecting ? interactions.beginAnnotationDrag : noopAnnotation}
                   onMoveAnnotation={selecting ? interactions.moveAnnotation : noopElement}
                   onFinishAnnotation={selecting ? interactions.finishAnnotation : noopElement}
