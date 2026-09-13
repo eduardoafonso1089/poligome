@@ -59,19 +59,35 @@ async function select(page, id) {
   await page.waitForTimeout(60);
 }
 async function count(page) { return page.locator("[data-annotation-id]").count(); }
+async function ids(page) { return page.locator("[data-annotation-id]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-annotation-id")).filter(Boolean)); }
 async function drawPolygon(page, points) {
-  const beforeIds = await page.locator("[data-annotation-id]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-annotation-id")));
+  const beforeIds = await ids(page);
   await (await button(page, /Polígono por pontos \(P\)|Polygon/i)).tap();
   const { box } = await canvas(page);
   for (const [x, y] of points) {
     const point = p(box, x, y);
     await page.touchscreen.tap(point.x, point.y);
+    await page.waitForTimeout(20);
   }
-  await (await button(page, /^Concluir$|^Finish$/i)).tap();
+  const finish = page.getByRole("button", { name: /^Concluir$|^Finish$/i }).first();
+  await finish.waitFor({ state: "visible", timeout: 8000 });
+  if (await finish.isDisabled()) throw new Error("polygon Finish remained disabled after touch points");
+  await finish.tap();
   await page.waitForTimeout(70);
-  const afterIds = await page.locator("[data-annotation-id]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-annotation-id")));
-  const id = afterIds.find((item) => item && !beforeIds.includes(item));
+  const afterIds = await ids(page);
+  const id = afterIds.find((item) => !beforeIds.includes(item));
   if (!id) throw new Error("polygon not created");
+  return id;
+}
+async function drawBox(page, cdp, from = [.56, .56], to = [.70, .69]) {
+  const beforeIds = await ids(page);
+  await (await button(page, /Caixa \(B\)|Box \(B\)/i)).tap();
+  const { box } = await canvas(page);
+  await touchDrag(cdp, p(box, from[0], from[1]), p(box, to[0], to[1]), 10);
+  await page.waitForTimeout(80);
+  const afterIds = await ids(page);
+  const id = afterIds.find((item) => !beforeIds.includes(item));
+  if (!id) throw new Error("box not created");
   return id;
 }
 
@@ -128,7 +144,7 @@ try {
     await page.waitForTimeout(50);
     const decreased = await readZoom();
     if (!(decreased < increased)) throw new Error(`${increased} -> ${decreased}`);
-    await (await button(page, /Ajustar imagem|Fit image|Fit/i)).tap();
+    await (await button(page, /Centralizar e ajustar|Ajustar a imagem|Fit image|Fit/i)).tap();
     await page.waitForTimeout(50);
     const fitted = await readZoom();
     if (!Number.isFinite(fitted) || fitted <= 0) throw new Error(`fit=${fitted}`);
@@ -159,7 +175,7 @@ try {
 
   await check("Snap toggles on mobile", async () => {
     await loadDemo(page);
-    const snap = await button(page, /snap/i);
+    const snap = await button(page, /Encaixe|Snap/i);
     const before = await snap.getAttribute("aria-pressed");
     await snap.tap();
     const after = await snap.getAttribute("aria-pressed");
@@ -168,7 +184,7 @@ try {
 
   await check("Simplify changes polygon geometry on mobile", async () => {
     await loadDemo(page);
-    const id = await drawPolygon(page, [[.55,.55],[.60,.55],[.65,.55],[.65,.68],[.60,.68],[.55,.68]]);
+    const id = await drawPolygon(page, [[.56,.52],[.63,.52],[.70,.52],[.70,.67],[.63,.67],[.56,.67]]);
     await select(page, id);
     const path = page.locator(`[data-annotation-id="${id}"] path`).first();
     const before = await path.getAttribute("d");
@@ -191,13 +207,15 @@ try {
   await check("Merge unions two mobile-selected overlapping polygons", async () => {
     await loadDemo(page);
     const first = await drawPolygon(page, [[.55,.58],[.68,.58],[.68,.72],[.55,.72]]);
-    await drawPolygon(page, [[.62,.63],[.75,.63],[.75,.77],[.62,.77]]);
+    const second = await drawPolygon(page, [[.62,.63],[.75,.63],[.75,.77],[.62,.77]]);
     const before = await count(page);
     await (await button(page, /Selecionar e mover \(V\)|Select/i)).tap();
     const multi = await button(page, /Selecionar várias|Select multiple/i);
     await multi.tap();
     await page.locator(`[data-annotation-id="${first}"]`).tap({ force: true });
-    await (await button(page, /Unir polígonos selecionados|Merge/i)).tap();
+    await page.locator(`[data-annotation-id="${second}"]`).tap({ force: true });
+    const merge = await button(page, /Unir polígonos selecionados|Merge/i);
+    await merge.tap();
     await page.waitForTimeout(90);
     const after = await count(page);
     if (after !== before - 1) throw new Error(`${before} -> ${after}`);
@@ -205,8 +223,9 @@ try {
 
   await check("Box resize handle works with touch", async () => {
     await loadDemo(page);
-    await select(page, "demo-a4");
-    const group = page.locator('[data-annotation-id="demo-a4"]').first();
+    const id = await drawBox(page, cdp);
+    await select(page, id);
+    const group = page.locator(`[data-annotation-id="${id}"]`).first();
     const rect = group.locator("rect").first();
     const before = await rect.evaluate((node) => Number(node.getAttribute("width")));
     const handle = group.locator(".box-resize-handle.se").first();
