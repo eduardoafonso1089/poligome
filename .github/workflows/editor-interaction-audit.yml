@@ -31,6 +31,8 @@ jobs:
           for i in {1..40}; do curl -LfsS http://127.0.0.1:4174/annotate/ >/dev/null && exit 0; sleep 1; done
           cat /tmp/poligome-audit-server.log
           exit 1
+      - name: Audit real Demo entry flow
+        run: node scripts/demo-entry-audit.mjs
       - name: Audit desktop and mobile interactions
         run: node scripts/run-editor-interaction-audit.mjs
       - name: Audit mobile toolbar responsiveness
