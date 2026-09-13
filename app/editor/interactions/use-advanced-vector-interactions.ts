@@ -102,7 +102,10 @@ export function useAdvancedVectorInteractions({ svgRef, imageSize, tool, activeP
 
   const onPointerDown = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
     if (!tool || !activePolygon || event.button !== 0) return;
-    if (tool !== "transform" && event.target !== event.currentTarget) return;
+    // During an advanced vector mode the canvas router has already decided that
+    // this gesture belongs to this hook. The original target may still be a
+    // rendered annotation/handle, so rejecting non-SVG targets made Hole, Split
+    // and Reshape silently ignore valid gestures over the polygon itself.
     const point = pointFor(event, tool === "split" || tool === "reshape");
     if (!point) return;
     event.currentTarget.setPointerCapture?.(event.pointerId);
