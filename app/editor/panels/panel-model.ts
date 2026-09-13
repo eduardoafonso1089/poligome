@@ -3,13 +3,28 @@ import type { EditorAnnotation } from "../models/annotation-model";
 
 export const UNLABELED_ID = "unlabeled";
 
+export function reorderItemById<T extends { id: string }>(
+  items: T[],
+  sourceId: string,
+  targetId: string,
+  position: "before" | "after",
+): T[] {
+  if (sourceId === targetId) return items;
+  const sourceIndex = items.findIndex((item) => item.id === sourceId);
+  if (sourceIndex < 0 || !items.some((item) => item.id === targetId)) return items;
+  const next = [...items];
+  const [moved] = next.splice(sourceIndex, 1);
+  const targetIndex = next.findIndex((item) => item.id === targetId);
+  if (targetIndex < 0) return items;
+  next.splice(targetIndex + (position === "after" ? 1 : 0), 0, moved);
+  return next;
+}
+
 export function moveItemById<T extends { id: string }>(items: T[], id: string, delta: -1 | 1): T[] {
   const index = items.findIndex((item) => item.id === id);
   const target = index + delta;
   if (index < 0 || target < 0 || target >= items.length) return items;
-  const next = [...items];
-  [next[index], next[target]] = [next[target], next[index]];
-  return next;
+  return reorderItemById(items, id, items[target].id, delta < 0 ? "before" : "after");
 }
 
 export function renameLabel(labels: Label[], id: string, name: string): Label[] {
