@@ -35,6 +35,8 @@ test("canonical workbench still composes the refactored subsystems", async () =>
     "EditorManagementPanels",
     "PreRefactorTopbar",
     "PreRefactorToolbar",
+    "DemoTutorialChrome",
+    "DemoTutorialOverlay",
   ]) assert.ok(source.includes(token), `workbench lost canonical subsystem: ${token}`);
 });
 
@@ -42,6 +44,7 @@ test("restored presentation does not take ownership of canonical editor state", 
   const sources = await Promise.all([
     read("app/editor/presentation/pre-refactor-chrome.tsx"),
     read("app/editor/panels/editor-management-panels.tsx"),
+    read("app/editor/demo/pre-refactor-demo-tutorial.tsx"),
   ]);
   for (const source of sources) {
     for (const token of forbiddenPresentationImports) {
@@ -51,6 +54,10 @@ test("restored presentation does not take ownership of canonical editor state", 
   const panels = sources[1];
   assert.match(panels, /onMoveAsset:/, "image ordering must remain callback-driven from presentation");
   assert.ok(!panels.includes("setAssets("), "presentation must not own the canonical asset collection");
+
+  const demo = sources[2];
+  assert.ok(!demo.includes("useState("), "Demo presentation must not own the walkthrough state machine");
+  assert.ok(!demo.includes("replaceAnnotations("), "Demo presentation must not mutate canonical annotations");
 });
 
 test("state and panel models remain framework-independent", async () => {
