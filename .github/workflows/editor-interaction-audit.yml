@@ -37,6 +37,8 @@ jobs:
         run: node scripts/run-editor-interaction-audit.mjs
       - name: Audit mobile toolbar responsiveness
         run: node scripts/mobile-toolbar-layout-audit.mjs
+      - name: Diagnose delete routing
+        run: node scripts/delete-interaction-diagnostic.mjs
       - name: Audit advanced geometry interactions
         run: node scripts/editor-advanced-interaction-audit.mjs
       - name: Upload audit artifacts
