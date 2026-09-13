@@ -5,7 +5,7 @@ const runtimeUrl = new URL("./.demo-entry-audit-runtime.mjs", import.meta.url);
 let source = await fs.readFile(sourceUrl, "utf8");
 
 const oldPress = `async function press(page, locator, touch) {\n  await locator.scrollIntoViewIfNeeded().catch(() => undefined);\n  if (touch) await locator.tap(); else await locator.click();\n}`;
-const newPress = `async function press(page, locator, touch) {\n  await locator.scrollIntoViewIfNeeded().catch(() => undefined);\n  if (touch) {\n    await locator.tap();\n    // React commits the tool first and clears the tutorial tool prompt in a follow-up effect.\n    // Wait one short UI frame so the audit observes the same state a person sees after the tap.\n    await page.waitForTimeout(120);\n  } else {\n    await locator.click();\n  }\n}`;
+const newPress = `async function press(page, locator, touch) {\n  await locator.scrollIntoViewIfNeeded().catch(() => undefined);\n  if (touch) await locator.tap(); else await locator.click();\n  // Tool selection is committed first and the tutorial prompt is cleared by a\n  // follow-up React effect. Observe the post-effect state a person sees, not\n  // the same JavaScript tick as the click/tap.\n  await page.waitForTimeout(120);\n}`;
 
 if (!source.includes(oldPress)) {
   throw new Error("Demo audit press helper changed; update this runner instead of silently weakening synchronization.");
