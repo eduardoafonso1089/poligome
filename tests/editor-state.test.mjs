@@ -71,3 +71,18 @@ test('annotation deletion prunes selection', () => {
   assert.deepEqual(state.annotations.map(annotation=>annotation.id),['q']);
   assert.equal(state.selection.selected,null);
 });
+
+test('incremental imports preserve an active polygon edit and its undo baseline', () => {
+  const incoming={id:'loaded',asset:'other-image',label:'weed',type:'point',x:50,y:50};
+  let state=createEditorState([polygon]);
+  state=editorReducer(state,{type:'select-vertex',vertex:{annotationId:'p',vertexId:'p:v1'}});
+  state=editorReducer(state,{type:'begin-gesture'});
+  state=editorReducer(state,{type:'update-vertex',annotationId:'p',vertexId:'p:v1',point:{x:120,y:20}});
+  state=editorReducer(state,{type:'append-annotations',annotations:[incoming]});
+  assert.deepEqual(state.selection.selected,'p');
+  assert.deepEqual(state.selectedVertex,{annotationId:'p',vertexId:'p:v1'});
+  state=editorReducer(state,{type:'commit-gesture'});
+  state=editorReducer(state,{type:'undo'});
+  assert.deepEqual(state.annotations.map(annotation=>annotation.id),['p','loaded']);
+  assert.deepEqual([state.annotations[0].vertices[1].x,state.annotations[0].vertices[1].y],[100,10]);
+});

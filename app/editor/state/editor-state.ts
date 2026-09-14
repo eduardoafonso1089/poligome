@@ -28,6 +28,7 @@ export type EditorState = {
 
 export type EditorAction =
   | { type: "replace-annotations"; annotations: EditorAnnotation[]; markSaved?: boolean }
+  | { type: "append-annotations"; annotations: EditorAnnotation[]; markSaved?: boolean }
   | { type: "add-annotation"; annotation: EditorAnnotation; select?: boolean }
   | { type: "delete-annotations"; ids: string[] }
   | { type: "replace-annotations-batch"; removeIds: string[]; annotations: EditorAnnotation[]; selectIds?: string[] }
@@ -124,6 +125,24 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         gesture: null,
         saved: action.markSaved ?? true,
       };
+
+    case "append-annotations": {
+      if (!action.annotations.length) return { ...state, saved: action.markSaved ?? state.saved };
+      const existingIds = new Set(state.annotations.map((annotation) => annotation.id));
+      const additions = action.annotations.filter((annotation) => !existingIds.has(annotation.id));
+      if (!additions.length) return state;
+      // Imports arrive incrementally. Appending must not reset an active edit,
+      // selection or undo gesture merely because another image finished loading.
+      if (state.gesture) {
+        return {
+          ...state,
+          annotations: [...state.annotations, ...additions],
+          gesture: { ...state.gesture, annotations: [...state.gesture.annotations, ...additions] },
+          saved: action.markSaved ?? false,
+        };
+      }
+      return { ...state, annotations: [...state.annotations, ...additions], saved: action.markSaved ?? false };
+    }
 
     case "add-annotation": {
       const next = snapshot(state);

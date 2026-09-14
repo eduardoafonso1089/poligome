@@ -416,19 +416,22 @@ export function CanonicalEditorWorkbench() {
     resetInteractionState();
   }
 
-  function applyCocoImport(result: { labels: Label[]; annotations: EditorAnnotation[]; message: string }) {
+  function applyCocoImport(result: { labels: Label[]; annotations: EditorAnnotation[]; append?: boolean; message: string }) {
     setLabels(result.labels);
     if (!result.labels.some((label) => label.id === activeLabel)) setActiveLabel(result.labels[0]?.id ?? EMPTY_LABELS[0].id);
-    editor.replaceAnnotations(result.annotations, false);
-    resetTransientVisibility();
-    resetDemoTutorial();
+    if (result.append) editor.appendAnnotations(result.annotations, false);
+    else editor.replaceAnnotations(result.annotations, false);
     setSessionDirty(true);
     setMessage(result.message);
-    drawing.cancelDraft();
-    advanced.cancel();
-    setVectorTool(null);
-    setTool("select");
-    setAddToSelection(false);
+    if (!result.append) {
+      resetTransientVisibility();
+      resetDemoTutorial();
+      drawing.cancelDraft();
+      advanced.cancel();
+      setVectorTool(null);
+      setTool("select");
+      setAddToSelection(false);
+    }
   }
 
   function chooseTool(next: DrawingTool) {

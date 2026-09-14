@@ -83,7 +83,7 @@ type CocoImportControlProps = {
   language?: Language;
   disabled?: boolean;
   showTrigger?: boolean;
-  onImported: (result: { labels: Label[]; annotations: EditorAnnotation[]; message: string }) => void;
+  onImported: (result: { labels: Label[]; annotations: EditorAnnotation[]; append?: boolean; message: string }) => void;
 };
 
 export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlProps>(function CocoImportControl({
@@ -248,7 +248,8 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
         // Apply what has loaded so far, then yield so the browser stays responsive.
         onImported({
           labels: nextLabels,
-          annotations: [...annotations, ...importedAnnotations],
+          annotations: chunkResult.annotations,
+          append: true,
           message: `${importedAnnotations.length} ${copy.annotationsToLoad}${unmatched ? ` · ${unmatched}` : ""}.`,
         });
         await afterNextPaint();
@@ -258,13 +259,15 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
       }
       onImported({
         labels: nextLabels,
-        annotations: [...annotations, ...importedAnnotations],
+        annotations: [],
+        append: true,
         message: `${importedAnnotations.length} ${copy.annotationsToLoad}${unmatched ? ` · ${unmatched}` : ""}.`,
       });
     } catch (error) {
       onImported({
         labels: nextLabels,
-        annotations: [...annotations, ...importedAnnotations],
+        annotations: [],
+        append: true,
         message: translateErrorCode(error, copy, copy.projectOpenError),
       });
     } finally {
