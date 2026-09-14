@@ -8,7 +8,10 @@ test('straight vertices build a cursor perpendicular to their actual segment', (
   const [normal] = vertexCursorDirections(vertices([[0, 0], [100, 35]]), 0, true);
   assert.ok(Math.abs(normal.x + 0.33) < 0.01);
   assert.ok(Math.abs(normal.y - 0.94) < 0.01);
-  assert.match(vertexMoveCursor(vertices([[0, 0], [100, 35]]), 0, true), /data:image\/svg\+xml/);
+  const cursor = vertexMoveCursor(vertices([[0, 0], [100, 35]]), 0, true);
+  assert.match(cursor, /data:image\/svg\+xml/);
+  assert.match(decodeURIComponent(cursor), /stroke="white"/);
+  assert.doesNotMatch(decodeURIComponent(cursor), /stroke="#111"/);
 });
 
 test('corners build a double arrow along the angle bisector', () => {
