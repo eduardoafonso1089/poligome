@@ -614,31 +614,39 @@ export function CanonicalEditorWorkbench() {
   }
 
   function simplifySelected() {
-    if (!activePolygon) return;
+    if (!selectedPolygons.length) return;
     const tolerance = screenPixelsToImageUnits(4, imageSize, viewport.layout.width);
-    const simplified = simplifyPolygonAnnotation(activePolygon, tolerance);
-    if (simplified === activePolygon) return;
-    editor.dispatch({ type: "replace-annotation", annotation: simplified });
+    // Simplify every selected polygon; keep only the ones that actually changed.
+    const simplified = selectedPolygons
+      .map((polygon) => simplifyPolygonAnnotation(polygon, tolerance))
+      .filter((polygon, index) => polygon !== selectedPolygons[index]);
+    if (!simplified.length) return;
+    editor.dispatch({ type: "replace-annotations-by-id", annotations: simplified });
     setMessage(copy.toastSimplified);
   }
 
-  function duplicateSelected() {
-    if (!activePolygon) return;
+  function duplicatePolygon(source: Extract<EditorAnnotation, { type: "polygon" }>): EditorAnnotation {
     const id = makeId("copy");
     const offset = screenPixelsToImageUnits(22, imageSize, viewport.layout.width);
-    const xs = activePolygon.vertices.map((vertex) => vertex.x);
-    const ys = activePolygon.vertices.map((vertex) => vertex.y);
+    const xs = source.vertices.map((vertex) => vertex.x);
+    const ys = source.vertices.map((vertex) => vertex.y);
     let dx = Math.max(...xs) + offset <= imageSize.width ? offset : -offset;
     let dy = Math.max(...ys) + offset <= imageSize.height ? offset : -offset;
     if (Math.min(...xs) + dx < 0) dx = 0;
     if (Math.min(...ys) + dy < 0) dy = 0;
-    const duplicate: EditorAnnotation = {
-      ...activePolygon,
+    return {
+      ...source,
       id,
-      vertices: activePolygon.vertices.map((vertex, index) => ({ id: `${id}:outer:v${index}`, x: vertex.x + dx, y: vertex.y + dy })),
-      holes: activePolygon.holes.map((hole, holeIndex) => hole.map((vertex, vertexIndex) => ({ id: `${id}:hole-${holeIndex}:v${vertexIndex}`, x: vertex.x + dx, y: vertex.y + dy }))),
+      vertices: source.vertices.map((vertex, index) => ({ id: `${id}:outer:v${index}`, x: vertex.x + dx, y: vertex.y + dy })),
+      holes: source.holes.map((hole, holeIndex) => hole.map((vertex, vertexIndex) => ({ id: `${id}:hole-${holeIndex}:v${vertexIndex}`, x: vertex.x + dx, y: vertex.y + dy }))),
     };
-    editor.addAnnotation(duplicate, true);
+  }
+
+  function duplicateSelected() {
+    if (!selectedPolygons.length) return;
+    // Duplicate every selected polygon in one undo step and select the copies.
+    const duplicates = selectedPolygons.map(duplicatePolygon);
+    editor.dispatch({ type: "replace-annotations-batch", removeIds: [], annotations: duplicates, selectIds: duplicates.map((duplicate) => duplicate.id) });
     setMessage(copy.toastDuplicated);
   }
 
@@ -849,8 +857,8 @@ export function CanonicalEditorWorkbench() {
     canFinishDraft: vectorTool === "hole" ? advanced.canFinish : drawing.canFinish,
     canRemoveDraftPoint: vectorTool === "hole" ? advanced.canRemoveLastPoint : drawing.canRemoveLastPoint,
     hasDraft: drawing.hasDraft || advanced.hasDraft,
-    canSimplify: Boolean(activePolygon),
-    canDuplicate: Boolean(activePolygon),
+    canSimplify: selectedPolygons.length >= 1,
+    canDuplicate: selectedPolygons.length >= 1,
     canMerge: selectedPolygons.length >= 2,
     canEditPolygon: Boolean(activePolygon),
     canUndo: editor.history.length > 0,
@@ -884,8 +892,8 @@ export function CanonicalEditorWorkbench() {
     onClearAnnotations: clearAllAnnotations,
     onSelectAllAnnotations: selectAllActiveAnnotations,
     onStrokeChange: setStrokePx,
-    onZoomOut: () => viewport.zoomBy(-10),
-    onZoomIn: () => viewport.zoomBy(10),
+    onZoomOut: () => viewport.zoomByRatio(1 / 1.1),
+    onZoomIn: () => viewport.zoomByRatio(1.1),
     onFit: () => viewport.zoomTo(92),
     onPreviousImage: () => stepImage(-1),
     onNextImage: () => stepImage(1),

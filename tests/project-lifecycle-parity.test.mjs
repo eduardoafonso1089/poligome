@@ -21,7 +21,8 @@ test('polygon duplicate gets a new annotation id and fresh vertex ids', () => {
   assert.match(workbench, /const id = makeId\("copy"\)/);
   assert.match(workbench, /id: `\$\{id\}:outer:v\$\{index\}`/);
   assert.match(workbench, /id: `\$\{id\}:hole-\$\{holeIndex\}:v\$\{vertexIndex\}`/);
-  assert.match(workbench, /editor\.addAnnotation\(duplicate, true\)/);
+  assert.match(workbench, /const duplicates = selectedPolygons\.map\(duplicatePolygon\)/);
+  assert.match(workbench, /type: "replace-annotations-batch", removeIds: \[\], annotations: duplicates/);
   assert.match(toolbar, /copy\.duplicate/);
   assert.match(toolbar, /onDuplicate/);
 });

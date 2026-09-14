@@ -63,6 +63,27 @@ test('deleting a minimum polygon vertex removes the annotation', () => {
   assert.equal(state.selectedVertex,null);
 });
 
+test('replace-annotations-by-id updates many annotations in place as one undo step', () => {
+  const a = { id: 'a', asset: 'img', label: 'weed', type: 'polygon', holes: [], vertices: [
+    { id: 'a:v0', x: 0, y: 0 }, { id: 'a:v1', x: 10, y: 0 }, { id: 'a:v2', x: 10, y: 10 }] };
+  const b = { id: 'b', asset: 'img', label: 'weed', type: 'polygon', holes: [], vertices: [
+    { id: 'b:v0', x: 0, y: 0 }, { id: 'b:v1', x: 20, y: 0 }, { id: 'b:v2', x: 20, y: 20 }] };
+  const c = { id: 'c', asset: 'img', label: 'weed', type: 'point', x: 5, y: 5 };
+  let state = createEditorState([a, b, c]);
+  const nextA = { ...a, vertices: [...a.vertices, { id: 'a:v3', x: 0, y: 10 }] };
+  const nextB = { ...b, vertices: [...b.vertices, { id: 'b:v3', x: 0, y: 20 }] };
+  state = editorReducer(state, { type: 'replace-annotations-by-id', annotations: [nextA, nextB] });
+  // Both replaced, order preserved (a, b, c), single history entry.
+  assert.deepEqual(state.annotations.map(annotation => annotation.id), ['a', 'b', 'c']);
+  assert.equal(state.annotations[0].vertices.length, 4);
+  assert.equal(state.annotations[1].vertices.length, 4);
+  assert.equal(state.annotations[2].id, 'c');
+  assert.equal(state.history.length, 1);
+  state = editorReducer(state, { type: 'undo' });
+  assert.equal(state.annotations[0].vertices.length, 3);
+  assert.equal(state.annotations[1].vertices.length, 3);
+});
+
 test('annotation deletion prunes selection', () => {
   const point={id:'q',asset:'img',label:'weed',type:'point',x:50,y:50};
   let state=createEditorState([polygon,point]);

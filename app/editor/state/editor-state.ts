@@ -46,6 +46,7 @@ export type EditorAction =
   | { type: "delete-vertex"; annotationId: string; vertexId: string }
   | { type: "translate-annotations"; ids: string[]; dx: number; dy: number }
   | { type: "replace-annotation"; annotation: EditorAnnotation }
+  | { type: "replace-annotations-by-id"; annotations: EditorAnnotation[] }
   | { type: "undo" }
   | { type: "redo" }
   | { type: "mark-saved" };
@@ -287,6 +288,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       const index = state.annotations.findIndex((annotation) => annotation.id === action.annotation.id);
       if (index < 0) return state;
       const annotations = state.annotations.map((annotation) => annotation.id === action.annotation.id ? action.annotation : annotation);
+      return mutate(state, annotations);
+    }
+
+    case "replace-annotations-by-id": {
+      const replacements = new Map(action.annotations.map((annotation) => [annotation.id, annotation]));
+      if (!state.annotations.some((annotation) => replacements.has(annotation.id))) return state;
+      const annotations = state.annotations.map((annotation) => replacements.get(annotation.id) ?? annotation);
       return mutate(state, annotations);
     }
 
