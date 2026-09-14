@@ -16,7 +16,21 @@ import {
 } from "./coco-document-import";
 
 function afterNextPaint() {
-  return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  return new Promise<void>((resolve) => {
+    let done = false;
+    let fallback = 0;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(fallback);
+      resolve();
+    };
+    // Prefer a paint between chunks while the editor is visible. Browsers pause
+    // requestAnimationFrame in background tabs, so a timer fallback prevents a
+    // progressive import from being stranded when the user briefly leaves it.
+    requestAnimationFrame(() => requestAnimationFrame(finish));
+    fallback = window.setTimeout(finish, 100);
+  });
 }
 
 type PendingCoco = {

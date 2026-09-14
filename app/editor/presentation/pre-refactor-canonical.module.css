@@ -5,7 +5,11 @@
   height: 100% !important;
   min-height: 0 !important;
   margin: 0 !important;
+  /* Reserve the gutter even when a scrollbar is not needed. This keeps the
+     viewport geometry stable at the overflow threshold without showing an
+     inactive scrollbar. */
   overflow: auto !important;
+  scrollbar-gutter: stable both-edges;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;

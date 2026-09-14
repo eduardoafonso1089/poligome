@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { WheelEvent as ReactWheelEvent } from "react";
 import { ViewportController, type ViewportState } from "./viewport-controller";
 import type { Size2D } from "../../lib/editor-viewport";
 
@@ -114,13 +113,20 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
     publish(next);
   }, [initialZoom, publish, syncBeforeGesture]);
 
-  const zoomBy = useCallback((delta: number) => {
+  const viewportCenter = useCallback(() => {
     const scroller = scrollRef.current;
-    const point = scroller
-      ? { x: scroller.getBoundingClientRect().left + scroller.clientWidth / 2, y: scroller.getBoundingClientRect().top + scroller.clientHeight / 2 }
-      : undefined;
-    zoomTo(state.zoom + delta, point);
-  }, [state.zoom, zoomTo]);
+    if (!scroller) return undefined;
+    const rect = scroller.getBoundingClientRect();
+    return { x: rect.left + scroller.clientWidth / 2, y: rect.top + scroller.clientHeight / 2 };
+  }, []);
+
+  const zoomBy = useCallback((delta: number) => {
+    zoomTo(state.zoom + delta, viewportCenter());
+  }, [state.zoom, viewportCenter, zoomTo]);
+
+  const zoomByRatio = useCallback((ratio: number) => {
+    zoomTo(state.zoom * ratio, viewportCenter());
+  }, [state.zoom, viewportCenter, zoomTo]);
 
   const panBy = useCallback((pointerDx: number, pointerDy: number) => {
     syncBeforeGesture();
@@ -140,12 +146,32 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
     ));
   }, [publish, syncBeforeGesture]);
 
-  const onWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
-    if (!event.shiftKey && !event.ctrlKey && !event.metaKey) return;
+  const onWheel = useCallback((event: WheelEvent) => {
     event.preventDefault();
-    const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2;
-    zoomTo(state.zoom * factor, { x: event.clientX, y: event.clientY });
-  }, [state.zoom, zoomTo]);
+    // The wheel owns zooming in the canvas. Modifiers turn it into navigation
+    // so Ctrl is never passed through to the browser's page zoom.
+    if (event.shiftKey) {
+      panBy(-(event.deltaX || event.deltaY), 0);
+      return;
+    }
+    if (event.ctrlKey || event.metaKey) {
+      panBy(0, -event.deltaY);
+      return;
+    }
+    const clampedDelta = Math.max(-120, Math.min(120, event.deltaY));
+    const factor = Math.exp(-clampedDelta * 0.0018);
+    zoomTo(controllerRef.current.snapshot().zoom * factor, { x: event.clientX, y: event.clientY });
+  }, [panBy, zoomTo]);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    // React may attach wheel listeners as passive, which means preventDefault
+    // cannot stop the browser's Ctrl+wheel page zoom. The native listener is
+    // explicitly non-passive so the canvas remains the only zoom target.
+    scroller.addEventListener("wheel", onWheel, { passive: false });
+    return () => scroller.removeEventListener("wheel", onWheel);
+  }, [onWheel]);
 
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
@@ -164,9 +190,9 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
     layout: controllerRef.current.layout(),
     maxZoom: controllerRef.current.maxZoom(),
     onScroll,
-    onWheel,
     zoomTo,
     zoomBy,
+    zoomByRatio,
     panBy,
     pinchPan,
     syncViewport,

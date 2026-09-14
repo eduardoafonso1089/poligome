@@ -884,8 +884,8 @@ export function CanonicalEditorWorkbench() {
     onClearAnnotations: clearAllAnnotations,
     onSelectAllAnnotations: selectAllActiveAnnotations,
     onStrokeChange: setStrokePx,
-    onZoomOut: () => viewport.zoomBy(-10),
-    onZoomIn: () => viewport.zoomBy(10),
+    onZoomOut: () => viewport.zoomByRatio(1 / 1.1),
+    onZoomIn: () => viewport.zoomByRatio(1.1),
     onFit: () => viewport.zoomTo(92),
     onPreviousImage: () => stepImage(-1),
     onNextImage: () => stepImage(1),
@@ -942,7 +942,7 @@ export function CanonicalEditorWorkbench() {
       <section className={`editor ${touch.touchMode ? "touch-editor" : ""}`}>
         <div className="editor-controls"><PreRefactorToolbar {...chromeProps} projectName={/^Demo\b/.test(projectName) ? "Tutorial" : projectName} /></div>
         <div className="stage">
-          <section ref={viewport.scrollRef} onScroll={viewport.onScroll} onWheel={viewport.onWheel} className={exact.stageScroll}>
+          <section ref={viewport.scrollRef} onScroll={viewport.onScroll} className={exact.stageScroll}>
             <div style={{ position: "relative", width: viewport.layout.surfaceWidth, height: viewport.layout.surfaceHeight }}>
               <div style={{ position: "absolute", left: viewport.layout.left, top: viewport.layout.top, width: viewport.layout.width, height: viewport.layout.height }}>
                 {asset?.raster?.mode === "tiled" ? <CogTiledLayer asset={asset} viewport={viewport.state} layout={viewport.layout} copy={copy} onError={setMessage} />
