@@ -299,10 +299,6 @@ export function CanonicalEditorWorkbench() {
     const box = tutorialEditBox(reference, parkSize);
     editor.replaceAnnotations(box ? [box] : [], editor.saved);
     setCurrent("demo-park");
-    setTool("pan");
-    setVectorTool(null);
-    setAddToSelection(false);
-    setCursorPoint(null);
     if (box) editor.setSelection({ selected: box.id, multiSelected: [box.id], anchorId: box.id });
     setDemoTutorialToolPrompt("select");
     setDemoTutorialStep(2);
@@ -312,10 +308,6 @@ export function CanonicalEditorWorkbench() {
   function advanceDemoToModel() {
     editor.replaceAnnotations([], editor.saved);
     setCurrent("demo-rural");
-    setTool("select");
-    setVectorTool(null);
-    setAddToSelection(false);
-    setCursorPoint(null);
     setDemoTutorialToolPrompt(null);
     setDemoTutorialStep(4);
     viewport.zoomTo(92);
@@ -345,13 +337,9 @@ export function CanonicalEditorWorkbench() {
       const drawn = editor.annotations.find((annotation) => annotation.asset === "demo-urban");
       if (drawn && annotationIntersectsDemoRoof(drawn, imageSize)) {
         setDemoTutorialStep(1);
-        setTool("select");
-        setVectorTool(null);
         setMessage(tutorialSuccessTitle[language]);
       } else if (drawn) {
         editor.replaceAnnotations(editor.annotations.filter((annotation) => annotation.id !== drawn.id), false);
-        setTool("select");
-        setVectorTool(null);
         setDemoTutorialToolPrompt("box");
         setMessage(tutorialWrongDraw[language]);
       }
@@ -360,8 +348,6 @@ export function CanonicalEditorWorkbench() {
       const box = editor.annotations.find((annotation) => annotation.id === "demo-b4");
       if (tutorialEditBoxChanged(box, imageSize)) {
         setDemoTutorialStep(3);
-        setTool("select");
-        setVectorTool(null);
       }
     }
   }, [demoTutorialStep, editor.annotations, imageSize.height, imageSize.width, language]);
@@ -802,9 +788,6 @@ export function CanonicalEditorWorkbench() {
       if (suggestion) {
         editor.addAnnotation(suggestion, true);
         setDemoTutorialStep(5);
-        setTool("select");
-        setVectorTool(null);
-        setAddToSelection(false);
       }
       return;
     }
