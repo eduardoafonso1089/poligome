@@ -35,7 +35,7 @@ test('extracted layers remain presentational and expose annotation ids', () => {
 
 test('vertex insertion starts direct manipulation and handles expose their edit cursor', () => {
   assert.match(vertexHandles, /cursor: "copy"/);
-  assert.match(vertexHandles, /cursor: "nwse-resize"/);
+  assert.match(vertexHandles, /vertexMoveCursor\(vertices, index, open\)/);
   assert.match(interactions, /setPointerCapture/);
   assert.match(interactions, /type: "begin-gesture"/);
   assert.match(interactions, /vertexDrag\.current = \{ pointerId: event\.pointerId, annotationId: annotation\.id, vertexId \}/);
