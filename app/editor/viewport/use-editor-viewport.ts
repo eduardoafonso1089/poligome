@@ -114,13 +114,23 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
     publish(next);
   }, [initialZoom, publish, syncBeforeGesture]);
 
-  const zoomBy = useCallback((delta: number) => {
+  const viewportCenter = useCallback(() => {
     const scroller = scrollRef.current;
-    const point = scroller
-      ? { x: scroller.getBoundingClientRect().left + scroller.clientWidth / 2, y: scroller.getBoundingClientRect().top + scroller.clientHeight / 2 }
-      : undefined;
-    zoomTo(state.zoom + delta, point);
-  }, [state.zoom, zoomTo]);
+    if (!scroller) return undefined;
+    const rect = scroller.getBoundingClientRect();
+    return { x: rect.left + scroller.clientWidth / 2, y: rect.top + scroller.clientHeight / 2 };
+  }, []);
+
+  const zoomBy = useCallback((delta: number) => {
+    zoomTo(state.zoom + delta, viewportCenter());
+  }, [state.zoom, viewportCenter, zoomTo]);
+
+  // Multiplicative step keeps the zoom-button feel consistent across the whole
+  // range instead of a coarse fixed jump that is tiny when zoomed in and huge
+  // when zoomed out.
+  const zoomByRatio = useCallback((ratio: number) => {
+    zoomTo(state.zoom * ratio, viewportCenter());
+  }, [state.zoom, viewportCenter, zoomTo]);
 
   const panBy = useCallback((pointerDx: number, pointerDy: number) => {
     syncBeforeGesture();
@@ -143,7 +153,13 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
   const onWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
     if (!event.shiftKey && !event.ctrlKey && !event.metaKey) return;
     event.preventDefault();
-    const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2;
+    // Scale the zoom by the wheel delta instead of a fixed factor. A trackpad
+    // pinch emits a stream of small deltas, so a constant factor per event made
+    // it lurch to the zoom limit; tying the factor to the delta keeps the pinch
+    // smooth while a mouse-wheel notch (large delta) still steps briskly. The
+    // delta is clamped so a single momentum spike can't jump more than ~1.25x.
+    const clampedDelta = Math.max(-120, Math.min(120, event.deltaY));
+    const factor = Math.exp(-clampedDelta * 0.0018);
     zoomTo(state.zoom * factor, { x: event.clientX, y: event.clientY });
   }, [state.zoom, zoomTo]);
 
@@ -167,6 +183,7 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
     onWheel,
     zoomTo,
     zoomBy,
+    zoomByRatio,
     panBy,
     pinchPan,
     syncViewport,
