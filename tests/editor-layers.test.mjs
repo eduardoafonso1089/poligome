@@ -40,3 +40,9 @@ test('vertex insertion starts direct manipulation and handles expose their edit 
   assert.match(interactions, /type: "begin-gesture"/);
   assert.match(interactions, /vertexDrag\.current = \{ pointerId: event\.pointerId, annotationId: annotation\.id, vertexId \}/);
 });
+
+test('vertex drags capture movement at the root until the pointer is released', () => {
+  assert.match(interactions, /svgRef\.current \?\? event\.currentTarget/);
+  assert.match(interactions, /if \(!drag \|\| drag\.pointerId !== event\.pointerId\) return false/);
+  assert.match(interactions, /dispatch\(\{ type: "commit-gesture" \}\);\s+return true/);
+});

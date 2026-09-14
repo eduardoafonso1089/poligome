@@ -840,6 +840,24 @@ export function CanonicalEditorWorkbench() {
     else drawing.cancelDraft();
   }
 
+  function routePointerMoveCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    touch.onPointerMoveCapture(event);
+    if (event.isPropagationStopped()) return;
+    if (interactions.moveVertex(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  function routePointerUpCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    touch.onPointerUpCapture(event);
+    if (event.isPropagationStopped()) return;
+    if (interactions.finishVertex(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
   function finishWithContextMenu(event: ReactMouseEvent<SVGSVGElement>) {
     event.preventDefault();
     if ((vectorTool === "hole" && advanced.canFinish) || drawing.canFinish) finishActiveDraft();
@@ -993,8 +1011,8 @@ export function CanonicalEditorWorkbench() {
                   boxTouchRadius={boxTouchRadius}
                   boxRotationTouchRadius={boxRotationTouchRadius}
                   onPointerDownCapture={touch.onPointerDownCapture}
-                  onPointerMoveCapture={touch.onPointerMoveCapture}
-                  onPointerUpCapture={touch.onPointerUpCapture}
+                  onPointerMoveCapture={routePointerMoveCapture}
+                  onPointerUpCapture={routePointerUpCapture}
                   onPointerCancelCapture={touch.onPointerCancelCapture}
                   onPointerDown={routePointerDown}
                   onPointerMove={routePointerMove}
