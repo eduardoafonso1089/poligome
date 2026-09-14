@@ -12,6 +12,7 @@ test('straight vertices build a cursor perpendicular to their actual segment', (
   assert.match(cursor, /data:image\/svg\+xml/);
   assert.match(decodeURIComponent(cursor), /stroke="white"/);
   assert.match(decodeURIComponent(cursor), /stroke="#111"/);
+  assert.match(decodeURIComponent(cursor), /stroke-width="4"/);
 });
 
 test('corners build a double arrow along the angle bisector', () => {
