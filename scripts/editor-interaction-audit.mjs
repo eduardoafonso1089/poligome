@@ -117,11 +117,11 @@ async function desktop(browser) {
   });
 
   await check("desktop", "Multiple selection is additive", async () => {
-    await (await button(page,/Selecionar e mover \(V\)|Select/i)).click(); const multi=await button(page,/Selecionar várias|Select multiple/i); await multi.click();
-    if(await multi.getAttribute("aria-pressed")!=="true") throw new Error("mode inactive");
-    await page.locator('[data-annotation-id="demo-a1"]').click({force:true}); await page.locator('[data-annotation-id="demo-a2"]').click({force:true});
-    const selected = await page.locator('[data-annotation-id="demo-a1"], [data-annotation-id="demo-a2"]').count(); if(selected!==2) throw new Error("objects missing");
-    const del = page.locator('.drawing-actions').getByRole('button',{name:/Excluir|Delete/i}).last(); if(await del.isDisabled()) throw new Error("selection was not retained");
+    await (await button(page,/Selecionar e mover \(V\)|Select/i)).click();
+    await page.locator('[data-annotation-id="demo-a1"]').click({force:true});
+    await page.locator('[data-annotation-id="demo-a2"]').click({force:true, modifiers:['ControlOrMeta']});
+    await page.waitForTimeout(80);
+    const active = await page.locator('.instance-row.active').count(); if(active!==2) throw new Error(`additive Ctrl/Cmd+click expected 2 selected, got ${active}`);
   });
 
   await check("desktop", "Snap", async () => {

@@ -50,6 +50,7 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
 }, ref) {
   const inputRef = useRef<HTMLInputElement>(null);
   const importingRef = useRef(false);
+  const cancelledRef = useRef(false);
   const selectionTouchedRef = useRef(false);
   const importSelectionRef = useRef<{ geometryTypes: CocoGeometry[]; selectedIndexes: number[] }>({ geometryTypes: [], selectedIndexes: [] });
   const [busy, setBusy] = useState(false);
@@ -95,6 +96,12 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
     setPending(null);
     updateImportSelection([], [], false);
     setTab("categories");
+  }
+
+  // Always dismissable: if a load is running, flag it to stop and close right away.
+  function requestClose() {
+    cancelledRef.current = true;
+    close();
   }
 
   function updateImportSelection(nextGeometryTypes: CocoGeometry[], nextSelectedIndexes: number[], touched = true) {
@@ -148,9 +155,9 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
     const { geometryTypes: selectedGeometryTypes, selectedIndexes: currentSelectedIndexes } = currentImportSelection(pending);
     if (importingRef.current || !currentSelectedIndexes.length || !selectedGeometryTypes.length) return;
     importingRef.current = true;
+    cancelledRef.current = false;
     flushSync(() => {
       setImporting(true);
-      close();
     });
     await afterNextPaint();
     let nextLabels = labels;
@@ -162,6 +169,7 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
       const chunkSize = selectedGeometryTypes.includes("polygon") ? 25 : 500;
 
       for (let offset = 0; offset < selectedAnnotations.length; offset += chunkSize) {
+        if (cancelledRef.current) break;
         const chunk = selectedAnnotations.slice(offset, offset + chunkSize);
         const chunkResult = importCocoDocument(
           { ...pending.document, annotations: chunk },
@@ -180,13 +188,11 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
         });
         await afterNextPaint();
       }
-      const result = { labels: nextLabels, annotations: importedAnnotations, imported: importedAnnotations.length, unmatched };
-    onImported({
-      labels: result.labels,
-      annotations: [...annotations, ...result.annotations],
-      message: `${result.imported} ${copy.annotationsToLoad}${result.unmatched ? ` · ${result.unmatched}` : ""}.`,
+      onImported({
+        labels: nextLabels,
+        annotations: [...annotations, ...importedAnnotations],
+        message: `${importedAnnotations.length} ${copy.annotationsToLoad}${unmatched ? ` · ${unmatched}` : ""}.`,
       });
-      close();
     } catch (error) {
       onImported({
         labels: nextLabels,
@@ -196,6 +202,7 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
     } finally {
       importingRef.current = false;
       setImporting(false);
+      close();
     }
   }
 
@@ -217,11 +224,11 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
       {busy ? `${copy.progress}…` : "COCO"}
     </button>}
 
-    {pending && <div className="modal-backdrop" role="presentation">
-      <section className="sam-modal coco-import-modal" role="dialog" aria-modal="true" aria-busy={importing} aria-labelledby="coco-import-title">
+    {pending && <div className="modal-backdrop" role="presentation" onMouseDown={requestClose}>
+      <section className="sam-modal coco-import-modal" role="dialog" aria-modal="true" aria-busy={importing} aria-labelledby="coco-import-title" onMouseDown={(event) => event.stopPropagation()}>
         <header>
           <div><strong>{copy.chooseAnnotations}</strong><div style={{ fontSize: 13, opacity: .72, marginTop: 4 }}>{copy.chooseAnnotationsHint}</div><div style={{ fontSize: 12, opacity: .6, marginTop: 2 }}>{pending.file.name}</div></div>
-          <button type="button" disabled={importing} onClick={close} aria-label={copy.close}><X size={19} /></button>
+          <button type="button" onClick={requestClose} aria-label={copy.close}><X size={19} /></button>
         </header>
 
         <div className="coco-import-tabs">
@@ -261,7 +268,7 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
         </>}
 
         <footer>
-          <button type="button" disabled={importing} onClick={close}>{copy.cancel}</button>
+          <button type="button" onClick={requestClose}>{copy.cancel}</button>
           <button type="button" disabled={importing || !canImport} onClick={() => void importSelected()}>OK</button>
         </footer>
       </section>

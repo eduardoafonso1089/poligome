@@ -16,7 +16,8 @@ test('destructive panel actions require explicit confirmation', () => {
 });
 
 test('visible delete controls route through confirmation helpers', () => {
-  assert.match(source, /currentAsset && confirmAssetDelete\(currentAsset,/);
+  assert.match(source, /onClick=\{confirmSelectedAssetsDelete\}/);
+  assert.match(source, /confirmAssetDelete\(currentAsset,/);
   assert.match(source, /confirmAnnotationDelete\(activeSelectedIds\)/);
   assert.match(source, /confirmAnnotationDelete\(\[annotation\.id\]\)/);
   assert.match(source, /confirmLabelDelete\(label\)/);

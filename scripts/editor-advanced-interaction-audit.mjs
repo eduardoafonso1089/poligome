@@ -128,9 +128,7 @@ try {
     await drawPolygon(page, [[.48,.62],[.62,.62],[.62,.78],[.48,.78]]);
     const before = await annotationCount(page);
     await (await button(page, /Selecionar e mover \(V\)|Select/i)).click();
-    const multi = await button(page, /Selecionar várias|Select multiple/i);
-    await multi.click();
-    await page.locator(`[data-annotation-id="${first}"]`).click({ force: true });
+    await page.locator(`[data-annotation-id="${first}"]`).click({ force: true, modifiers: ['ControlOrMeta'] });
     const merge = await button(page, /Unir polígonos selecionados|Merge/i);
     await merge.click();
     await page.waitForTimeout(80);

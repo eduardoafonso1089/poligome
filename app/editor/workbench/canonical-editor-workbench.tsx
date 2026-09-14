@@ -861,6 +861,7 @@ export function CanonicalEditorWorkbench() {
     onHome: () => { if (!projectDirty || window.confirm(copy.confirmLeaveHome)) window.location.assign("/"); },
     onNewProject: startNewProject,
     onRenameProject: (name: string) => { setProjectName(name); setSessionDirty(true); },
+    onDemo: () => { if (!projectDirty || window.confirm(copy.replaceUnsavedProject)) void loadDemo(); },
     onOpenProject: () => projectInputRef.current?.click(),
     onImportImages: () => imageInputRef.current?.click(),
     onSaveProject: (mode: ProjectSaveMode) => void saveProject(mode),
