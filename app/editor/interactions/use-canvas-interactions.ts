@@ -18,6 +18,7 @@ export type CanvasInteractionOptions = {
   dispatch: (action: EditorAction) => void;
   makeId: (prefix: string) => string;
   activeAssetId?: string | null;
+  activeAnnotations?: EditorAnnotation[];
   addToSelection?: boolean;
   snap?: { enabled: boolean; tolerance: number; annotations: EditorAnnotation[] };
 };
@@ -38,7 +39,7 @@ function eventPoint(svgRef: RefObject<SVGSVGElement | null>, imageSize: Size2D, 
   return svg ? clientPointToImage(svg, event.clientX, event.clientY, imageSize) : null;
 }
 
-export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, makeId, activeAssetId, addToSelection = false, snap }: CanvasInteractionOptions) {
+export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, makeId, activeAssetId, activeAnnotations, addToSelection = false, snap }: CanvasInteractionOptions) {
   const annotationDrag = useRef<DragState | null>(null);
   const vertexDrag = useRef<VertexDragState | null>(null);
   const boxTransform = useRef<BoxTransformState | null>(null);
@@ -46,7 +47,7 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
   const marqueePointerRef = useRef<number | null>(null);
   const [selectionMarquee, setSelectionMarquee] = useState<SelectionMarquee | null>(null);
 
-  const selectionScope = activeAssetId ? state.annotations.filter((annotation) => annotation.asset === activeAssetId) : state.annotations;
+  const selectionScope = activeAssetId ? activeAnnotations ?? state.annotations.filter((annotation) => annotation.asset === activeAssetId) : state.annotations;
   const selectedIds = state.selection.multiSelected.length ? state.selection.multiSelected : state.selection.selected ? [state.selection.selected] : [];
 
   const toggleOnly = useCallback((event: ReactPointerEvent<SVGElement>, annotationId: string) => {

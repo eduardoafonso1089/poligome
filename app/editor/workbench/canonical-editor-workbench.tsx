@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { Asset, Label } from "../../lib/types";
 import { getCopy, storedLanguage, storedTheme, type Language } from "../../lib/i18n";
@@ -13,6 +13,7 @@ import { CocoImportControl, type CocoImportHandle } from "../import/coco-import-
 import { RasterImportControl, type RasterImportResult } from "../import/raster-import-control";
 import { ExportControls } from "../export/export-controls";
 import { useEditorState } from "../state/use-editor-state";
+import { useAnnotationIndex } from "../state/annotation-index";
 import { useCanvasInteractions } from "../interactions/use-canvas-interactions";
 import { useAdvancedVectorInteractions, type AdvancedVectorResult } from "../interactions/use-advanced-vector-interactions";
 import { EditorCanvas } from "../canvas/editor-canvas";
@@ -48,8 +49,16 @@ import {
 import exact from "../presentation/pre-refactor-canonical.module.css";
 
 const EMPTY_LABELS: Label[] = [{ id: UNLABELED_ID, name: "Sem label", color: "#929a95", key: "" }];
+const EMPTY_ANNOTATIONS: EditorAnnotation[] = [];
 
 type MousePanState = { pointerId: number; x: number; y: number } | null;
+
+function labelsMatch(current: Label[], next: Label[]) {
+  return current === next || (current.length === next.length && current.every((label, index) => {
+    const candidate = next[index];
+    return label.id === candidate?.id && label.name === candidate.name && label.color === candidate.color && label.key === candidate.key;
+  }));
+}
 
 export function CanonicalEditorWorkbench() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -85,6 +94,7 @@ export function CanonicalEditorWorkbench() {
   const demoAnnotationsRef = useRef<EditorAnnotation[]>([]);
   const mousePanRef = useRef<MousePanState>(null);
   const editor = useEditorState();
+  const annotationIndex = useAnnotationIndex(editor.annotations);
   const copy = getCopy(language);
   const asset = assets.find((item) => item.id === current) ?? assets[0] ?? null;
   const imageSize = { width: asset?.width ?? 1, height: asset?.height ?? 1 };
@@ -97,14 +107,17 @@ export function CanonicalEditorWorkbench() {
   }, []);
 
   const activeAssetAnnotations = useMemo(
-    () => asset ? editor.annotations.filter((annotation) => annotation.asset === asset.id) : [],
-    [asset, editor.annotations],
+    () => asset ? annotationIndex.byAsset.get(asset.id) ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS,
+    [asset, annotationIndex.byAsset],
   );
   const visibleAnnotations = useMemo(
     () => activeAssetAnnotations.filter((annotation) => !hiddenAnnotationIds.has(annotation.id) && !hiddenLabelIds.has(annotation.label)),
     [activeAssetAnnotations, hiddenAnnotationIds, hiddenLabelIds],
   );
-  const selectedIds = editor.selection.multiSelected.length ? editor.selection.multiSelected : editor.selection.selected ? [editor.selection.selected] : [];
+  const selectedIds = useMemo(
+    () => editor.selection.multiSelected.length ? editor.selection.multiSelected : editor.selection.selected ? [editor.selection.selected] : [],
+    [editor.selection.multiSelected, editor.selection.selected],
+  );
   const assetById = useMemo(() => new Map(assets.map((item) => [item.id, item])), [assets]);
   const selectedPolygons = useMemo(
     () => editor.annotations.filter((annotation): annotation is Extract<EditorAnnotation, { type: "polygon" }> => selectedIds.includes(annotation.id) && annotation.type === "polygon"),
@@ -115,7 +128,10 @@ export function CanonicalEditorWorkbench() {
   const projectDirty = sessionDirty || !editor.saved;
   const missingImageCount = assets.filter((item) => item.missing).length;
   const snapTolerance = screenPixelsToImageUnits(13, imageSize, viewport.layout.width);
-  const snap = { enabled: snapEnabled, tolerance: snapTolerance, annotations: visibleAnnotations };
+  const snap = useMemo(
+    () => ({ enabled: snapEnabled, tolerance: snapTolerance, annotations: visibleAnnotations }),
+    [snapEnabled, snapTolerance, visibleAnnotations],
+  );
 
   const interactions = useCanvasInteractions({
     svgRef: viewport.canvasRef,
@@ -124,6 +140,7 @@ export function CanonicalEditorWorkbench() {
     dispatch: editor.dispatch,
     makeId,
     activeAssetId: current || null,
+    activeAnnotations: activeAssetAnnotations,
     addToSelection,
     snap,
   });
@@ -418,21 +435,30 @@ export function CanonicalEditorWorkbench() {
   }
 
   function applyCocoImport(result: { labels: Label[]; annotations: EditorAnnotation[]; append?: boolean; message: string }) {
+    if (result.append) {
+      // Import batches are background work: keep pointer/keyboard edits ahead of React's
+      // reconciliation for the next batch.
+      startTransition(() => {
+        setLabels((currentLabels) => labelsMatch(currentLabels, result.labels) ? currentLabels : result.labels);
+        if (!result.labels.some((label) => label.id === activeLabel)) setActiveLabel(result.labels[0]?.id ?? EMPTY_LABELS[0].id);
+        editor.appendAnnotations(result.annotations, false);
+        setSessionDirty(true);
+        setMessage(result.message);
+      });
+      return;
+    }
     setLabels(result.labels);
     if (!result.labels.some((label) => label.id === activeLabel)) setActiveLabel(result.labels[0]?.id ?? EMPTY_LABELS[0].id);
-    if (result.append) editor.appendAnnotations(result.annotations, false);
-    else editor.replaceAnnotations(result.annotations, false);
+    editor.replaceAnnotations(result.annotations, false);
     setSessionDirty(true);
     setMessage(result.message);
-    if (!result.append) {
-      resetTransientVisibility();
-      resetDemoTutorial();
-      drawing.cancelDraft();
-      advanced.cancel();
-      setVectorTool(null);
-      setTool("select");
-      setAddToSelection(false);
-    }
+    resetTransientVisibility();
+    resetDemoTutorial();
+    drawing.cancelDraft();
+    advanced.cancel();
+    setVectorTool(null);
+    setTool("select");
+    setAddToSelection(false);
   }
 
   function chooseTool(next: DrawingTool) {
@@ -922,6 +948,8 @@ export function CanonicalEditorWorkbench() {
         assets={assets}
         currentAssetId={asset?.id ?? ""}
         annotations={editor.annotations}
+        annotationCountByAsset={annotationIndex.countByAsset}
+        annotationCountByLabel={annotationIndex.countByLabel}
         activeAssetAnnotations={activeAssetAnnotations}
         labels={labels}
         activeLabelId={activeLabel}

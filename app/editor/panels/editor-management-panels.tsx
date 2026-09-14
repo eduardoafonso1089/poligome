@@ -22,6 +22,8 @@ type Props = {
   assets: Asset[];
   currentAssetId: string;
   annotations: EditorAnnotation[];
+  annotationCountByAsset: ReadonlyMap<string, number>;
+  annotationCountByLabel: ReadonlyMap<string, number>;
   activeAssetAnnotations: EditorAnnotation[];
   labels: Label[];
   activeLabelId: string;
@@ -60,7 +62,7 @@ function sentenceCase(value: string) { return value.charAt(0) + value.slice(1).t
 
 export function EditorManagementPanels(props: Props) {
   const {
-    assets, currentAssetId, annotations, activeAssetAnnotations, labels, activeLabelId, selection,
+    assets, currentAssetId, annotations, annotationCountByAsset, annotationCountByLabel, activeAssetAnnotations, labels, activeLabelId, selection,
     hiddenAnnotationIds, hiddenLabelIds, copy,
   } = props;
   const [imageSearch, setImageSearch] = useState("");
@@ -109,7 +111,7 @@ export function EditorManagementPanels(props: Props) {
   }, [assets, imageSearch]);
   const selectedIds = selection.multiSelected.length ? selection.multiSelected : selection.selected ? [selection.selected] : [];
   const activeSelectedIds = selectedIds.filter((id) => activeAssetAnnotations.some((annotation) => annotation.id === id));
-  const completed = assets.filter((item) => annotations.some((annotation) => annotation.asset === item.id)).length;
+  const completed = assets.filter((item) => (annotationCountByAsset.get(item.id) ?? 0) > 0).length;
   const currentAsset = assets.find((item) => item.id === currentAssetId) ?? null;
   const allHidden = activeAssetAnnotations.length > 0 && activeAssetAnnotations.every((annotation) => hiddenAnnotationIds.has(annotation.id));
   const labelName = (label: Label) => label.id === UNLABELED_ID ? copy.unlabeled : label.name;
@@ -135,10 +137,10 @@ export function EditorManagementPanels(props: Props) {
   function confirmSelectedAssetsDelete() {
     const selectedAssets = assets.filter((item) => selectedImageIds.has(item.id));
     if (!selectedAssets.length) {
-      if (currentAsset) confirmAssetDelete(currentAsset, annotations.filter((annotation) => annotation.asset === currentAsset.id).length);
+      if (currentAsset) confirmAssetDelete(currentAsset, annotationCountByAsset.get(currentAsset.id) ?? 0);
       return;
     }
-    const annotationCount = annotations.filter((annotation) => selectedImageIds.has(annotation.asset)).length;
+    const annotationCount = selectedAssets.reduce((total, item) => total + (annotationCountByAsset.get(item.id) ?? 0), 0);
     const annotationWarning = annotationCount ? `\n${annotationCount} ${copy.annotations.toLocaleLowerCase()}. ${copy.deleteAnnotationsWarning}` : "";
     if (!window.confirm(`${copy.deleteSelectedAnnotations}: ${selectedAssets.length} ${copy.images.toLocaleLowerCase()}?${annotationWarning}`)) return;
     props.onDeleteAssets(selectedAssets.map((item) => item.id));
@@ -224,7 +226,7 @@ export function EditorManagementPanels(props: Props) {
       <div className="asset-list">
         {filteredAssets.map((item) => {
           const index = assets.findIndex((asset) => asset.id === item.id);
-          const count = annotations.filter((annotation) => annotation.asset === item.id).length;
+          const count = annotationCountByAsset.get(item.id) ?? 0;
           const details = item.width && item.height ? `${item.width} × ${item.height}` : `${count} ${copy.projectAnnotations}`;
           const active = item.id === currentAssetId;
           const selectedImage = selectedImageIds.has(item.id);
@@ -333,7 +335,7 @@ export function EditorManagementPanels(props: Props) {
           {labels.map((label) => {
             const protectedLabel = label.id === UNLABELED_ID;
             const hidden = hiddenLabelIds.has(label.id);
-            const count = annotations.filter((annotation) => annotation.label === label.id).length;
+            const count = annotationCountByLabel.get(label.id) ?? 0;
             return <div key={label.id}>
               <input type="color" value={label.color} disabled={protectedLabel} onChange={(event) => props.onRecolorLabel(label.id, event.target.value)} />
               <input defaultValue={labelName(label)} disabled={protectedLabel} onFocus={() => props.onActiveLabelChange(label.id)} onBlur={(event) => props.onRenameLabel(label.id, event.target.value)} />
