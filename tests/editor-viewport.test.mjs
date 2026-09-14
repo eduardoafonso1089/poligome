@@ -76,6 +76,8 @@ test('wheel zoom scales with the gesture delta and bounds momentum spikes', () =
 
 test('progressive COCO imports can continue after the tab loses animation frames', () => {
   const control = readFileSync(new URL('../app/editor/import/coco-import-control.tsx', import.meta.url), 'utf8');
-  assert.match(control, /requestAnimationFrame\(\(\) => requestAnimationFrame\(finish\)\)/);
+  assert.match(control, /document\.addEventListener\("visibilitychange", resumeWhenVisible\)/);
+  assert.match(control, /document\.removeEventListener\("visibilitychange", resumeWhenVisible\)/);
+  assert.match(control, /if \(document\.visibilityState === "visible"\) queuePaint\(\)/);
   assert.match(control, /window\.setTimeout\(finish, 100\)/);
 });

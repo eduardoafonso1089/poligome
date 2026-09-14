@@ -19,16 +19,35 @@ function afterNextPaint() {
   return new Promise<void>((resolve) => {
     let done = false;
     let fallback = 0;
+    let firstFrame = 0;
+    let secondFrame = 0;
     const finish = () => {
       if (done) return;
       done = true;
       window.clearTimeout(fallback);
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      document.removeEventListener("visibilitychange", resumeWhenVisible);
       resolve();
     };
-    // Prefer a paint between chunks while the editor is visible. Browsers pause
-    // requestAnimationFrame in background tabs, so a timer fallback prevents a
-    // progressive import from being stranded when the user briefly leaves it.
-    requestAnimationFrame(() => requestAnimationFrame(finish));
+    const queuePaint = () => {
+      firstFrame = requestAnimationFrame(() => {
+        secondFrame = requestAnimationFrame(finish);
+      });
+    };
+    const resumeWhenVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      // A hidden tab can have a queued frame or throttled timer. Start a fresh
+      // turn as soon as it returns instead of waiting for either one.
+      window.clearTimeout(fallback);
+      fallback = window.setTimeout(finish, 0);
+      queuePaint();
+    };
+    document.addEventListener("visibilitychange", resumeWhenVisible);
+    if (document.visibilityState === "visible") queuePaint();
+    // Browsers pause animation frames in background tabs. The timeout keeps the
+    // import advancing when allowed and visibilitychange guarantees recovery
+    // immediately when the user returns to the editor.
     fallback = window.setTimeout(finish, 100);
   });
 }
