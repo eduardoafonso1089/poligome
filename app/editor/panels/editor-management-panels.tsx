@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import {
   BarChart3, Check, ClipboardCheck, Eye, EyeOff, FileText, GripVertical,
-  ImagePlus, LoaderCircle, Menu, MoreHorizontal, Palette, PanelLeftClose, PanelLeftOpen,
-  PanelRightClose, PanelRightOpen, Plus, Search, ShieldCheck, Tags, Trash2, WandSparkles, X,
+  ImagePlus, Menu, MoreHorizontal, Palette, PanelLeftClose, PanelLeftOpen,
+  PanelRightClose, PanelRightOpen, Plus, Search, ShieldCheck, Tags, Trash2, X,
 } from "lucide-react";
 import type { Asset, Label } from "../../lib/types";
 import { getCopy } from "../../lib/i18n";
@@ -32,7 +32,6 @@ type Props = {
   loading?: boolean;
   onImportImages?: () => void;
   onImportAnnotations?: () => void;
-  onLoadDemo?: () => void;
   onSelectAsset: (id: string) => void;
   onMoveAsset: (id: string, delta: -1 | 1) => void;
   onDeleteAsset: (id: string) => void;
@@ -209,7 +208,6 @@ export function EditorManagementPanels(props: Props) {
       </div>
       {props.onImportImages && <button type="button" className="import" disabled={props.loading} onClick={props.onImportImages}><ImagePlus size={16} />{copy.importImages}</button>}
       {props.onImportAnnotations && <button type="button" className="import coco-import-action" disabled={props.loading || !assets.length} onClick={props.onImportAnnotations}><FileText size={16} /><span>{sentenceCase(copy.annotations)}</span></button>}
-      {props.onLoadDemo && <button type="button" className="demo-import" disabled={props.loading} onClick={props.onLoadDemo}>{props.loading ? <LoaderCircle className="spin" size={15} /> : <WandSparkles size={15} />}{copy.tryDemo}</button>}
       <label className="search"><Search size={14} /><input aria-label={copy.searchImage} value={imageSearch} onChange={(event) => setImageSearch(event.target.value)} placeholder={copy.searchImage} /></label>
       <div className="progress"><div><span>{copy.progress}</span><b>{completed} {copy.of} {assets.length}</b></div><i><em style={{ width: `${assets.length ? completed / assets.length * 100 : 0}%` }} /></i></div>
       <div className="asset-list">

@@ -919,7 +919,6 @@ export function CanonicalEditorWorkbench() {
         loading={loading}
         onImportImages={() => imageInputRef.current?.click()}
         onImportAnnotations={() => annotationImportRef.current?.open()}
-        onLoadDemo={() => { if (!projectDirty || window.confirm(copy.replaceUnsavedProject)) void loadDemo(); }}
         onSelectAsset={selectAsset}
         onMoveAsset={moveAsset}
         onDeleteAsset={deleteAsset}
