@@ -81,3 +81,10 @@ test('progressive COCO imports can continue after the tab loses animation frames
   assert.match(control, /if \(document\.visibilityState === "visible"\) queuePaint\(\)/);
   assert.match(control, /window\.setTimeout\(finish, 100\)/);
 });
+
+test('COCO geometry conversion runs in a dedicated worker when available', () => {
+  const control = readFileSync(new URL('../app/editor/import/coco-import-control.tsx', import.meta.url), 'utf8');
+  const worker = readFileSync(new URL('../app/editor/import/coco-import.worker.ts', import.meta.url), 'utf8');
+  assert.match(control, /new Worker\(new URL\("\.\/coco-import\.worker\.ts", import\.meta\.url\)/);
+  assert.match(worker, /importCocoDocument\(/);
+});

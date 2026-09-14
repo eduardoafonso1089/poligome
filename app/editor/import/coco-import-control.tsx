@@ -14,6 +14,7 @@ import {
   type CocoDocumentInput,
   type CocoDocumentPlan,
 } from "./coco-document-import";
+import type { CocoImportWorkerRequest, CocoImportWorkerResponse } from "./coco-import.worker";
 
 function afterNextPaint() {
   return new Promise<void>((resolve) => {
@@ -49,6 +50,20 @@ function afterNextPaint() {
     // import advancing when allowed and visibilitychange guarantees recovery
     // immediately when the user returns to the editor.
     fallback = window.setTimeout(finish, 100);
+  });
+}
+
+type WorkerAsset = Pick<Asset, "id" | "name" | "width" | "height">;
+
+function hasWorkerSupport() {
+  return typeof Worker !== "undefined";
+}
+
+function runWorker(worker: Worker, request: CocoImportWorkerRequest) {
+  return new Promise<CocoImportWorkerResponse>((resolve, reject) => {
+    worker.onmessage = ({ data }: MessageEvent<CocoImportWorkerResponse>) => resolve(data);
+    worker.onerror = (event) => reject(event.error ?? new Error(event.message));
+    worker.postMessage(request);
   });
 }
 
@@ -202,18 +217,31 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
     try {
       const sourceAnnotations = pending.document.annotations ?? [];
       const selectedAnnotations = currentSelectedIndexes.flatMap((index) => sourceAnnotations[index] ? [sourceAnnotations[index]] : []);
-      const chunkSize = selectedGeometryTypes.includes("polygon") ? 25 : 500;
+      const chunkSize = selectedGeometryTypes.includes("polygon") ? 100 : 500;
+      const worker = hasWorkerSupport()
+        ? new Worker(new URL("./coco-import.worker.ts", import.meta.url), { type: "module" })
+        : null;
+      const workerAssets: WorkerAsset[] = assets.map(({ id, name, width, height }) => ({ id, name, width, height }));
 
-      for (let offset = 0; offset < selectedAnnotations.length; offset += chunkSize) {
+      try {
+        for (let offset = 0; offset < selectedAnnotations.length; offset += chunkSize) {
         if (cancelledRef.current) break;
         const chunk = selectedAnnotations.slice(offset, offset + chunkSize);
-        const chunkResult = importCocoDocument(
-          { ...pending.document, annotations: chunk },
-          assets,
-          nextLabels,
-          makeId,
-          { geometryTypes: selectedGeometryTypes, unlabeledName: copy.unlabeled },
-        );
+        const chunkResult = worker
+          ? await runWorker(worker, {
+              taskId: makeId("coco-worker"),
+              document: { ...pending.document, annotations: chunk },
+              assets: workerAssets,
+              labels: nextLabels,
+              options: { geometryTypes: selectedGeometryTypes, unlabeledName: copy.unlabeled },
+            })
+          : importCocoDocument(
+              { ...pending.document, annotations: chunk },
+              assets,
+              nextLabels,
+              makeId,
+              { geometryTypes: selectedGeometryTypes, unlabeledName: copy.unlabeled },
+            );
         nextLabels = chunkResult.labels;
         importedAnnotations.push(...chunkResult.annotations);
         unmatched += chunkResult.unmatched;
@@ -224,6 +252,9 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
           message: `${importedAnnotations.length} ${copy.annotationsToLoad}${unmatched ? ` · ${unmatched}` : ""}.`,
         });
         await afterNextPaint();
+      }
+      } finally {
+        worker?.terminate();
       }
       onImported({
         labels: nextLabels,
