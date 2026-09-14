@@ -11,8 +11,11 @@ test('straight vertices build a cursor perpendicular to their actual segment', (
   assert.match(vertexMoveCursor(vertices([[0, 0], [100, 35]]), 0, true), /data:image\/svg\+xml/);
 });
 
-test('corners build an angle-aware three-arm Y cursor', () => {
+test('corners build a double arrow along the angle bisector', () => {
   const arms = vertexCursorDirections(vertices([[0, 0], [100, 0], [100, 100]]), 1, true);
-  assert.equal(arms.length, 3);
-  assert.deepEqual(arms.slice(0, 2), [{ x: -1, y: 0 }, { x: 0, y: 1 }]);
+  assert.equal(arms.length, 2);
+  assert.ok(Math.abs(arms[0].x + Math.SQRT1_2) < 0.01);
+  assert.ok(Math.abs(arms[0].y - Math.SQRT1_2) < 0.01);
+  assert.ok(Math.abs(arms[1].x - Math.SQRT1_2) < 0.01);
+  assert.ok(Math.abs(arms[1].y + Math.SQRT1_2) < 0.01);
 });

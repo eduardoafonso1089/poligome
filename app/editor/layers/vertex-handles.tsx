@@ -32,7 +32,7 @@ function cursorSvg(directions: Direction[]) {
 
 /**
  * Uses both neighboring segments. A straight run yields its normal; a corner
- * yields a three-arm Y whose two arms follow the neighboring segments.
+ * yields the line that bisects the angle between its two rays.
  */
 export function vertexCursorDirections(vertices: Vertex[], index: number, open = false): Direction[] {
   const vertex = vertices[index];
@@ -50,7 +50,7 @@ export function vertexCursorDirections(vertices: Vertex[], index: number, open =
     if (towardPrevious && towardNext && scale > 0 && cross / scale > 0.01) {
       const bisector = unit({ x: towardPrevious.x + towardNext.x, y: towardPrevious.y + towardNext.y });
       return bisector
-        ? [towardPrevious, towardNext, { x: -bisector.x, y: -bisector.y }]
+        ? [bisector, { x: -bisector.x, y: -bisector.y }]
         : [{ x: -incoming.y, y: incoming.x }, { x: incoming.y, y: -incoming.x }].map(unit).filter((item): item is Direction => item !== null);
     }
     const tangent = unit({ x: next.x - previous.x, y: next.y - previous.y });
