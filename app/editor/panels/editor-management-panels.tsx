@@ -39,6 +39,7 @@ type Props = {
   onSelectAnnotation: (id: string, modifiers: { shift: boolean; additive: boolean }) => void;
   onMoveAnnotation: (id: string, delta: -1 | 1) => void;
   onDeleteAnnotations: (ids: string[]) => void;
+  onClearAnnotations?: () => void;
   onToggleAnnotationVisibility: (id: string) => void;
   onToggleLabelVisibility: (id: string) => void;
   onSelectAllAnnotations: () => void;
@@ -91,6 +92,16 @@ export function EditorManagementPanels(props: Props) {
       setBatchLabel(labels.some((label) => label.id === activeLabelId) ? activeLabelId : labels[0]?.id ?? UNLABELED_ID);
     }
   }, [activeLabelId, batchLabel, labels]);
+
+  // Reflect the current class of the selected annotation(s) in the change-class selector.
+  useEffect(() => {
+    const ids = selection.multiSelected.length ? selection.multiSelected : selection.selected ? [selection.selected] : [];
+    const selectedLabels = new Set(ids.map((id) => activeAssetAnnotations.find((annotation) => annotation.id === id)?.label).filter((label): label is string => !!label));
+    if (selectedLabels.size === 1) {
+      const only = [...selectedLabels][0];
+      if (labels.some((label) => label.id === only)) setBatchLabel(only);
+    }
+  }, [selection.selected, selection.multiSelected, activeAssetAnnotations, labels]);
 
   const filteredAssets = useMemo(() => {
     const query = imageSearch.trim().toLocaleLowerCase();
@@ -280,6 +291,7 @@ export function EditorManagementPanels(props: Props) {
           <div className="annotation-panel-actions">
             <button disabled={!activeAssetAnnotations.length} title={allHidden ? copy.showAllAnnotations : copy.hideAllAnnotations} onClick={toggleAllAnnotations}>{allHidden ? <EyeOff size={14} /> : <Eye size={14} />}{allHidden ? copy.showAllAnnotations : copy.hideAllAnnotations}</button>
             <button onClick={() => setClassManagerOpen(true)}><Palette size={14} />{copy.manageClasses}</button>
+            {props.onClearAnnotations && <button disabled={!annotations.length} title={copy.removeLoadedAnnotations} onClick={props.onClearAnnotations}><Trash2 size={14} />{copy.removeLoadedAnnotations}</button>}
           </div>
         </section>
         {activeSelectedIds.length > 0 && <section className="batch-class">

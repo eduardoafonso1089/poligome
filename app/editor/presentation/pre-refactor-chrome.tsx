@@ -289,7 +289,6 @@ export function PreRefactorToolbar(props: PreRefactorChromeProps) {
       <label className={`stroke-control ${!canEdit ? "disabled" : ""}`} title={copy.lineThickness}><PenLine size={14} /><input aria-label={copy.lineThickness} disabled={!canEdit} type="range" min="1" max="10" step="1" value={props.strokePx} onChange={(event) => props.onStrokeChange(Number(event.target.value))} /><output>{props.strokePx}px</output></label>
       <div className="zoom"><button aria-label={copy.zoomOut} disabled={!canEdit} onClick={props.onZoomOut}><ZoomOut size={15} /></button><span>{Math.round(props.zoom)}%</span><button aria-label={copy.zoomIn} disabled={!canEdit} onClick={props.onZoomIn}><ZoomIn size={15} /></button></div>
       <ToolButton title={copy.fitImage} disabled={!canEdit} onClick={props.onFit}><Focus size={16} /></ToolButton>
-      <ToolButton title={copy.removeLoadedAnnotations} disabled={!props.annotationsCount} onClick={props.onClearAnnotations}><Trash2 size={16} /></ToolButton>
       <ToolButton title={copy.shortcuts} onClick={() => setTutorialOpen(true)}><Keyboard size={16} /></ToolButton>
     </div>
 

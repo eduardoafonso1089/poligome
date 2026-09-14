@@ -926,6 +926,7 @@ export function CanonicalEditorWorkbench() {
         onSelectAnnotation={selectAnnotationFromPanel}
         onMoveAnnotation={(id, delta) => editor.dispatch({ type: "reorder-annotation", id, delta })}
         onDeleteAnnotations={deleteAnnotations}
+        onClearAnnotations={clearAllAnnotations}
         onToggleAnnotationVisibility={toggleAnnotationVisibility}
         onToggleLabelVisibility={toggleLabelVisibility}
         onSelectAllAnnotations={selectAllActiveAnnotations}

@@ -181,11 +181,9 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
         nextLabels = chunkResult.labels;
         importedAnnotations.push(...chunkResult.annotations);
         unmatched += chunkResult.unmatched;
-        onImported({
-          labels: nextLabels,
-          annotations: [...annotations, ...importedAnnotations],
-          message: `${importedAnnotations.length} ${copy.annotationsToLoad}${unmatched ? ` · ${unmatched}` : ""}.`,
-        });
+        // Yield between chunks so the browser stays responsive, but apply the
+        // result (and re-render) only once, after the loop — a per-chunk apply
+        // re-renders the whole editor each time and makes large loads crawl.
         await afterNextPaint();
       }
       onImported({
