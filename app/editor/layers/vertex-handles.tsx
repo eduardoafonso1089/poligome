@@ -60,6 +60,7 @@ export function VertexHandles({
       />}
       <ellipse
         className="edge-handle"
+        style={{ cursor: "copy" }}
         data-edge-after-vertex-id={midpoint.afterVertexId}
         onPointerDown={(event) => onInsertVertex(event, midpoint.afterVertexId, midpoint.x, midpoint.y)}
         onPointerMove={onMoveVertex}
@@ -91,6 +92,7 @@ export function VertexHandles({
         />}
         <ellipse
           className={`vertex-handle ${isSelected ? "selected" : ""}`}
+          style={{ cursor: "nwse-resize" }}
           data-vertex-id={vertex.id}
           onPointerDown={(event) => onBeginVertexDrag(event, vertex.id)}
           onPointerMove={onMoveVertex}

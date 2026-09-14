@@ -766,6 +766,7 @@ export function CanonicalEditorWorkbench() {
   const selecting = tool === "select" && !vectorTool;
   const vectorEditing = Boolean(vectorTool);
   const panning = tool === "pan";
+  const stageTool = vectorTool ?? tool;
   const markerRadius = screenPixelsToImageUnits(4.6, imageSize, viewport.layout.width);
   const lineThickness = screenPixelsToImageUnits(strokePx, imageSize, viewport.layout.width);
   const touchRadius = screenPixelsToImageUnits(22, imageSize, viewport.layout.width);
@@ -982,7 +983,7 @@ export function CanonicalEditorWorkbench() {
 
       <section className={`editor ${touch.touchMode ? "touch-editor" : ""}`}>
         <div className="editor-controls"><PreRefactorToolbar {...chromeProps} projectName={/^Demo\b/.test(projectName) ? "Tutorial" : projectName} /></div>
-        <div className="stage">
+        <div className={`stage ${stageTool}${mousePanning ? " panning" : ""}`}>
           <section ref={viewport.scrollRef} onScroll={viewport.onScroll} className={asset && !asset.missing ? exact.stageScroll : `${exact.stageScroll} ${exact.emptyStage}`}>
             <div style={{ position: "relative", width: viewport.layout.surfaceWidth, height: viewport.layout.surfaceHeight }}>
               <div style={{ position: "absolute", left: viewport.layout.left, top: viewport.layout.top, width: viewport.layout.width, height: viewport.layout.height }}>

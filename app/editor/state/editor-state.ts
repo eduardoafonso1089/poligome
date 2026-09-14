@@ -269,7 +269,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       if (!target) return state;
       const updated = insertAnnotationVertex(target, action.afterVertexId, action.point, action.vertexId);
       if (updated === target) return state;
-      const next = snapshot(state);
+      // A pointer insertion may immediately become a drag gesture. Keep its
+      // original geometry as the single undo baseline instead of snapshotting it twice.
+      const next = state.gesture ? state : snapshot(state);
       return {
         ...next,
         annotations: state.annotations.map((annotation) => annotation.id === target.id ? updated : annotation),

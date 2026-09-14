@@ -130,7 +130,13 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     event.stopPropagation();
     const raw = { x, y };
     const point = snap?.enabled ? snapPointToAnnotations(raw, snap.annotations, annotation.id, snap.tolerance) : raw;
-    dispatch({ type: "insert-vertex", annotationId: annotation.id, afterVertexId, vertexId: makeId(`${annotation.id}:v`), point });
+    const vertexId = makeId(`${annotation.id}:v`);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    // Insertion and dragging are one gesture. Capturing the pointer from the edge
+    // lets the very next move event target the vertex that was just created.
+    dispatch({ type: "begin-gesture" });
+    dispatch({ type: "insert-vertex", annotationId: annotation.id, afterVertexId, vertexId, point });
+    vertexDrag.current = { pointerId: event.pointerId, annotationId: annotation.id, vertexId };
   }, [addToSelection, dispatch, makeId, snap, toggleOnly]);
 
   const resizeStart = useCallback((event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation, corner: BoxCorner) => {

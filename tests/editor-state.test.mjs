@@ -100,3 +100,15 @@ test('replace-annotations-by-id simplifies multiple selected polygons in one und
   state=editorReducer(state,{type:'undo'});
   assert.deepEqual(state.annotations.map(annotation=>annotation.vertices.length),[3,3]);
 });
+
+test('inserting and immediately dragging a vertex is one undoable gesture', () => {
+  let state=createEditorState([polygon]);
+  state=editorReducer(state,{type:'begin-gesture'});
+  state=editorReducer(state,{type:'insert-vertex',annotationId:'p',afterVertexId:'p:v0',vertexId:'p:new',point:{x:55,y:10}});
+  state=editorReducer(state,{type:'update-vertex',annotationId:'p',vertexId:'p:new',point:{x:60,y:25}});
+  state=editorReducer(state,{type:'commit-gesture'});
+  assert.equal(state.history.length,1);
+  assert.deepEqual(state.annotations[0].vertices.find(vertex=>vertex.id==='p:new'),{id:'p:new',x:60,y:25});
+  state=editorReducer(state,{type:'undo'});
+  assert.deepEqual(state.annotations[0].vertices.map(vertex=>vertex.id),['p:v0','p:v1','p:v2']);
+});
