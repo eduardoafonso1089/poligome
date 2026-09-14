@@ -942,7 +942,7 @@ export function CanonicalEditorWorkbench() {
       <section className={`editor ${touch.touchMode ? "touch-editor" : ""}`}>
         <div className="editor-controls"><PreRefactorToolbar {...chromeProps} projectName={/^Demo\b/.test(projectName) ? "Tutorial" : projectName} /></div>
         <div className="stage">
-          <section ref={viewport.scrollRef} onScroll={viewport.onScroll} className={exact.stageScroll}>
+          <section ref={viewport.scrollRef} onScroll={viewport.onScroll} className={asset && !asset.missing ? exact.stageScroll : `${exact.stageScroll} ${exact.emptyStage}`}>
             <div style={{ position: "relative", width: viewport.layout.surfaceWidth, height: viewport.layout.surfaceHeight }}>
               <div style={{ position: "absolute", left: viewport.layout.left, top: viewport.layout.top, width: viewport.layout.width, height: viewport.layout.height }}>
                 {asset?.raster?.mode === "tiled" ? <CogTiledLayer asset={asset} viewport={viewport.state} layout={viewport.layout} copy={copy} onError={setMessage} />

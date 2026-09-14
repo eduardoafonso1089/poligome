@@ -9,11 +9,16 @@
      viewport geometry stable at the overflow threshold without showing an
      inactive scrollbar. */
   overflow: auto !important;
-  scrollbar-gutter: stable both-edges;
+  scrollbar-gutter: stable;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
   overscroll-behavior: contain;
+}
+
+.emptyStage {
+  overflow: hidden !important;
+  scrollbar-gutter: auto;
 }
 
 .reviewHidden { display: none; }

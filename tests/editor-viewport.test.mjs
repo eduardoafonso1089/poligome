@@ -50,7 +50,9 @@ test('the editor scroll container keeps a stable scrollbar geometry while zoomin
   const css = readFileSync(new URL('../app/editor/presentation/pre-refactor-canonical.module.css', import.meta.url), 'utf8');
   const scrollRule = css.match(/\.stageScroll\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
   assert.match(scrollRule, /overflow: auto !important/);
-  assert.match(scrollRule, /scrollbar-gutter: stable both-edges/);
+  assert.match(scrollRule, /scrollbar-gutter: stable/);
+  assert.doesNotMatch(scrollRule, /both-edges/);
+  assert.match(css, /\.emptyStage\s*\{[\s\S]*?overflow: hidden !important/);
 });
 
 test('wheel zoom reserves Ctrl and Shift for vertical and horizontal navigation', () => {

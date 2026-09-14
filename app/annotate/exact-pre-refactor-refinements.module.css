@@ -6,14 +6,13 @@
   display: none !important;
 }
 
-/* The canonical scroll surface used to be absolutely stretched across the
-   stage, bypassing the historical stage padding. The old editor measured the
-   scroll viewport inside that padding; restore that geometry exactly. */
+/* The scroll surface reaches the stage edge so its rails sit beside the usable
+   image area instead of being inset by the decorative stage padding. */
 .contract :global(.stage) > section {
-  position: relative !important;
-  inset: auto !important;
-  width: 100% !important;
-  height: 100% !important;
+  position: absolute !important;
+  inset: 0 !important;
+  width: auto !important;
+  height: auto !important;
 }
 .contract :global(.editor-controls) { overflow: visible !important; }
 
