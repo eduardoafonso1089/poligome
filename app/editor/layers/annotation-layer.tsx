@@ -1,6 +1,6 @@
 "use client";
 
-import type { PointerEvent as ReactPointerEvent } from "react";
+import { memo, type PointerEvent as ReactPointerEvent } from "react";
 import type { EditorAnnotation } from "../models/annotation-model";
 import type { SelectedVertex } from "../state/editor-state";
 import { BoxLayer, type BoxCorner } from "./box-layer";
@@ -38,7 +38,7 @@ export type AnnotationLayerProps = {
   onTransformEnd: (event: ReactPointerEvent<SVGElement>) => void;
 };
 
-export function AnnotationLayer(props: AnnotationLayerProps) {
+export const AnnotationLayer = memo(function AnnotationLayer(props: AnnotationLayerProps) {
   const { annotation } = props;
 
   if (annotation.type === "polygon") {
@@ -127,4 +127,4 @@ export function AnnotationLayer(props: AnnotationLayerProps) {
     onPointerUp={props.onFinishAnnotation}
     onPointerCancel={props.onCancel}
   />;
-}
+});

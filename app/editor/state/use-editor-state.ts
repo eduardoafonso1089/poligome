@@ -22,6 +22,10 @@ export function useEditorState(initialAnnotations: EditorAnnotation[] = []) {
     dispatch({ type: "replace-annotations", annotations, markSaved });
   }, []);
 
+  const appendAnnotations = useCallback((annotations: EditorAnnotation[], markSaved = false) => {
+    dispatch({ type: "append-annotations", annotations, markSaved });
+  }, []);
+
   const addAnnotation = useCallback((annotation: EditorAnnotation, select = true) => {
     dispatch({ type: "add-annotation", annotation, select });
   }, []);
@@ -60,6 +64,7 @@ export function useEditorState(initialAnnotations: EditorAnnotation[] = []) {
     selectedAnnotations,
     saved: state.saved,
     replaceAnnotations,
+    appendAnnotations,
     addAnnotation,
     deleteAnnotations,
     setSelection,

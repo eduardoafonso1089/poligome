@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { Asset, Label } from "../../lib/types";
 import { getCopy, storedLanguage, storedTheme, type Language } from "../../lib/i18n";
@@ -13,6 +13,7 @@ import { CocoImportControl, type CocoImportHandle } from "../import/coco-import-
 import { RasterImportControl, type RasterImportResult } from "../import/raster-import-control";
 import { ExportControls } from "../export/export-controls";
 import { useEditorState } from "../state/use-editor-state";
+import { useAnnotationIndex } from "../state/annotation-index";
 import { useCanvasInteractions } from "../interactions/use-canvas-interactions";
 import { useAdvancedVectorInteractions, type AdvancedVectorResult } from "../interactions/use-advanced-vector-interactions";
 import { EditorCanvas } from "../canvas/editor-canvas";
@@ -48,8 +49,16 @@ import {
 import exact from "../presentation/pre-refactor-canonical.module.css";
 
 const EMPTY_LABELS: Label[] = [{ id: UNLABELED_ID, name: "Sem label", color: "#929a95", key: "" }];
+const EMPTY_ANNOTATIONS: EditorAnnotation[] = [];
 
 type MousePanState = { pointerId: number; x: number; y: number } | null;
+
+function labelsMatch(current: Label[], next: Label[]) {
+  return current === next || (current.length === next.length && current.every((label, index) => {
+    const candidate = next[index];
+    return label.id === candidate?.id && label.name === candidate.name && label.color === candidate.color && label.key === candidate.key;
+  }));
+}
 
 export function CanonicalEditorWorkbench() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -85,6 +94,7 @@ export function CanonicalEditorWorkbench() {
   const demoAnnotationsRef = useRef<EditorAnnotation[]>([]);
   const mousePanRef = useRef<MousePanState>(null);
   const editor = useEditorState();
+  const annotationIndex = useAnnotationIndex(editor.annotations);
   const copy = getCopy(language);
   const asset = assets.find((item) => item.id === current) ?? assets[0] ?? null;
   const imageSize = { width: asset?.width ?? 1, height: asset?.height ?? 1 };
@@ -97,24 +107,31 @@ export function CanonicalEditorWorkbench() {
   }, []);
 
   const activeAssetAnnotations = useMemo(
-    () => asset ? editor.annotations.filter((annotation) => annotation.asset === asset.id) : [],
-    [asset, editor.annotations],
+    () => asset ? annotationIndex.byAsset.get(asset.id) ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS,
+    [asset, annotationIndex.byAsset],
   );
   const visibleAnnotations = useMemo(
     () => activeAssetAnnotations.filter((annotation) => !hiddenAnnotationIds.has(annotation.id) && !hiddenLabelIds.has(annotation.label)),
     [activeAssetAnnotations, hiddenAnnotationIds, hiddenLabelIds],
   );
-  const selectedIds = editor.selection.multiSelected.length ? editor.selection.multiSelected : editor.selection.selected ? [editor.selection.selected] : [];
+  const selectedIds = useMemo(
+    () => editor.selection.multiSelected.length ? editor.selection.multiSelected : editor.selection.selected ? [editor.selection.selected] : [],
+    [editor.selection.multiSelected, editor.selection.selected],
+  );
+  const assetById = useMemo(() => new Map(assets.map((item) => [item.id, item])), [assets]);
   const selectedPolygons = useMemo(
-    () => editor.annotations.filter((annotation): annotation is Extract<EditorAnnotation, { type: "polygon" }> => selectedIds.includes(annotation.id) && annotation.type === "polygon" && annotation.asset === asset?.id),
-    [asset?.id, editor.annotations, selectedIds],
+    () => editor.annotations.filter((annotation): annotation is Extract<EditorAnnotation, { type: "polygon" }> => selectedIds.includes(annotation.id) && annotation.type === "polygon"),
+    [editor.annotations, selectedIds],
   );
   const activePolygon = editor.selectedAnnotation?.type === "polygon" && editor.selectedAnnotation.asset === asset?.id ? editor.selectedAnnotation : null;
   const activeColor = labels.find((label) => label.id === activeLabel)?.color ?? "#929a95";
   const projectDirty = sessionDirty || !editor.saved;
   const missingImageCount = assets.filter((item) => item.missing).length;
   const snapTolerance = screenPixelsToImageUnits(13, imageSize, viewport.layout.width);
-  const snap = { enabled: snapEnabled, tolerance: snapTolerance, annotations: visibleAnnotations };
+  const snap = useMemo(
+    () => ({ enabled: snapEnabled, tolerance: snapTolerance, annotations: visibleAnnotations }),
+    [snapEnabled, snapTolerance, visibleAnnotations],
+  );
 
   const interactions = useCanvasInteractions({
     svgRef: viewport.canvasRef,
@@ -123,6 +140,7 @@ export function CanonicalEditorWorkbench() {
     dispatch: editor.dispatch,
     makeId,
     activeAssetId: current || null,
+    activeAnnotations: activeAssetAnnotations,
     addToSelection,
     snap,
   });
@@ -281,10 +299,6 @@ export function CanonicalEditorWorkbench() {
     const box = tutorialEditBox(reference, parkSize);
     editor.replaceAnnotations(box ? [box] : [], editor.saved);
     setCurrent("demo-park");
-    setTool("pan");
-    setVectorTool(null);
-    setAddToSelection(false);
-    setCursorPoint(null);
     if (box) editor.setSelection({ selected: box.id, multiSelected: [box.id], anchorId: box.id });
     setDemoTutorialToolPrompt("select");
     setDemoTutorialStep(2);
@@ -294,10 +308,6 @@ export function CanonicalEditorWorkbench() {
   function advanceDemoToModel() {
     editor.replaceAnnotations([], editor.saved);
     setCurrent("demo-rural");
-    setTool("select");
-    setVectorTool(null);
-    setAddToSelection(false);
-    setCursorPoint(null);
     setDemoTutorialToolPrompt(null);
     setDemoTutorialStep(4);
     viewport.zoomTo(92);
@@ -327,13 +337,9 @@ export function CanonicalEditorWorkbench() {
       const drawn = editor.annotations.find((annotation) => annotation.asset === "demo-urban");
       if (drawn && annotationIntersectsDemoRoof(drawn, imageSize)) {
         setDemoTutorialStep(1);
-        setTool("select");
-        setVectorTool(null);
         setMessage(tutorialSuccessTitle[language]);
       } else if (drawn) {
         editor.replaceAnnotations(editor.annotations.filter((annotation) => annotation.id !== drawn.id), false);
-        setTool("select");
-        setVectorTool(null);
         setDemoTutorialToolPrompt("box");
         setMessage(tutorialWrongDraw[language]);
       }
@@ -342,8 +348,6 @@ export function CanonicalEditorWorkbench() {
       const box = editor.annotations.find((annotation) => annotation.id === "demo-b4");
       if (tutorialEditBoxChanged(box, imageSize)) {
         setDemoTutorialStep(3);
-        setTool("select");
-        setVectorTool(null);
       }
     }
   }, [demoTutorialStep, editor.annotations, imageSize.height, imageSize.width, language]);
@@ -416,14 +420,26 @@ export function CanonicalEditorWorkbench() {
     resetInteractionState();
   }
 
-  function applyCocoImport(result: { labels: Label[]; annotations: EditorAnnotation[]; message: string }) {
+  function applyCocoImport(result: { labels: Label[]; annotations: EditorAnnotation[]; append?: boolean; message: string }) {
+    if (result.append) {
+      // Import batches are background work: keep pointer/keyboard edits ahead of React's
+      // reconciliation for the next batch.
+      startTransition(() => {
+        setLabels((currentLabels) => labelsMatch(currentLabels, result.labels) ? currentLabels : result.labels);
+        if (!result.labels.some((label) => label.id === activeLabel)) setActiveLabel(result.labels[0]?.id ?? EMPTY_LABELS[0].id);
+        editor.appendAnnotations(result.annotations, false);
+        setSessionDirty(true);
+        setMessage(result.message);
+      });
+      return;
+    }
     setLabels(result.labels);
     if (!result.labels.some((label) => label.id === activeLabel)) setActiveLabel(result.labels[0]?.id ?? EMPTY_LABELS[0].id);
     editor.replaceAnnotations(result.annotations, false);
-    resetTransientVisibility();
-    resetDemoTutorial();
     setSessionDirty(true);
     setMessage(result.message);
+    resetTransientVisibility();
+    resetDemoTutorial();
     drawing.cancelDraft();
     advanced.cancel();
     setVectorTool(null);
@@ -615,10 +631,18 @@ export function CanonicalEditorWorkbench() {
 
   function simplifySelected() {
     if (!selectedPolygons.length) return;
-    const tolerance = screenPixelsToImageUnits(4, imageSize, viewport.layout.width);
-    // Simplify every selected polygon; keep only the ones that actually changed.
+    // Use every polygon's source dimensions so batch simplification matches the
+    // result of simplifying that same polygon while its image is active.
     const simplified = selectedPolygons
-      .map((polygon) => simplifyPolygonAnnotation(polygon, tolerance))
+      .map((polygon) => {
+        const source = assetById.get(polygon.asset);
+        const polygonImage = {
+          width: Number(source?.width) || imageSize.width,
+          height: Number(source?.height) || imageSize.height,
+        };
+        const tolerance = screenPixelsToImageUnits(4, polygonImage, viewport.layout.width);
+        return simplifyPolygonAnnotation(polygon, tolerance);
+      })
       .filter((polygon, index) => polygon !== selectedPolygons[index]);
     if (!simplified.length) return;
     editor.dispatch({ type: "replace-annotations-by-id", annotations: simplified });
@@ -735,6 +759,7 @@ export function CanonicalEditorWorkbench() {
   const selecting = tool === "select" && !vectorTool;
   const vectorEditing = Boolean(vectorTool);
   const panning = tool === "pan";
+  const stageTool = vectorTool ?? tool;
   const markerRadius = screenPixelsToImageUnits(4.6, imageSize, viewport.layout.width);
   const lineThickness = screenPixelsToImageUnits(strokePx, imageSize, viewport.layout.width);
   const touchRadius = screenPixelsToImageUnits(22, imageSize, viewport.layout.width);
@@ -770,9 +795,6 @@ export function CanonicalEditorWorkbench() {
       if (suggestion) {
         editor.addAnnotation(suggestion, true);
         setDemoTutorialStep(5);
-        setTool("select");
-        setVectorTool(null);
-        setAddToSelection(false);
       }
       return;
     }
@@ -823,6 +845,24 @@ export function CanonicalEditorWorkbench() {
     if (vectorEditing) advanced.cancel();
     else if (selecting) interactions.cancel();
     else drawing.cancelDraft();
+  }
+
+  function routePointerMoveCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    touch.onPointerMoveCapture(event);
+    if (event.isPropagationStopped()) return;
+    if (interactions.moveVertex(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  function routePointerUpCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    touch.onPointerUpCapture(event);
+    if (event.isPropagationStopped()) return;
+    if (interactions.finishVertex(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
   }
 
   function finishWithContextMenu(event: ReactMouseEvent<SVGSVGElement>) {
@@ -917,6 +957,8 @@ export function CanonicalEditorWorkbench() {
         assets={assets}
         currentAssetId={asset?.id ?? ""}
         annotations={editor.annotations}
+        annotationCountByAsset={annotationIndex.countByAsset}
+        annotationCountByLabel={annotationIndex.countByLabel}
         activeAssetAnnotations={activeAssetAnnotations}
         labels={labels}
         activeLabelId={activeLabel}
@@ -949,8 +991,8 @@ export function CanonicalEditorWorkbench() {
 
       <section className={`editor ${touch.touchMode ? "touch-editor" : ""}`}>
         <div className="editor-controls"><PreRefactorToolbar {...chromeProps} projectName={/^Demo\b/.test(projectName) ? "Tutorial" : projectName} /></div>
-        <div className="stage">
-          <section ref={viewport.scrollRef} onScroll={viewport.onScroll} onWheel={viewport.onWheel} className={exact.stageScroll}>
+        <div className={`stage ${stageTool}${mousePanning ? " panning" : ""}`}>
+          <section ref={viewport.scrollRef} onScroll={viewport.onScroll} className={asset && !asset.missing ? exact.stageScroll : `${exact.stageScroll} ${exact.emptyStage}`}>
             <div style={{ position: "relative", width: viewport.layout.surfaceWidth, height: viewport.layout.surfaceHeight }}>
               <div style={{ position: "absolute", left: viewport.layout.left, top: viewport.layout.top, width: viewport.layout.width, height: viewport.layout.height }}>
                 {asset?.raster?.mode === "tiled" ? <CogTiledLayer asset={asset} viewport={viewport.state} layout={viewport.layout} copy={copy} onError={setMessage} />
@@ -976,8 +1018,8 @@ export function CanonicalEditorWorkbench() {
                   boxTouchRadius={boxTouchRadius}
                   boxRotationTouchRadius={boxRotationTouchRadius}
                   onPointerDownCapture={touch.onPointerDownCapture}
-                  onPointerMoveCapture={touch.onPointerMoveCapture}
-                  onPointerUpCapture={touch.onPointerUpCapture}
+                  onPointerMoveCapture={routePointerMoveCapture}
+                  onPointerUpCapture={routePointerUpCapture}
                   onPointerCancelCapture={touch.onPointerCancelCapture}
                   onPointerDown={routePointerDown}
                   onPointerMove={routePointerMove}

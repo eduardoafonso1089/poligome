@@ -14,9 +14,57 @@ import {
   type CocoDocumentInput,
   type CocoDocumentPlan,
 } from "./coco-document-import";
+import type { CocoImportWorkerRequest, CocoImportWorkerResponse } from "./coco-import.worker";
 
 function afterNextPaint() {
-  return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  return new Promise<void>((resolve) => {
+    let done = false;
+    let fallback = 0;
+    let firstFrame = 0;
+    let secondFrame = 0;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(fallback);
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      document.removeEventListener("visibilitychange", resumeWhenVisible);
+      resolve();
+    };
+    const queuePaint = () => {
+      firstFrame = requestAnimationFrame(() => {
+        secondFrame = requestAnimationFrame(finish);
+      });
+    };
+    const resumeWhenVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      // A hidden tab can have a queued frame or throttled timer. Start a fresh
+      // turn as soon as it returns instead of waiting for either one.
+      window.clearTimeout(fallback);
+      fallback = window.setTimeout(finish, 0);
+      queuePaint();
+    };
+    document.addEventListener("visibilitychange", resumeWhenVisible);
+    if (document.visibilityState === "visible") queuePaint();
+    // Browsers pause animation frames in background tabs. The timeout keeps the
+    // import advancing when allowed and visibilitychange guarantees recovery
+    // immediately when the user returns to the editor.
+    fallback = window.setTimeout(finish, 100);
+  });
+}
+
+type WorkerAsset = Pick<Asset, "id" | "name" | "width" | "height">;
+
+function hasWorkerSupport() {
+  return typeof Worker !== "undefined";
+}
+
+function runWorker(worker: Worker, request: CocoImportWorkerRequest) {
+  return new Promise<CocoImportWorkerResponse>((resolve, reject) => {
+    worker.onmessage = ({ data }: MessageEvent<CocoImportWorkerResponse>) => resolve(data);
+    worker.onerror = (event) => reject(event.error ?? new Error(event.message));
+    worker.postMessage(request);
+  });
 }
 
 type PendingCoco = {
@@ -35,7 +83,7 @@ type CocoImportControlProps = {
   language?: Language;
   disabled?: boolean;
   showTrigger?: boolean;
-  onImported: (result: { labels: Label[]; annotations: EditorAnnotation[]; message: string }) => void;
+  onImported: (result: { labels: Label[]; annotations: EditorAnnotation[]; append?: boolean; message: string }) => void;
 };
 
 export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlProps>(function CocoImportControl({
@@ -169,38 +217,57 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
     try {
       const sourceAnnotations = pending.document.annotations ?? [];
       const selectedAnnotations = currentSelectedIndexes.flatMap((index) => sourceAnnotations[index] ? [sourceAnnotations[index]] : []);
-      const chunkSize = selectedGeometryTypes.includes("polygon") ? 25 : 500;
+      const chunkSize = selectedGeometryTypes.includes("polygon") ? 100 : 500;
+      const worker = hasWorkerSupport()
+        ? new Worker(new URL("./coco-import.worker.ts", import.meta.url), { type: "module" })
+        : null;
+      const workerAssets: WorkerAsset[] = assets.map(({ id, name, width, height }) => ({ id, name, width, height }));
 
-      for (let offset = 0; offset < selectedAnnotations.length; offset += chunkSize) {
+      try {
+        for (let offset = 0; offset < selectedAnnotations.length; offset += chunkSize) {
         if (cancelledRef.current) break;
         const chunk = selectedAnnotations.slice(offset, offset + chunkSize);
-        const chunkResult = importCocoDocument(
-          { ...pending.document, annotations: chunk },
-          assets,
-          nextLabels,
-          makeId,
-          { geometryTypes: selectedGeometryTypes, unlabeledName: copy.unlabeled },
-        );
+        const chunkResult = worker
+          ? await runWorker(worker, {
+              taskId: makeId("coco-worker"),
+              document: { ...pending.document, annotations: chunk },
+              assets: workerAssets,
+              labels: nextLabels,
+              options: { geometryTypes: selectedGeometryTypes, unlabeledName: copy.unlabeled },
+            })
+          : importCocoDocument(
+              { ...pending.document, annotations: chunk },
+              assets,
+              nextLabels,
+              makeId,
+              { geometryTypes: selectedGeometryTypes, unlabeledName: copy.unlabeled },
+            );
         nextLabels = chunkResult.labels;
         importedAnnotations.push(...chunkResult.annotations);
         unmatched += chunkResult.unmatched;
         // Apply what has loaded so far, then yield so the browser stays responsive.
         onImported({
           labels: nextLabels,
-          annotations: [...annotations, ...importedAnnotations],
+          annotations: chunkResult.annotations,
+          append: true,
           message: `${importedAnnotations.length} ${copy.annotationsToLoad}${unmatched ? ` · ${unmatched}` : ""}.`,
         });
         await afterNextPaint();
       }
+      } finally {
+        worker?.terminate();
+      }
       onImported({
         labels: nextLabels,
-        annotations: [...annotations, ...importedAnnotations],
+        annotations: [],
+        append: true,
         message: `${importedAnnotations.length} ${copy.annotationsToLoad}${unmatched ? ` · ${unmatched}` : ""}.`,
       });
     } catch (error) {
       onImported({
         labels: nextLabels,
-        annotations: [...annotations, ...importedAnnotations],
+        annotations: [],
+        append: true,
         message: translateErrorCode(error, copy, copy.projectOpenError),
       });
     } finally {

@@ -46,14 +46,45 @@ test('large source images remain fit-to-viewport until the user deep-zooms', () 
   assert.equal(deep.height, 30_000);
 });
 
-test('the editor scroll container aligns oversized canvases to the reachable origin', () => {
-  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
-  const scrollRule = css.match(/\.editor \.scroll\{display:block;[^}]*\}/)?.[0] ?? '';
-  assert.match(scrollRule, /place-items:start/);
-  assert.match(scrollRule, /scrollbar-gutter:auto/);
+test('the editor scroll container keeps a stable scrollbar geometry while zooming', () => {
+  const css = readFileSync(new URL('../app/editor/presentation/pre-refactor-canonical.module.css', import.meta.url), 'utf8');
+  const scrollRule = css.match(/\.stageScroll\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(scrollRule, /overflow: auto !important/);
+  assert.match(scrollRule, /scrollbar-gutter: stable/);
+  assert.doesNotMatch(scrollRule, /both-edges/);
+  assert.match(css, /\.emptyStage\s*\{[\s\S]*?overflow: hidden !important/);
 });
 
-test('laptop wheel zoom accepts Shift as well as platform zoom modifiers', () => {
+test('wheel zoom reserves Ctrl and Shift for vertical and horizontal navigation', () => {
   const hook = readFileSync(new URL('../app/editor/viewport/use-editor-viewport.ts', import.meta.url), 'utf8');
-  assert.match(hook, /!event\.shiftKey && !event\.ctrlKey && !event\.metaKey/);
+  const onWheel = hook.match(/const onWheel[\s\S]*?\}, \[panBy, zoomTo\]\);/)?.[0] ?? '';
+  assert.match(onWheel, /event\.preventDefault\(\);/);
+  assert.match(onWheel, /if \(event\.shiftKey\) \{/);
+  assert.match(onWheel, /panBy\(-\(event\.deltaX \|\| event\.deltaY\), 0\)/);
+  assert.match(onWheel, /if \(event\.ctrlKey \|\| event\.metaKey\) \{/);
+  assert.match(onWheel, /panBy\(0, -event\.deltaY\)/);
+  assert.match(onWheel, /controllerRef\.current\.snapshot\(\)\.zoom \* factor/);
+  assert.match(hook, /addEventListener\("wheel", onWheel, \{ passive: false \}\)/);
+});
+
+test('wheel zoom scales with the gesture delta and bounds momentum spikes', () => {
+  const hook = readFileSync(new URL('../app/editor/viewport/use-editor-viewport.ts', import.meta.url), 'utf8');
+  assert.match(hook, /Math\.max\(-120, Math\.min\(120, event\.deltaY\)\)/);
+  assert.match(hook, /Math\.exp\(-clampedDelta \* 0\.0018\)/);
+  assert.doesNotMatch(hook, /event\.deltaY < 0 \? 1\.2 : 1 \/ 1\.2/);
+});
+
+test('progressive COCO imports can continue after the tab loses animation frames', () => {
+  const control = readFileSync(new URL('../app/editor/import/coco-import-control.tsx', import.meta.url), 'utf8');
+  assert.match(control, /document\.addEventListener\("visibilitychange", resumeWhenVisible\)/);
+  assert.match(control, /document\.removeEventListener\("visibilitychange", resumeWhenVisible\)/);
+  assert.match(control, /if \(document\.visibilityState === "visible"\) queuePaint\(\)/);
+  assert.match(control, /window\.setTimeout\(finish, 100\)/);
+});
+
+test('COCO geometry conversion runs in a dedicated worker when available', () => {
+  const control = readFileSync(new URL('../app/editor/import/coco-import-control.tsx', import.meta.url), 'utf8');
+  const worker = readFileSync(new URL('../app/editor/import/coco-import.worker.ts', import.meta.url), 'utf8');
+  assert.match(control, /new Worker\(new URL\("\.\/coco-import\.worker\.ts", import\.meta\.url\)/);
+  assert.match(worker, /importCocoDocument\(/);
 });

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { WheelEvent as ReactWheelEvent } from "react";
 import { ViewportController, type ViewportState } from "./viewport-controller";
 import type { Size2D } from "../../lib/editor-viewport";
 
@@ -150,18 +149,34 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
     ));
   }, [publish, syncBeforeGesture]);
 
-  const onWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
-    if (!event.shiftKey && !event.ctrlKey && !event.metaKey) return;
+  const onWheel = useCallback((event: WheelEvent) => {
     event.preventDefault();
-    // Scale the zoom by the wheel delta instead of a fixed factor. A trackpad
-    // pinch emits a stream of small deltas, so a constant factor per event made
-    // it lurch to the zoom limit; tying the factor to the delta keeps the pinch
-    // smooth while a mouse-wheel notch (large delta) still steps briskly. The
-    // delta is clamped so a single momentum spike can't jump more than ~1.25x.
+    // The wheel owns zooming in the canvas. Modifiers turn it into navigation
+    // so Ctrl is never passed through to the browser's page zoom.
+    if (event.shiftKey) {
+      panBy(-(event.deltaX || event.deltaY), 0);
+      return;
+    }
+    if (event.ctrlKey || event.metaKey) {
+      panBy(0, -event.deltaY);
+      return;
+    }
+    // Scale the zoom by its delta so trackpad pinches stay smooth; clamp spikes
+    // from a momentum event to keep a single wheel event bounded.
     const clampedDelta = Math.max(-120, Math.min(120, event.deltaY));
     const factor = Math.exp(-clampedDelta * 0.0018);
-    zoomTo(state.zoom * factor, { x: event.clientX, y: event.clientY });
-  }, [state.zoom, zoomTo]);
+    zoomTo(controllerRef.current.snapshot().zoom * factor, { x: event.clientX, y: event.clientY });
+  }, [panBy, zoomTo]);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    // React may attach wheel listeners as passive, which means preventDefault
+    // cannot stop the browser's Ctrl+wheel page zoom. The native listener is
+    // explicitly non-passive so the canvas remains the only zoom target.
+    scroller.addEventListener("wheel", onWheel, { passive: false });
+    return () => scroller.removeEventListener("wheel", onWheel);
+  }, [onWheel]);
 
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
@@ -180,7 +195,6 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
     layout: controllerRef.current.layout(),
     maxZoom: controllerRef.current.maxZoom(),
     onScroll,
-    onWheel,
     zoomTo,
     zoomBy,
     zoomByRatio,

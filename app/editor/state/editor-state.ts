@@ -28,6 +28,7 @@ export type EditorState = {
 
 export type EditorAction =
   | { type: "replace-annotations"; annotations: EditorAnnotation[]; markSaved?: boolean }
+  | { type: "append-annotations"; annotations: EditorAnnotation[]; markSaved?: boolean }
   | { type: "add-annotation"; annotation: EditorAnnotation; select?: boolean }
   | { type: "delete-annotations"; ids: string[] }
   | { type: "replace-annotations-batch"; removeIds: string[]; annotations: EditorAnnotation[]; selectIds?: string[] }
@@ -125,6 +126,24 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         gesture: null,
         saved: action.markSaved ?? true,
       };
+
+    case "append-annotations": {
+      if (!action.annotations.length) return { ...state, saved: action.markSaved ?? state.saved };
+      const existingIds = new Set(state.annotations.map((annotation) => annotation.id));
+      const additions = action.annotations.filter((annotation) => !existingIds.has(annotation.id));
+      if (!additions.length) return state;
+      // Imports arrive incrementally. Appending must not reset an active edit,
+      // selection or undo gesture merely because another image finished loading.
+      if (state.gesture) {
+        return {
+          ...state,
+          annotations: [...state.annotations, ...additions],
+          gesture: { ...state.gesture, annotations: [...state.gesture.annotations, ...additions] },
+          saved: action.markSaved ?? false,
+        };
+      }
+      return { ...state, annotations: [...state.annotations, ...additions], saved: action.markSaved ?? false };
+    }
 
     case "add-annotation": {
       const next = snapshot(state);
@@ -250,7 +269,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       if (!target) return state;
       const updated = insertAnnotationVertex(target, action.afterVertexId, action.point, action.vertexId);
       if (updated === target) return state;
-      const next = snapshot(state);
+      // A pointer insertion may immediately become a drag gesture. Keep its
+      // original geometry as the single undo baseline instead of snapshotting it twice.
+      const next = state.gesture ? state : snapshot(state);
       return {
         ...next,
         annotations: state.annotations.map((annotation) => annotation.id === target.id ? updated : annotation),
