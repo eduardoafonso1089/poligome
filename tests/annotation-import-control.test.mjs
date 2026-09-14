@@ -25,7 +25,7 @@ test("the image-panel COCO action opens the canonical annotation importer", asyn
   assert.match(importer, /candidates\.find\(\(candidate\) => candidate\.index === index\)\?\.geometries\.some\(\(item\) => nextGeometryTypes\.includes\(item\)\)/);
   assert.match(importer, /const chunkSize = selectedGeometryTypes\.includes\("polygon"\) \? 25 : 500/);
   assert.match(importer, /updateImportSelection\(plan\.geometryTypes, plan\.candidates\.map/);
-  assert.match(importer, /flushSync\(\(\) => \{\s*setImporting\(true\);\s*\}\)/);
+  assert.match(importer, /flushSync\(\(\) => \{\s*setImporting\(true\);\s*close\(\);/);
   assert.match(importer, /importedAnnotations\.push\(\.\.\.chunkResult\.annotations\);\s*unmatched \+= chunkResult\.unmatched;/);
   assert.match(importer, /disabled=\{importing \|\| !canImport\} onClick=\{\(\) => void importSelected\(\)\}>OK<\/button>/);
   // The import can always be dismissed/aborted, even while a load is in progress.
