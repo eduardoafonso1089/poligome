@@ -27,3 +27,10 @@ test('standalone canonical controls honor explicit or persisted language', () =>
     assert.match(source, /getCopy\(language \?\? storedLanguage\(\)\)/);
   }
 });
+
+test('batch simplification uses each selected polygon source image', () => {
+  assert.match(workbench, /const assetById = useMemo\(\(\) => new Map\(assets\.map/);
+  assert.match(workbench, /selectedIds\.includes\(annotation\.id\) && annotation\.type === "polygon"\)/);
+  assert.match(workbench, /const source = assetById\.get\(polygon\.asset\)/);
+  assert.match(workbench, /screenPixelsToImageUnits\(4, polygonImage, viewport\.layout\.width\)/);
+});

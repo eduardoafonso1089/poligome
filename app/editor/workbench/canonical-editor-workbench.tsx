@@ -105,9 +105,10 @@ export function CanonicalEditorWorkbench() {
     [activeAssetAnnotations, hiddenAnnotationIds, hiddenLabelIds],
   );
   const selectedIds = editor.selection.multiSelected.length ? editor.selection.multiSelected : editor.selection.selected ? [editor.selection.selected] : [];
+  const assetById = useMemo(() => new Map(assets.map((item) => [item.id, item])), [assets]);
   const selectedPolygons = useMemo(
-    () => editor.annotations.filter((annotation): annotation is Extract<EditorAnnotation, { type: "polygon" }> => selectedIds.includes(annotation.id) && annotation.type === "polygon" && annotation.asset === asset?.id),
-    [asset?.id, editor.annotations, selectedIds],
+    () => editor.annotations.filter((annotation): annotation is Extract<EditorAnnotation, { type: "polygon" }> => selectedIds.includes(annotation.id) && annotation.type === "polygon"),
+    [editor.annotations, selectedIds],
   );
   const activePolygon = editor.selectedAnnotation?.type === "polygon" && editor.selectedAnnotation.asset === asset?.id ? editor.selectedAnnotation : null;
   const activeColor = labels.find((label) => label.id === activeLabel)?.color ?? "#929a95";
@@ -618,9 +619,16 @@ export function CanonicalEditorWorkbench() {
 
   function simplifySelected() {
     if (!selectedPolygons.length) return;
-    const tolerance = screenPixelsToImageUnits(4, imageSize, viewport.layout.width);
     const simplified = selectedPolygons
-      .map((polygon) => simplifyPolygonAnnotation(polygon, tolerance))
+      .map((polygon) => {
+        const source = assetById.get(polygon.asset);
+        const polygonImage = {
+          width: Number(source?.width) || imageSize.width,
+          height: Number(source?.height) || imageSize.height,
+        };
+        const tolerance = screenPixelsToImageUnits(4, polygonImage, viewport.layout.width);
+        return simplifyPolygonAnnotation(polygon, tolerance);
+      })
       .filter((polygon, index) => polygon !== selectedPolygons[index]);
     if (!simplified.length) return;
     editor.dispatch({ type: "replace-annotations-by-id", annotations: simplified });
