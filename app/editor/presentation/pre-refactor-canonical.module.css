@@ -169,6 +169,25 @@
   cursor: pointer;
 }
 
+
+:global(.coco-import-modal) { width: min(560px, 100%); }
+:global(.coco-import-modal header small) { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+:global(.coco-import-tabs) { height: 40px; display: grid; grid-template-columns: 1fr 1fr; margin: 0 0 10px; border-bottom: 1px solid var(--line); }
+:global(.coco-import-tabs button) { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: 12px; font-weight: 700; cursor: pointer; }
+:global(.coco-import-tabs button.active) { border-color: var(--green); color: var(--btn-accent-ink); }
+:global(.coco-import-tabs b) { margin-left: 4px; padding: 2px 5px; border-radius: 8px; background: var(--control-bg); font-size: 10px; }
+:global(.coco-import-actions) { display: flex; justify-content: flex-end; gap: 6px; margin: 0 0 8px; }
+:global(.coco-import-actions button) { height: 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--control-bg); color: var(--btn-accent-ink); padding: 0 8px; font-size: 10px; font-weight: 700; cursor: pointer; }
+:global(.coco-import-list) { max-height: min(48vh, 420px); overflow: auto; display: grid; gap: 6px; padding-right: 3px; }
+:global(.coco-import-list > button) { width: 100%; min-height: 49px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); color: var(--ink); padding: 8px 10px; display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 9px; text-align: left; cursor: pointer; }
+:global(.coco-import-list > button.selected) { border-color: var(--green); background: color-mix(in srgb, var(--green) 10%, var(--surface)); }
+:global(.coco-import-list > button > i) { width: 18px; height: 18px; border: 1px solid var(--line); border-radius: 5px; display: grid; place-items: center; font-style: normal; color: var(--on-brand); }
+:global(.coco-import-list > button.selected > i) { border-color: var(--green); background: var(--green); }
+:global(.coco-import-list b), :global(.coco-import-list small) { display: block; }
+:global(.coco-import-list b) { font-size: 12px; }
+:global(.coco-import-list small) { margin-top: 2px; color: var(--muted); font-size: 10px; }
+:global(.coco-import-empty) { margin: 20px 6px; color: var(--muted); font-size: 12px; text-align: center; }
+
 :global(.canonical-management-panels .asset-row) { position: relative; }
 :global(.canonical-management-panels .asset-main) { min-width: 0; }
 :global(.canonical-management-panels .canonical-asset-actions) {

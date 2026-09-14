@@ -40,6 +40,9 @@ export function QualityReviewPanel({
   onAssetReview,
   onAnnotationReview,
   onLabelReview,
+  onFocusAsset,
+  onFocusLabel,
+  showTabs = true,
 }: {
   mode: "quality" | "review";
   assets: Asset[];
@@ -55,37 +58,40 @@ export function QualityReviewPanel({
   onAssetReview: (score: number) => void;
   onAnnotationReview: (score: number) => void;
   onLabelReview: (score: number) => void;
+  onFocusAsset?: (id: string) => void;
+  onFocusLabel?: (id: string) => void;
+  showTabs?: boolean;
 }) {
   const quality = buildQualitySummary(assets, labels, annotations);
   const activeLabel = labels.find((label) => label.id === activeLabelId) ?? labels[0] ?? null;
 
   return <aside className={ui.reviewPanel} aria-label={`${copy.quality} / ${copy.reviewTab}`}>
-    <div className={ui.reviewTabs}>
+    {showTabs && <div className={ui.reviewTabs}>
       <button type="button" aria-pressed={mode === "quality"} onClick={() => onModeChange("quality")}>{copy.quality}</button>
       <button type="button" aria-pressed={mode === "review"} onClick={() => onModeChange("review")}>{copy.reviewTab}</button>
-    </div>
+    </div>}
 
     {mode === "quality" ? <div>
       <section className={ui.reviewSection}>
         <b>{copy.qualityBalanceByImage}</b>
         <small className={ui.helperText}>{copy.qualityInstancesPerImage.replace("{min}", String(quality.minPerImage)).replace("{max}", String(quality.maxPerImage))}</small>
-        {quality.perImage.map(({ item, count }) => <div key={item.id} className={ui.metricRow}>
+        {quality.perImage.map(({ item, count }) => <button type="button" key={item.id} className={ui.metricRow} onClick={() => onFocusAsset?.(item.id)} aria-label={`${copy.reviewImage}: ${item.name}`}>
           <span title={item.name} className={ui.metricName}>{item.name}</span>
           <i className={ui.metricTrack}><em className={ui.metricFill} style={{ width: `${quality.maxPerImage ? count / quality.maxPerImage * 100 : 0}%` }} /></i>
           <b>{count}</b>
-        </div>)}
+        </button>)}
       </section>
 
       <section className={ui.reviewSection}>
         <b>{copy.qualityClassBalance}</b>
-        {quality.counts.map(({ label, count }) => {
+        {quality.counts.filter(({ label }) => label.id !== "unlabeled").map(({ label, count }) => {
           const dotStyle = { "--label-color": label.color } as CSSProperties;
-          return <div key={label.id} className={ui.metricClassRow}>
+          return <button type="button" key={label.id} className={ui.metricClassRow} onClick={() => onFocusLabel?.(label.id)} aria-label={`${copy.reviewClass}: ${label.name}`}>
             <i className={ui.metricDot} style={dotStyle} />
             <span>{label.name}</span>
             <b>{count}</b>
             <small>{count === quality.maxCount && count > 0 ? copy.qualityMajority : count <= Math.max(1, quality.maxCount * .25) ? copy.qualityMinority : copy.qualityBalanced}</small>
-          </div>;
+          </button>;
         })}
       </section>
 

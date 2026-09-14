@@ -34,6 +34,13 @@ const tutorialToolCopy = {
   es: { box: ["Selecciona la herramienta Caja", "Haz clic en la herramienta resaltada para empezar."], select: ["Selecciona la herramienta de movimiento", "Haz clic en la herramienta Seleccionar resaltada para editar la caja."] },
 } as const;
 
+const tutorialDragInstruction: Record<Language, string> = {
+  pt: "Arraste de uma diagonal \u00e0 outra para criar a caixa.",
+  en: "Drag from one diagonal corner to the other to create the box.",
+  fr: "Faites glisser d\u2019un coin diagonal \u00e0 l\u2019autre pour cr\u00e9er la bo\u00eete.",
+  es: "Arrastra de una esquina diagonal a la otra para crear la caja.",
+};
+
 export const tutorialSuccessTitle = { pt: "Muito bem!", en: "Great!", fr: "Très bien !", es: "¡Muy bien!" } as const;
 export const tutorialWrongDraw = {
   pt: "A anotação ficou fora do telhado destacado. Tente novamente.",
@@ -125,24 +132,38 @@ export function DemoTutorialOverlay({ step, toolPrompt, imageSize, language = st
   if (step === null) return null;
   const { sx, sy } = scales(imageSize);
   const fontScale = Math.min(sx, sy);
-  const hint = step === 0 ? { x: 405, y: 112, text: tutorialDrawHere } : step === 2 ? { x: 112, y: 438, text: tutorialModifyHere } : { x: 460, y: 365, text: tutorialClickPoint };
-  const showTarget = (((step === 0 || step === 2) && toolPrompt === null) || step === 4);
+  const hint = step === 0 ? { x: 330, y: 112, width: 270, text: tutorialDrawHere } : step === 2 ? { x: 112, y: 438, width: 120, text: tutorialModifyHere } : { x: 460, y: 365, width: 120, text: tutorialClickPoint };
+  const showTarget = ((step === 0 || step === 2) && toolPrompt === null) || step === 4;
+  const showDim = step === 0 || step === 2 || showTarget;
   return <>
-    {showTarget && <>
-      <mask id="demo-tutorial-mask" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse">
+    {showDim && <>
+      {showTarget && <mask id="demo-tutorial-mask" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse">
         <rect width={imageSize.width} height={imageSize.height} fill="white" />
         {step === 0 && <polygon points={`${357 * sx},${68 * sy} ${568 * sx},${72 * sy} ${567 * sx},${282 * sy} ${357 * sx},${277 * sy}`} fill="black" />}
         {step === 2 && <rect x={92 * sx} y={394 * sy} width={160 * sx} height={152 * sy} rx={12 * fontScale} fill="black" />}
         {step === 4 && <rect x={460 * sx} y={340 * sy} width={120 * sx} height={175 * sy} rx={10 * fontScale} fill="black" />}
-      </mask>
-      <rect className="demo-tutorial-image-dim" width={imageSize.width} height={imageSize.height} mask="url(#demo-tutorial-mask)" />
+      </mask>}
+      <rect className="demo-tutorial-image-dim" width={imageSize.width} height={imageSize.height} mask={showTarget ? "url(#demo-tutorial-mask)" : undefined} />
+      {showTarget && <>
       {step === 0 && <polygon className="demo-tutorial-target" points={`${357 * sx},${68 * sy} ${568 * sx},${72 * sy} ${567 * sx},${282 * sy} ${357 * sx},${277 * sy}`} />}
       {step === 2 && <rect className="demo-tutorial-target" x={92 * sx} y={394 * sy} width={160 * sx} height={152 * sy} rx={12 * fontScale} />}
       {step === 4 && <><rect className="demo-tutorial-model-region" x={460 * sx} y={340 * sy} width={120 * sx} height={175 * sy} rx={10 * fontScale} /><circle className="demo-tutorial-model-point" cx={525 * sx} cy={422 * sy} r={10 * fontScale} /></>}
-      <g className="demo-tutorial-click-hint" transform={`translate(${hint.x * sx} ${hint.y * sy})`}>
-        <rect x="0" y="0" width={120 * sx} height={30 * sy} rx={15 * fontScale} />
-        <text x={60 * sx} y={20 * sy} textAnchor="middle" fontSize={12 * fontScale}>{hint.text[language]}</text>
-      </g>
+      {step === 0 ? <g className="demo-tutorial-drag-hint" pointerEvents="none">
+        <line className="demo-tutorial-drag-path" x1={374 * sx} y1={86 * sy} x2={545 * sx} y2={258 * sy} />
+        <polyline className="demo-tutorial-drag-arrow" points={`${523 * sx},${258 * sy} ${545 * sx},${258 * sy} ${545 * sx},${236 * sy}`} />
+        <circle className="demo-tutorial-drag-pointer" r={7 * fontScale}>
+          <animateMotion dur="1.45s" repeatCount="indefinite" path={`M ${374 * sx} ${86 * sy} L ${545 * sx} ${258 * sy}`} />
+        </circle>
+      </g> : step === 2 ? <g className="demo-tutorial-drag-hint" pointerEvents="none">
+        <line className="demo-tutorial-drag-path" x1={140 * sx} y1={394 * sy} x2={164 * sx} y2={448 * sy} />
+        <polyline className="demo-tutorial-drag-arrow" points={`${151 * sx},${439 * sy} ${164 * sx},${448 * sy} ${166 * sx},${432 * sy}`} />
+        <circle className="demo-tutorial-drag-pointer" r={7 * fontScale}>
+          <animateMotion dur="1.45s" repeatCount="indefinite" path={`M ${140 * sx} ${394 * sy} L ${164 * sx} ${448 * sy}`} />
+        </circle>
+      </g> : <g className="demo-tutorial-click-hint" transform={`translate(${hint.x * sx} ${hint.y * sy})`}>
+        <rect x="0" y="0" width={hint.width * sx} height={30 * sy} rx={15 * fontScale} />
+        <text x={hint.width * sx / 2} y={20 * sy} textAnchor="middle" fontSize={12 * fontScale}>{hint.text[language]}</text>
+      </g>}</>}
     </>}
   </>;
 }
@@ -209,7 +230,7 @@ export function DemoTutorialChrome({ step, toolPrompt, language, onNextToEdit, o
   const stepIndex = Math.min(step, 4) as 0 | 1 | 2 | 3 | 4;
   const stepCopy = tutorialCopy[language][stepIndex];
   const title = toolPrompt ? tutorialToolCopy[language][toolPrompt][0] : stepCopy[0];
-  const detail = toolPrompt ? tutorialToolCopy[language][toolPrompt][1] : step === 5 ? copy.sam : stepCopy[1];
+  const detail = toolPrompt ? tutorialToolCopy[language][toolPrompt][1] : step === 0 ? tutorialDragInstruction[language] : step === 5 ? copy.sam : stepCopy[1];
   return <>
     {toolPrompt && <div className="demo-tutorial-tool-hint" aria-hidden="true"><span>{tutorialClickHere[language]}</span></div>}
     <section className="demo-tutorial-card" role="dialog" aria-live="polite" data-demo-tutorial-step={step}>

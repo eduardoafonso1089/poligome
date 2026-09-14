@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { Check, X } from "lucide-react";
 import type { Asset, Label } from "../../lib/types";
 import { getCopy, storedLanguage, type Language } from "../../lib/i18n";
 import { translateErrorCode } from "../../lib/error-message";
@@ -13,40 +15,58 @@ import {
   type CocoDocumentPlan,
 } from "./coco-document-import";
 
+function afterNextPaint() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+}
+
 type PendingCoco = {
   file: File;
   document: CocoDocumentInput;
   plan: CocoDocumentPlan;
 };
 
-export function CocoImportControl({
-  assets,
-  labels,
-  annotations,
-  makeId,
-  language,
-  disabled = false,
-  onImported,
-}: {
+export type CocoImportHandle = { open: () => void };
+
+type CocoImportControlProps = {
   assets: Asset[];
   labels: Label[];
   annotations: EditorAnnotation[];
   makeId: (prefix: string) => string;
   language?: Language;
   disabled?: boolean;
+  showTrigger?: boolean;
   onImported: (result: { labels: Label[]; annotations: EditorAnnotation[]; message: string }) => void;
-}) {
+};
+
+export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlProps>(function CocoImportControl({
+  assets,
+  labels,
+  annotations,
+  makeId,
+  language,
+  disabled = false,
+  showTrigger = true,
+  onImported,
+}, ref) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const importingRef = useRef(false);
+  const selectionTouchedRef = useRef(false);
+  const importSelectionRef = useRef<{ geometryTypes: CocoGeometry[]; selectedIndexes: number[] }>({ geometryTypes: [], selectedIndexes: [] });
   const [busy, setBusy] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [pending, setPending] = useState<PendingCoco | null>(null);
   const [geometryTypes, setGeometryTypes] = useState<CocoGeometry[]>([]);
   const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
   const [tab, setTab] = useState<"categories" | "annotations">("categories");
   const copy = getCopy(language ?? storedLanguage());
 
+  useImperativeHandle(ref, () => ({ open: () => inputRef.current?.click() }), []);
+
   const visibleCandidates = useMemo(() => pending?.plan.candidates.filter((candidate) =>
     candidate.geometries.some((geometry) => geometryTypes.includes(geometry)),
   ) ?? [], [geometryTypes, pending]);
+  const activeImportSelection = pending ? currentImportSelection(pending) : { geometryTypes: [], selectedIndexes: [] };
+  const canImport = activeImportSelection.geometryTypes.length > 0 && activeImportSelection.selectedIndexes.length > 0;
 
   async function inspectFile(file: File) {
     setBusy(true);
@@ -58,8 +78,7 @@ export function CocoImportControl({
         return;
       }
       setPending({ file, document, plan });
-      setGeometryTypes(plan.geometryTypes);
-      setSelectedIndexes(plan.candidates.map((candidate) => candidate.index));
+      updateImportSelection(plan.geometryTypes, plan.candidates.map((candidate) => candidate.index), false);
       setTab("categories");
     } catch (error) {
       onImported({
@@ -74,40 +93,110 @@ export function CocoImportControl({
 
   function close() {
     setPending(null);
-    setGeometryTypes([]);
-    setSelectedIndexes([]);
+    updateImportSelection([], [], false);
     setTab("categories");
   }
 
+  function updateImportSelection(nextGeometryTypes: CocoGeometry[], nextSelectedIndexes: number[], touched = true) {
+    selectionTouchedRef.current = touched;
+    importSelectionRef.current = { geometryTypes: nextGeometryTypes, selectedIndexes: nextSelectedIndexes };
+    setGeometryTypes(nextGeometryTypes);
+    setSelectedIndexes(nextSelectedIndexes);
+  }
+
+  function currentImportSelection(currentPending: PendingCoco) {
+    if (!selectionTouchedRef.current) {
+      return {
+        geometryTypes: currentPending.plan.geometryTypes,
+        selectedIndexes: currentPending.plan.candidates.map((candidate) => candidate.index),
+      };
+    }
+    return importSelectionRef.current;
+  }
+
   function toggleGeometry(geometry: CocoGeometry) {
-    const enabled = geometryTypes.includes(geometry);
-    const affected = pending?.plan.candidates.filter((candidate) => candidate.geometries.includes(geometry)).map((candidate) => candidate.index) ?? [];
+    const currentSelection = importSelectionRef.current;
+    const enabled = currentSelection.geometryTypes.includes(geometry);
+    const candidates = pending?.plan.candidates ?? [];
+    const affected = candidates.filter((candidate) => candidate.geometries.includes(geometry)).map((candidate) => candidate.index);
     if (enabled) {
-      setGeometryTypes((items) => items.filter((item) => item !== geometry));
-      setSelectedIndexes((items) => items.filter((index) => !affected.includes(index)));
+      const nextGeometryTypes = currentSelection.geometryTypes.filter((item) => item !== geometry);
+      updateImportSelection(
+        nextGeometryTypes,
+        currentSelection.selectedIndexes.filter((index) => candidates.find((candidate) => candidate.index === index)?.geometries.some((item) => nextGeometryTypes.includes(item))),
+      );
     } else {
-      setGeometryTypes((items) => [...items, geometry]);
-      setSelectedIndexes((items) => Array.from(new Set([...items, ...affected])));
+      updateImportSelection(
+        [...currentSelection.geometryTypes, geometry],
+        Array.from(new Set([...currentSelection.selectedIndexes, ...affected])),
+      );
     }
   }
 
   function toggleCandidate(index: number) {
-    setSelectedIndexes((items) => items.includes(index) ? items.filter((item) => item !== index) : [...items, index]);
+    const currentSelection = importSelectionRef.current;
+    updateImportSelection(
+      currentSelection.geometryTypes,
+      currentSelection.selectedIndexes.includes(index)
+        ? currentSelection.selectedIndexes.filter((item) => item !== index)
+        : [...currentSelection.selectedIndexes, index],
+    );
   }
 
-  function importSelected() {
-    if (!pending || !selectedIndexes.length || !geometryTypes.length) return;
-    const result = importCocoDocument(pending.document, assets, labels, makeId, {
-      selectedAnnotationIndexes: selectedIndexes,
-      geometryTypes,
-      unlabeledName: copy.unlabeled,
+  async function importSelected() {
+    if (!pending) return;
+    const { geometryTypes: selectedGeometryTypes, selectedIndexes: currentSelectedIndexes } = currentImportSelection(pending);
+    if (importingRef.current || !currentSelectedIndexes.length || !selectedGeometryTypes.length) return;
+    importingRef.current = true;
+    flushSync(() => {
+      setImporting(true);
+      close();
     });
+    await afterNextPaint();
+    let nextLabels = labels;
+    const importedAnnotations: EditorAnnotation[] = [];
+    let unmatched = 0;
+    try {
+      const sourceAnnotations = pending.document.annotations ?? [];
+      const selectedAnnotations = currentSelectedIndexes.flatMap((index) => sourceAnnotations[index] ? [sourceAnnotations[index]] : []);
+      const chunkSize = selectedGeometryTypes.includes("polygon") ? 25 : 500;
+
+      for (let offset = 0; offset < selectedAnnotations.length; offset += chunkSize) {
+        const chunk = selectedAnnotations.slice(offset, offset + chunkSize);
+        const chunkResult = importCocoDocument(
+          { ...pending.document, annotations: chunk },
+          assets,
+          nextLabels,
+          makeId,
+          { geometryTypes: selectedGeometryTypes, unlabeledName: copy.unlabeled },
+        );
+        nextLabels = chunkResult.labels;
+        importedAnnotations.push(...chunkResult.annotations);
+        unmatched += chunkResult.unmatched;
+        onImported({
+          labels: nextLabels,
+          annotations: [...annotations, ...importedAnnotations],
+          message: `${importedAnnotations.length} ${copy.annotationsToLoad}${unmatched ? ` · ${unmatched}` : ""}.`,
+        });
+        await afterNextPaint();
+      }
+      const result = { labels: nextLabels, annotations: importedAnnotations, imported: importedAnnotations.length, unmatched };
     onImported({
       labels: result.labels,
       annotations: [...annotations, ...result.annotations],
       message: `${result.imported} ${copy.annotationsToLoad}${result.unmatched ? ` · ${result.unmatched}` : ""}.`,
-    });
-    close();
+      });
+      close();
+    } catch (error) {
+      onImported({
+        labels: nextLabels,
+        annotations: [...annotations, ...importedAnnotations],
+        message: translateErrorCode(error, copy, copy.projectOpenError),
+      });
+    } finally {
+      importingRef.current = false;
+      setImporting(false);
+    }
   }
 
   const geometryLabel = (geometry: CocoGeometry) => geometry === "box" ? copy.box : geometry === "point" ? copy.point : copy.polygon;
@@ -124,58 +213,58 @@ export function CocoImportControl({
         event.currentTarget.value = "";
       }}
     />
-    <button onClick={() => inputRef.current?.click()} disabled={disabled || busy || !assets.length}>
+    {showTrigger && <button onClick={() => inputRef.current?.click()} disabled={disabled || busy || !assets.length}>
       {busy ? `${copy.progress}…` : "COCO"}
-    </button>
+    </button>}
 
-    {pending && <div role="dialog" aria-modal="true" aria-label={copy.chooseAnnotations} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,.45)", display: "grid", placeItems: "center", padding: 16 }}>
-      <section style={{ width: "min(720px, 100%)", maxHeight: "80vh", overflow: "auto", background: "var(--paper)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 10, padding: 16, boxShadow: "0 18px 48px rgba(0,0,0,.25)" }}>
-        <header style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+    {pending && <div className="modal-backdrop" role="presentation">
+      <section className="sam-modal coco-import-modal" role="dialog" aria-modal="true" aria-busy={importing} aria-labelledby="coco-import-title">
+        <header>
           <div><strong>{copy.chooseAnnotations}</strong><div style={{ fontSize: 13, opacity: .72, marginTop: 4 }}>{copy.chooseAnnotationsHint}</div><div style={{ fontSize: 12, opacity: .6, marginTop: 2 }}>{pending.file.name}</div></div>
-          <button type="button" onClick={close}>{copy.cancel}</button>
+          <button type="button" disabled={importing} onClick={close} aria-label={copy.close}><X size={19} /></button>
         </header>
 
-        <div style={{ display: "flex", gap: 6, margin: "14px 0 10px" }}>
-          <button type="button" aria-pressed={tab === "categories"} onClick={() => setTab("categories")}>{copy.annotationCategories}</button>
-          <button type="button" aria-pressed={tab === "annotations"} onClick={() => setTab("annotations")}>{copy.annotations} ({visibleCandidates.length})</button>
+        <div className="coco-import-tabs">
+          <button type="button" className={tab === "categories" ? "active" : ""} aria-pressed={tab === "categories"} onClick={() => setTab("categories")}>{copy.annotationCategories}</button>
+          <button type="button" className={tab === "annotations" ? "active" : ""} aria-pressed={tab === "annotations"} onClick={() => setTab("annotations")}>{copy.annotations} ({visibleCandidates.length})</button>
         </div>
 
         {tab === "categories" ? <>
-          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-            <button type="button" onClick={() => { setGeometryTypes(pending.plan.geometryTypes); setSelectedIndexes(pending.plan.candidates.map((candidate) => candidate.index)); }}>{copy.selectAllCategories}</button>
-            <button type="button" onClick={() => { setGeometryTypes([]); setSelectedIndexes([]); }}>{copy.clearClassSelection}</button>
+          <div className="coco-import-actions">
+            <button type="button" onClick={() => updateImportSelection(pending.plan.geometryTypes, pending.plan.candidates.map((candidate) => candidate.index))}>{copy.selectAllCategories}</button>
+            <button type="button" onClick={() => updateImportSelection([], [])}>{copy.clearClassSelection}</button>
           </div>
-          <div style={{ display: "grid", gap: 6 }}>
+          <div className="coco-import-list">
             {pending.plan.geometryTypes.map((geometry) => {
               const checked = geometryTypes.includes(geometry);
               const count = pending.plan.candidates.filter((candidate) => candidate.geometries.includes(geometry)).length;
-              return <button type="button" key={geometry} aria-pressed={checked} onClick={() => toggleGeometry(geometry)} style={{ textAlign: "left", padding: 10, fontWeight: checked ? 700 : 400 }}>
-                {checked ? "✓ " : "○ "}{geometryLabel(geometry)} · {count} {copy.annotationsToLoad}
+              return <button type="button" key={geometry} className={checked ? "selected" : ""} aria-pressed={checked} onClick={() => toggleGeometry(geometry)}>
+                <i>{checked && <Check size={13} />}</i><span><b>{geometryLabel(geometry)}</b><small>{count} {copy.annotationsToLoad}</small></span>
               </button>;
             })}
           </div>
         </> : <>
-          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-            <button type="button" onClick={() => setSelectedIndexes((items) => Array.from(new Set([...items, ...visibleCandidates.map((candidate) => candidate.index)])))}>{copy.selectAllAnnotations}</button>
-            <button type="button" onClick={() => setSelectedIndexes((items) => items.filter((index) => !visibleCandidates.some((candidate) => candidate.index === index)))}>{copy.clearAnnotationSelection}</button>
+          <div className="coco-import-actions">
+            <button type="button" onClick={() => updateImportSelection(importSelectionRef.current.geometryTypes, Array.from(new Set([...importSelectionRef.current.selectedIndexes, ...visibleCandidates.map((candidate) => candidate.index)])))}>{copy.selectAllAnnotations}</button>
+            <button type="button" onClick={() => updateImportSelection(importSelectionRef.current.geometryTypes, importSelectionRef.current.selectedIndexes.filter((index) => !visibleCandidates.some((candidate) => candidate.index === index)))}>{copy.clearAnnotationSelection}</button>
           </div>
-          <div style={{ display: "grid", gap: 6 }}>
+          <div className="coco-import-list">
             {visibleCandidates.map((candidate) => {
               const checked = selectedIndexes.includes(candidate.index);
               const geometries = candidate.geometries.filter((geometry) => geometryTypes.includes(geometry));
-              return <button type="button" key={candidate.index} aria-pressed={checked} onClick={() => toggleCandidate(candidate.index)} style={{ textAlign: "left", padding: 10, fontWeight: checked ? 700 : 400 }}>
-                {checked ? "✓ " : "○ "}<strong>{candidate.labelName}</strong> · {candidate.imageName} · {geometries.map(geometryLabel).join(" + ")}
+              return <button type="button" key={candidate.index} className={checked ? "selected" : ""} aria-pressed={checked} onClick={() => toggleCandidate(candidate.index)}>
+                <i>{checked && <Check size={13} />}</i><span><b>{candidate.labelName}</b><small>{candidate.imageName} · {geometries.map(geometryLabel).join(" + ")}</small></span>
               </button>;
             })}
-            {!visibleCandidates.length && <div style={{ padding: 12, opacity: .7 }}>{copy.noCategoriesSelected}</div>}
+            {!visibleCandidates.length && <p className="coco-import-empty">{copy.noCategoriesSelected}</p>}
           </div>
         </>}
 
-        <footer style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
-          <button type="button" onClick={close}>{copy.cancel}</button>
-          <button type="button" disabled={!selectedIndexes.length || !geometryTypes.length} onClick={importSelected}>{copy.importSelectedAnnotations}</button>
+        <footer>
+          <button type="button" disabled={importing} onClick={close}>{copy.cancel}</button>
+          <button type="button" disabled={importing || !canImport} onClick={() => void importSelected()}>OK</button>
         </footer>
       </section>
     </div>}
   </>;
-}
+});

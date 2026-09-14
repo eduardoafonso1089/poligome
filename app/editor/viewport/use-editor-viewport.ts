@@ -45,14 +45,6 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
 
   useEffect(() => {
     controllerRef.current.setImage(image);
-    const scroller = scrollRef.current;
-    if (scroller) {
-      controllerRef.current.setViewport({ width: scroller.clientWidth || 1, height: scroller.clientHeight || 1 });
-      controllerRef.current.setZoom(historicalFitZoom(
-        { width: scroller.clientWidth || 1, height: scroller.clientHeight || 1 },
-        image,
-      ));
-    }
     setState(controllerRef.current.snapshot());
   }, [image.height, image.width]);
 
@@ -149,7 +141,7 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
   }, [publish, syncBeforeGesture]);
 
   const onWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
-    if (!event.ctrlKey && !event.metaKey) return;
+    if (!event.shiftKey && !event.ctrlKey && !event.metaKey) return;
     event.preventDefault();
     const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2;
     zoomTo(state.zoom * factor, { x: event.clientX, y: event.clientY });

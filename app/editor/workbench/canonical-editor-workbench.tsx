@@ -9,7 +9,7 @@ import type { EditorAnnotation } from "../models/annotation-model";
 import type { BoxCorner } from "../layers/box-layer";
 import { createEditorDemo, openEditorProject, saveEditorProject } from "../session/editor-session-io";
 import { loadLocalImageAssets, relinkMissingAssets } from "../session/image-assets";
-import { CocoImportControl } from "../import/coco-import-control";
+import { CocoImportControl, type CocoImportHandle } from "../import/coco-import-control";
 import { RasterImportControl, type RasterImportResult } from "../import/raster-import-control";
 import { ExportControls } from "../export/export-controls";
 import { useEditorState } from "../state/use-editor-state";
@@ -78,6 +78,7 @@ export function CanonicalEditorWorkbench() {
   const objectUrls = useRef<string[]>([]);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const annotationImportRef = useRef<CocoImportHandle>(null);
   const relinkInputRef = useRef<HTMLInputElement>(null);
   const idCounter = useRef(0);
   const demoQueryHandled = useRef(false);
@@ -478,26 +479,29 @@ export function CanonicalEditorWorkbench() {
     });
   }
 
-  function deleteAsset(id: string) {
-    const index = assets.findIndex((item) => item.id === id);
-    if (index < 0) return;
-    const item = assets[index];
-    const annotationIds = editor.annotations.filter((annotation) => annotation.asset === id).map((annotation) => annotation.id);
+  function deleteAssets(ids: string[]) {
+    const removedIds = new Set(ids);
+    const removedAssets = assets.filter((item) => removedIds.has(item.id));
+    if (!removedAssets.length) return;
+    const index = assets.findIndex((item) => item.id === current);
+    const annotationIds = editor.annotations.filter((annotation) => removedIds.has(annotation.asset)).map((annotation) => annotation.id);
     if (annotationIds.length) editor.deleteAnnotations(annotationIds);
-    const remaining = assets.filter((candidate) => candidate.id !== id);
+    const remaining = assets.filter((candidate) => !removedIds.has(candidate.id));
     setAssets(remaining);
     setHiddenAnnotationIds((currentHidden) => new Set([...currentHidden].filter((annotationId) => !annotationIds.includes(annotationId))));
-    if (current === id) {
+    if (current && removedIds.has(current)) {
       setCurrent(remaining[Math.min(index, Math.max(0, remaining.length - 1))]?.id ?? "");
       editor.dispatch({ type: "clear-selection" });
       viewport.zoomTo(92);
     }
-    if (item.src.startsWith("blob:")) {
+    removedAssets.filter((item) => item.src.startsWith("blob:")).forEach((item) => {
       objectUrls.current = objectUrls.current.filter((url) => url !== item.src);
       URL.revokeObjectURL(item.src);
-    }
+    });
     setSessionDirty(true);
   }
+
+  function deleteAsset(id: string) { deleteAssets([id]); }
 
   function selectAnnotationFromPanel(id: string, modifiers: { shift: boolean; additive: boolean }) {
     if (modifiers.shift) {
@@ -857,7 +861,6 @@ export function CanonicalEditorWorkbench() {
     onHome: () => { if (!projectDirty || window.confirm(copy.confirmLeaveHome)) window.location.assign("/"); },
     onNewProject: startNewProject,
     onRenameProject: (name: string) => { setProjectName(name); setSessionDirty(true); },
-    onDemo: () => { if (!projectDirty || window.confirm(copy.replaceUnsavedProject)) void loadDemo(); },
     onOpenProject: () => projectInputRef.current?.click(),
     onImportImages: () => imageInputRef.current?.click(),
     onSaveProject: (mode: ProjectSaveMode) => void saveProject(mode),
@@ -896,9 +899,9 @@ export function CanonicalEditorWorkbench() {
 
     <PreRefactorTopbar {...chromeProps} fileMenuExtras={<div className="canonical-file-extras">
       <RasterImportControl makeId={makeId} language={language} disabled={loading} onImported={applyRasterImport} onMessage={setMessage} />
-      <CocoImportControl assets={assets} labels={labels} annotations={editor.annotations} makeId={makeId} language={language} disabled={loading} onImported={applyCocoImport} />
       <ExportControls assets={assets} labels={labels} annotations={editor.annotations} language={language} disabled={loading} onMessage={setMessage} />
     </div>} />
+    <CocoImportControl ref={annotationImportRef} assets={assets} labels={labels} annotations={editor.annotations} makeId={makeId} language={language} disabled={loading} showTrigger={false} onImported={applyCocoImport} />
 
     <div className="workspace">
       <EditorManagementPanels
@@ -914,10 +917,12 @@ export function CanonicalEditorWorkbench() {
         copy={copy}
         loading={loading}
         onImportImages={() => imageInputRef.current?.click()}
+        onImportAnnotations={() => annotationImportRef.current?.open()}
         onLoadDemo={() => { if (!projectDirty || window.confirm(copy.replaceUnsavedProject)) void loadDemo(); }}
         onSelectAsset={selectAsset}
         onMoveAsset={moveAsset}
         onDeleteAsset={deleteAsset}
+        onDeleteAssets={deleteAssets}
         onSelectAnnotation={selectAnnotationFromPanel}
         onMoveAnnotation={(id, delta) => editor.dispatch({ type: "reorder-annotation", id, delta })}
         onDeleteAnnotations={deleteAnnotations}

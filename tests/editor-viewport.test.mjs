@@ -52,3 +52,8 @@ test('the editor scroll container aligns oversized canvases to the reachable ori
   assert.match(scrollRule, /place-items:start/);
   assert.match(scrollRule, /scrollbar-gutter:auto/);
 });
+
+test('laptop wheel zoom accepts Shift as well as platform zoom modifiers', () => {
+  const hook = readFileSync(new URL('../app/editor/viewport/use-editor-viewport.ts', import.meta.url), 'utf8');
+  assert.match(hook, /!event\.shiftKey && !event\.ctrlKey && !event\.metaKey/);
+});

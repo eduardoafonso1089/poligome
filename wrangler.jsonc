@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "poligome",
-  "compatibility_date": "2026-09-06",
+  "compatibility_date": "2026-05-22",
   "assets": {
     "directory": "./out",
     "not_found_handling": "404-page",

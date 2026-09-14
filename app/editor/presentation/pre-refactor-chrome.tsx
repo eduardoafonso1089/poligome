@@ -79,7 +79,6 @@ export type PreRefactorChromeProps = {
   onHome: () => void;
   onNewProject: () => void;
   onRenameProject: (name: string) => void;
-  onDemo: () => void;
   onOpenProject: () => void;
   onImportImages: () => void;
   onSaveProject: (mode: ProjectSaveMode) => void;
@@ -302,8 +301,8 @@ export function PreRefactorToolbar(props: PreRefactorChromeProps) {
       </>}
       {cancellableTool && <button disabled={!props.hasDraft} onClick={props.onCancelDrawing}><X size={16} />{copy.cancel}</button>}
       {props.tool === "select" && !props.vectorTool && <>
-        <button aria-pressed={props.addToSelection} onClick={props.onToggleMultiSelect}><Combine size={16} />{copy.multipleSelection}</button>
-        <button disabled={!props.hasSelection} onClick={props.onDelete}><Trash2 size={16} />{copy.deleteSelectedAnnotations}</button>
+        {props.touchMode && <button aria-pressed={props.addToSelection} onClick={props.onToggleMultiSelect}><Combine size={16} />{copy.multipleSelection}</button>}
+        {props.touchMode && <button disabled={!props.hasSelection} onClick={props.onDelete}><Trash2 size={16} />{copy.deleteSelectedAnnotations}</button>}
       </>}
     </div>}
 
@@ -312,7 +311,7 @@ export function PreRefactorToolbar(props: PreRefactorChromeProps) {
         <span><Images size={30} /></span>
         <h2>{copy.emptyProjectTitle}</h2>
         <p>{copy.emptyProjectHint}</p>
-        <div><button disabled={props.loading} onClick={props.onImportImages}><ImagePlus size={16} />{copy.importImages}</button><button disabled={props.loading} onClick={props.onOpenProject}><FolderUp size={16} />{copy.openProject}</button><button disabled={props.loading} onClick={props.onDemo}><WandSparkles size={16} />{copy.tryDemo}</button></div>
+        <div><button disabled={props.loading} onClick={props.onImportImages}><ImagePlus size={16} />{copy.importImages}</button><button disabled={props.loading} onClick={props.onOpenProject}><FolderUp size={16} />{copy.openProject}</button></div>
         <small>{copy.privacy}</small>
       </div>
     </div>}

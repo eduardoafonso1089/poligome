@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import {
   BarChart3, Check, ClipboardCheck, Eye, EyeOff, FileText, GripVertical,
   ImagePlus, LoaderCircle, Menu, MoreHorizontal, Palette, PanelLeftClose, PanelLeftOpen,
@@ -31,10 +31,12 @@ type Props = {
   copy: Copy;
   loading?: boolean;
   onImportImages?: () => void;
+  onImportAnnotations?: () => void;
   onLoadDemo?: () => void;
   onSelectAsset: (id: string) => void;
   onMoveAsset: (id: string, delta: -1 | 1) => void;
   onDeleteAsset: (id: string) => void;
+  onDeleteAssets: (ids: string[]) => void;
   onSelectAnnotation: (id: string, modifiers: { shift: boolean; additive: boolean }) => void;
   onMoveAnnotation: (id: string, delta: -1 | 1) => void;
   onDeleteAnnotations: (ids: string[]) => void;
@@ -48,10 +50,13 @@ type Props = {
   onRenameLabel: (id: string, name: string) => void;
   onRecolorLabel: (id: string, color: string) => void;
   onDeleteLabel: (id: string) => void;
+  qualityContent?: ReactNode;
+  reviewContent?: ReactNode;
 };
 
 function stop(event: MouseEvent) { event.stopPropagation(); }
 function classes(...items: Array<string | false | null | undefined>) { return items.filter(Boolean).join(" "); }
+function sentenceCase(value: string) { return value.charAt(0) + value.slice(1).toLocaleLowerCase(); }
 
 export function EditorManagementPanels(props: Props) {
   const {
@@ -69,6 +74,7 @@ export function EditorManagementPanels(props: Props) {
   const [rightTab, setRightTab] = useState<RightTab>("annotations");
   const [classManagerOpen, setClassManagerOpen] = useState(false);
   const [assetReorder, setAssetReorder] = useState<ReorderDrag | null>(null);
+  const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     const openImages = () => { setLeftPanelCollapsed(false); setLeftOpen(true); setRightOpen(false); };
@@ -114,6 +120,19 @@ export function EditorManagementPanels(props: Props) {
     const annotationWarning = annotationCount ? `\n${annotationCount} ${copy.annotations.toLocaleLowerCase()}. ${copy.deleteAnnotationsWarning}` : "";
     if (!window.confirm(`${copy.deleteSelectedAnnotations}: ${item.name}?${annotationWarning}`)) return;
     props.onDeleteAsset(item.id);
+  }
+
+  function confirmSelectedAssetsDelete() {
+    const selectedAssets = assets.filter((item) => selectedImageIds.has(item.id));
+    if (!selectedAssets.length) {
+      if (currentAsset) confirmAssetDelete(currentAsset, annotations.filter((annotation) => annotation.asset === currentAsset.id).length);
+      return;
+    }
+    const annotationCount = annotations.filter((annotation) => selectedImageIds.has(annotation.asset)).length;
+    const annotationWarning = annotationCount ? `\n${annotationCount} ${copy.annotations.toLocaleLowerCase()}. ${copy.deleteAnnotationsWarning}` : "";
+    if (!window.confirm(`${copy.deleteSelectedAnnotations}: ${selectedAssets.length} ${copy.images.toLocaleLowerCase()}?${annotationWarning}`)) return;
+    props.onDeleteAssets(selectedAssets.map((item) => item.id));
+    setSelectedImageIds(new Set());
   }
 
   function confirmLabelDelete(label: Label) {
@@ -183,12 +202,13 @@ export function EditorManagementPanels(props: Props) {
         <span>{copy.images} <b>{assets.length}</b></span>
         <div>
           <button title={copy.importImages} aria-label={copy.importImages} disabled={props.loading} onClick={props.onImportImages}><Plus size={16} /></button>
-          <button title={copy.selectAllAnnotations} aria-label={copy.selectAllAnnotations} disabled={!assets.length} onClick={props.onSelectAllAnnotations}><Check size={16} /></button>
-          <button title="COCO JSON" aria-label="COCO JSON" disabled={!assets.length}><FileText size={16} /></button>
-          <button title={copy.deleteSelectedAnnotations} aria-label={copy.deleteSelectedAnnotations} disabled={!currentAsset} onClick={() => currentAsset && confirmAssetDelete(currentAsset, annotations.filter((a) => a.asset === currentAsset.id).length)}><Trash2 size={16} /></button>
+          <button title={copy.selectAllImages} aria-label={copy.selectAllImages} disabled={!assets.length} onClick={() => setSelectedImageIds(new Set(assets.map((asset) => asset.id)))}><Check size={16} /></button>
+          <button title={copy.clearImageSelection} aria-label={copy.clearImageSelection} disabled={!selectedImageIds.size} onClick={() => setSelectedImageIds(new Set())}><X size={16} /></button>
+          <button title={copy.deleteSelectedAnnotations} aria-label={copy.deleteSelectedAnnotations} disabled={!currentAsset && !selectedImageIds.size} onClick={confirmSelectedAssetsDelete}><Trash2 size={16} /></button>
         </div>
       </div>
       {props.onImportImages && <button type="button" className="import" disabled={props.loading} onClick={props.onImportImages}><ImagePlus size={16} />{copy.importImages}</button>}
+      {props.onImportAnnotations && <button type="button" className="import coco-import-action" disabled={props.loading || !assets.length} onClick={props.onImportAnnotations}><FileText size={16} /><span>{sentenceCase(copy.annotations)}</span></button>}
       {props.onLoadDemo && <button type="button" className="demo-import" disabled={props.loading} onClick={props.onLoadDemo}>{props.loading ? <LoaderCircle className="spin" size={15} /> : <WandSparkles size={15} />}{copy.tryDemo}</button>}
       <label className="search"><Search size={14} /><input aria-label={copy.searchImage} value={imageSearch} onChange={(event) => setImageSearch(event.target.value)} placeholder={copy.searchImage} /></label>
       <div className="progress"><div><span>{copy.progress}</span><b>{completed} {copy.of} {assets.length}</b></div><i><em style={{ width: `${assets.length ? completed / assets.length * 100 : 0}%` }} /></i></div>
@@ -198,6 +218,7 @@ export function EditorManagementPanels(props: Props) {
           const count = annotations.filter((annotation) => annotation.asset === item.id).length;
           const details = item.width && item.height ? `${item.width} × ${item.height}` : `${count} ${copy.projectAnnotations}`;
           const active = item.id === currentAssetId;
+          const selectedImage = selectedImageIds.has(item.id);
           const dropClass = assetReorder?.targetId === item.id ? `drop-${assetReorder.position}` : "";
           return <div
             key={item.id}
@@ -223,7 +244,17 @@ export function EditorManagementPanels(props: Props) {
               onDragEnd={() => setAssetReorder(null)}
               onKeyDown={(event) => moveAssetByKeyboard(event, item.id)}
             ><GripVertical size={14} /></button>
-            <span className={classes("asset-selector", active && "selected")} aria-hidden="true">{active ? <Check size={11} /> : null}</span>
+            <button
+              type="button"
+              className={classes("asset-selector", selectedImage && "selected")}
+              aria-label={`${selectedImage ? copy.deselectImage : copy.selectImage}: ${item.name}`}
+              aria-pressed={selectedImage}
+              onClick={() => setSelectedImageIds((items) => {
+                const next = new Set(items);
+                if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                return next;
+              })}
+            >{selectedImage ? <Check size={11} /> : null}</button>
             <button className="asset-main" onClick={() => { props.onSelectAsset(item.id); setLeftOpen(false); }} title={item.name}>
               <div className="thumb" style={{ backgroundImage: item.src ? `url(${item.src})` : "none" }}><span>{String(index + 1).padStart(2, "0")}</span></div>
               <div><strong>{item.name}</strong><small>{details}</small></div>
@@ -238,16 +269,16 @@ export function EditorManagementPanels(props: Props) {
     <aside data-panel="right" data-open={rightOpen ? "true" : "false"} className={classes("labels", rightOpen && "open", rightPanelCollapsed && "collapsed")}>
       <button className="sidebar-restore sidebar-restore-right" title={copy.annotations} aria-label={copy.annotations} onClick={() => setRightPanelCollapsed(false)}><PanelRightOpen size={17} /></button>
       <button className="panel-collapse panel-collapse-right" title={copy.annotations} aria-label={copy.annotations} onClick={() => { setRightPanelCollapsed(true); setRightOpen(false); }}><PanelRightClose size={16} /></button>
-      <div data-drawer-header="true" className="drawer-head"><b>{copy.annotations}</b><button aria-label={copy.closePanel} onClick={() => setRightOpen(false)}><X size={19} /></button></div>
+      <div data-drawer-header="true" className="drawer-head"><b>{sentenceCase(copy.annotations)}</b><button aria-label={copy.closePanel} onClick={() => setRightOpen(false)}><X size={19} /></button></div>
       <div className="tabs dataset-tabs" role="tablist" aria-label={copy.annotations}>
-        <button className={rightTab === "annotations" ? "active" : ""} role="tab" aria-selected={rightTab === "annotations"} onClick={() => setRightTab("annotations")}>{copy.annotations}</button>
+        <button className={rightTab === "annotations" ? "active" : ""} role="tab" aria-selected={rightTab === "annotations"} onClick={() => setRightTab("annotations")}>{sentenceCase(copy.annotations)}</button>
         <button className={rightTab === "quality" ? "active" : ""} role="tab" aria-selected={rightTab === "quality"} onClick={() => setRightTab("quality")}><BarChart3 size={14} />{copy.quality}</button>
         <button className={rightTab === "review" ? "active" : ""} role="tab" aria-selected={rightTab === "review"} onClick={() => setRightTab("review")}><ClipboardCheck size={14} />{copy.reviewTab}</button>
       </div>
 
       {rightTab === "annotations" && <div className="annotation-editor">
         <section className="annotation-panel-head">
-          <div><b>{copy.annotations} · {activeAssetAnnotations.length}</b><span>{copy.annotationPanelHint}</span></div>
+          <div><b>{sentenceCase(copy.annotations)} · {activeAssetAnnotations.length}</b><span>{copy.annotationPanelHint}</span></div>
           <div className="annotation-panel-actions">
             <button disabled={!activeAssetAnnotations.length} title={allHidden ? copy.showAllAnnotations : copy.hideAllAnnotations} onClick={toggleAllAnnotations}>{allHidden ? <EyeOff size={14} /> : <Eye size={14} />}{allHidden ? copy.showAllAnnotations : copy.hideAllAnnotations}</button>
             <button onClick={() => setClassManagerOpen(true)}><Palette size={14} />{copy.manageClasses}</button>
@@ -279,8 +310,8 @@ export function EditorManagementPanels(props: Props) {
         </div>
       </div>}
 
-      {rightTab === "quality" && <div className="canonical-placeholder"><BarChart3 size={20} /><b>{copy.quality}</b><span>{copy.annotationPanelHint}</span></div>}
-      {rightTab === "review" && <div className="canonical-placeholder"><ClipboardCheck size={20} /><b>{copy.reviewTab}</b><span>{copy.annotationPanelHint}</span></div>}
+      {rightTab === "quality" && (props.qualityContent ?? <div className="canonical-placeholder"><BarChart3 size={20} /><b>{copy.quality}</b><span>{copy.annotationPanelHint}</span></div>)}
+      {rightTab === "review" && (props.reviewContent ?? <div className="canonical-placeholder"><ClipboardCheck size={20} /><b>{copy.reviewTab}</b><span>{copy.annotationPanelHint}</span></div>)}
       <div className="hint"><b>{copy.quickTip}</b><p>{copy.shortcutHint}</p></div>
     </aside>
 
