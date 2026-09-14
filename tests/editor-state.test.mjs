@@ -86,3 +86,17 @@ test('incremental imports preserve an active polygon edit and its undo baseline'
   assert.deepEqual(state.annotations.map(annotation=>annotation.id),['p','loaded']);
   assert.deepEqual([state.annotations[0].vertices[1].x,state.annotations[0].vertices[1].y],[100,10]);
 });
+
+test('replace-annotations-by-id simplifies multiple selected polygons in one undo step', () => {
+  const other={id:'other',asset:'img',label:'weed',type:'polygon',holes:[],vertices:[
+    {id:'other:v0',x:0,y:0},{id:'other:v1',x:20,y:0},{id:'other:v2',x:20,y:20},
+  ]};
+  let state=createEditorState([polygon,other]);
+  const nextPolygon={...polygon,vertices:[...polygon.vertices,{id:'p:v3',x:10,y:100}]};
+  const nextOther={...other,vertices:[...other.vertices,{id:'other:v3',x:0,y:20}]};
+  state=editorReducer(state,{type:'replace-annotations-by-id',annotations:[nextPolygon,nextOther]});
+  assert.deepEqual(state.annotations.map(annotation=>annotation.id),['p','other']);
+  assert.equal(state.history.length,1);
+  state=editorReducer(state,{type:'undo'});
+  assert.deepEqual(state.annotations.map(annotation=>annotation.vertices.length),[3,3]);
+});

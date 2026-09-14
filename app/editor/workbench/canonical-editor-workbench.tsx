@@ -617,11 +617,13 @@ export function CanonicalEditorWorkbench() {
   }
 
   function simplifySelected() {
-    if (!activePolygon) return;
+    if (!selectedPolygons.length) return;
     const tolerance = screenPixelsToImageUnits(4, imageSize, viewport.layout.width);
-    const simplified = simplifyPolygonAnnotation(activePolygon, tolerance);
-    if (simplified === activePolygon) return;
-    editor.dispatch({ type: "replace-annotation", annotation: simplified });
+    const simplified = selectedPolygons
+      .map((polygon) => simplifyPolygonAnnotation(polygon, tolerance))
+      .filter((polygon, index) => polygon !== selectedPolygons[index]);
+    if (!simplified.length) return;
+    editor.dispatch({ type: "replace-annotations-by-id", annotations: simplified });
     setMessage(copy.toastSimplified);
   }
 
@@ -852,7 +854,7 @@ export function CanonicalEditorWorkbench() {
     canFinishDraft: vectorTool === "hole" ? advanced.canFinish : drawing.canFinish,
     canRemoveDraftPoint: vectorTool === "hole" ? advanced.canRemoveLastPoint : drawing.canRemoveLastPoint,
     hasDraft: drawing.hasDraft || advanced.hasDraft,
-    canSimplify: Boolean(activePolygon),
+    canSimplify: selectedPolygons.length >= 1,
     canDuplicate: Boolean(activePolygon),
     canMerge: selectedPolygons.length >= 2,
     canEditPolygon: Boolean(activePolygon),
