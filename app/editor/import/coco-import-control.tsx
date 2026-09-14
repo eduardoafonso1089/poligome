@@ -156,8 +156,11 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
     if (importingRef.current || !currentSelectedIndexes.length || !selectedGeometryTypes.length) return;
     importingRef.current = true;
     cancelledRef.current = false;
+    // Close the dialog immediately on OK; the load then streams in the background
+    // so the annotations appear progressively while the user keeps working.
     flushSync(() => {
       setImporting(true);
+      close();
     });
     await afterNextPaint();
     let nextLabels = labels;
@@ -181,6 +184,7 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
         nextLabels = chunkResult.labels;
         importedAnnotations.push(...chunkResult.annotations);
         unmatched += chunkResult.unmatched;
+        // Apply what has loaded so far, then yield so the browser stays responsive.
         onImported({
           labels: nextLabels,
           annotations: [...annotations, ...importedAnnotations],
@@ -202,7 +206,6 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
     } finally {
       importingRef.current = false;
       setImporting(false);
-      close();
     }
   }
 

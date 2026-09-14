@@ -919,7 +919,6 @@ export function CanonicalEditorWorkbench() {
         loading={loading}
         onImportImages={() => imageInputRef.current?.click()}
         onImportAnnotations={() => annotationImportRef.current?.open()}
-        onLoadDemo={() => { if (!projectDirty || window.confirm(copy.replaceUnsavedProject)) void loadDemo(); }}
         onSelectAsset={selectAsset}
         onMoveAsset={moveAsset}
         onDeleteAsset={deleteAsset}
@@ -927,6 +926,7 @@ export function CanonicalEditorWorkbench() {
         onSelectAnnotation={selectAnnotationFromPanel}
         onMoveAnnotation={(id, delta) => editor.dispatch({ type: "reorder-annotation", id, delta })}
         onDeleteAnnotations={deleteAnnotations}
+        onClearAnnotations={clearAllAnnotations}
         onToggleAnnotationVisibility={toggleAnnotationVisibility}
         onToggleLabelVisibility={toggleLabelVisibility}
         onSelectAllAnnotations={selectAllActiveAnnotations}

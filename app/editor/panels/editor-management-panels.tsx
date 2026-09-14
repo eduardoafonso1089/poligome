@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import {
   BarChart3, Check, ClipboardCheck, Eye, EyeOff, FileText, GripVertical,
-  ImagePlus, LoaderCircle, Menu, MoreHorizontal, Palette, PanelLeftClose, PanelLeftOpen,
-  PanelRightClose, PanelRightOpen, Plus, Search, ShieldCheck, Tags, Trash2, WandSparkles, X,
+  ImagePlus, Menu, MoreHorizontal, Palette, PanelLeftClose, PanelLeftOpen,
+  PanelRightClose, PanelRightOpen, Plus, Search, ShieldCheck, Tags, Trash2, X,
 } from "lucide-react";
 import type { Asset, Label } from "../../lib/types";
 import { getCopy } from "../../lib/i18n";
@@ -32,7 +32,6 @@ type Props = {
   loading?: boolean;
   onImportImages?: () => void;
   onImportAnnotations?: () => void;
-  onLoadDemo?: () => void;
   onSelectAsset: (id: string) => void;
   onMoveAsset: (id: string, delta: -1 | 1) => void;
   onDeleteAsset: (id: string) => void;
@@ -40,6 +39,7 @@ type Props = {
   onSelectAnnotation: (id: string, modifiers: { shift: boolean; additive: boolean }) => void;
   onMoveAnnotation: (id: string, delta: -1 | 1) => void;
   onDeleteAnnotations: (ids: string[]) => void;
+  onClearAnnotations?: () => void;
   onToggleAnnotationVisibility: (id: string) => void;
   onToggleLabelVisibility: (id: string) => void;
   onSelectAllAnnotations: () => void;
@@ -92,6 +92,16 @@ export function EditorManagementPanels(props: Props) {
       setBatchLabel(labels.some((label) => label.id === activeLabelId) ? activeLabelId : labels[0]?.id ?? UNLABELED_ID);
     }
   }, [activeLabelId, batchLabel, labels]);
+
+  // Reflect the current class of the selected annotation(s) in the change-class selector.
+  useEffect(() => {
+    const ids = selection.multiSelected.length ? selection.multiSelected : selection.selected ? [selection.selected] : [];
+    const selectedLabels = new Set(ids.map((id) => activeAssetAnnotations.find((annotation) => annotation.id === id)?.label).filter((label): label is string => !!label));
+    if (selectedLabels.size === 1) {
+      const only = [...selectedLabels][0];
+      if (labels.some((label) => label.id === only)) setBatchLabel(only);
+    }
+  }, [selection.selected, selection.multiSelected, activeAssetAnnotations, labels]);
 
   const filteredAssets = useMemo(() => {
     const query = imageSearch.trim().toLocaleLowerCase();
@@ -209,7 +219,6 @@ export function EditorManagementPanels(props: Props) {
       </div>
       {props.onImportImages && <button type="button" className="import" disabled={props.loading} onClick={props.onImportImages}><ImagePlus size={16} />{copy.importImages}</button>}
       {props.onImportAnnotations && <button type="button" className="import coco-import-action" disabled={props.loading || !assets.length} onClick={props.onImportAnnotations}><FileText size={16} /><span>{sentenceCase(copy.annotations)}</span></button>}
-      {props.onLoadDemo && <button type="button" className="demo-import" disabled={props.loading} onClick={props.onLoadDemo}>{props.loading ? <LoaderCircle className="spin" size={15} /> : <WandSparkles size={15} />}{copy.tryDemo}</button>}
       <label className="search"><Search size={14} /><input aria-label={copy.searchImage} value={imageSearch} onChange={(event) => setImageSearch(event.target.value)} placeholder={copy.searchImage} /></label>
       <div className="progress"><div><span>{copy.progress}</span><b>{completed} {copy.of} {assets.length}</b></div><i><em style={{ width: `${assets.length ? completed / assets.length * 100 : 0}%` }} /></i></div>
       <div className="asset-list">
@@ -282,6 +291,7 @@ export function EditorManagementPanels(props: Props) {
           <div className="annotation-panel-actions">
             <button disabled={!activeAssetAnnotations.length} title={allHidden ? copy.showAllAnnotations : copy.hideAllAnnotations} onClick={toggleAllAnnotations}>{allHidden ? <EyeOff size={14} /> : <Eye size={14} />}{allHidden ? copy.showAllAnnotations : copy.hideAllAnnotations}</button>
             <button onClick={() => setClassManagerOpen(true)}><Palette size={14} />{copy.manageClasses}</button>
+            {props.onClearAnnotations && <button disabled={!annotations.length} title={copy.removeLoadedAnnotations} onClick={props.onClearAnnotations}><Trash2 size={14} />{copy.removeLoadedAnnotations}</button>}
           </div>
         </section>
         {activeSelectedIds.length > 0 && <section className="batch-class">

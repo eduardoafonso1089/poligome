@@ -148,9 +148,14 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
   }, [state.zoom, zoomTo]);
 
   useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    // Apply the post-zoom scroll synchronously, before paint, so the canvas does
+    // not flash at the old scroll for a frame and then re-adjust on every zoom.
     const next = controllerRef.current.snapshot();
-    applyScroll(next);
-  }, [applyScroll, state.zoom]);
+    scroller.scrollLeft = next.scrollLeft;
+    scroller.scrollTop = next.scrollTop;
+  }, [state.zoom]);
 
   return {
     scrollRef,

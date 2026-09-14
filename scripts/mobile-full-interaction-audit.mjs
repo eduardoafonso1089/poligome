@@ -195,7 +195,9 @@ try {
 
   await check("Clear annotations action removes all annotations", async () => {
     await loadDemo(page);
-    const clear = page.locator(".tools").getByRole("button", { name: /Remover anotações carregadas|Clear.*annotations|Remove.*annotations/i }).first();
+    // The clear-all button lives in the annotations panel (right drawer on mobile).
+    await page.locator('.topbar button.mobile').last().tap();
+    const clear = page.locator('[data-panel="right"]').getByRole("button", { name: /Remover anotações carregadas|Clear.*annotations|Remove.*annotations/i }).first();
     await clear.waitFor({ state: "visible", timeout: 8000 });
     page.once("dialog", (dialog) => dialog.accept());
     await clear.tap();
