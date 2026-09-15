@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { boxCornerCursors } from '../app/editor/layers/box-layer.tsx';
 import { vertexCursorDirections, vertexMoveCursor } from '../app/editor/layers/vertex-handles.tsx';
 
 const vertices = (points) => points.map(([x, y], index) => ({ id: `v${index}`, x, y }));
@@ -20,4 +21,24 @@ test('corners build a bidirectional cursor along the angle bisector', () => {
   assert.equal(arms.length, 2);
   assert.ok(Math.abs(arms[0].x + Math.SQRT1_2) < 0.01);
   assert.ok(Math.abs(arms[0].y - Math.SQRT1_2) < 0.01);
+});
+
+test('rotating a box rotates the cursor directions on all of its resize corners', () => {
+  const base = { id: 'box', asset: 'image', label: 'class', type: 'box', x: 0, y: 0, width: 100, height: 50 };
+  const upright = boxCornerCursors(base);
+  const rotated = boxCornerCursors({ ...base, rotation: Math.PI / 2 });
+
+  assert.equal(rotated.length, 4);
+  assert.ok(rotated.every((cursor, index) => cursor !== upright[index]));
+  assert.match(decodeURIComponent(rotated[0]), /L8\.22 23\.78/);
+});
+
+test('rotated polygon and polyline vertices derive their cursor direction from transformed geometry', () => {
+  const [lineNormal] = vertexCursorDirections(vertices([[0, 0], [0, 100]]), 0, true);
+  assert.ok(Math.abs(lineNormal.x + 1) < 0.01);
+  assert.ok(Math.abs(lineNormal.y) < 0.01);
+
+  const [polygonBisector] = vertexCursorDirections(vertices([[100, 0], [100, 100], [0, 100]]), 1);
+  assert.ok(Math.abs(polygonBisector.x + Math.SQRT1_2) < 0.01);
+  assert.ok(Math.abs(polygonBisector.y + Math.SQRT1_2) < 0.01);
 });

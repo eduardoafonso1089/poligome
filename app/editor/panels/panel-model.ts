@@ -3,6 +3,11 @@ import type { EditorAnnotation } from "../models/annotation-model";
 
 export const UNLABELED_ID = "unlabeled";
 
+export function ensureUnlabeledLabel(labels: Label[], name: string): Label[] {
+  if (labels.some((label) => label.id === UNLABELED_ID)) return labels;
+  return [...labels, { id: UNLABELED_ID, name, color: "#929a95", key: "" }];
+}
+
 export function reorderItemById<T extends { id: string }>(
   items: T[],
   sourceId: string,
@@ -25,6 +30,13 @@ export function moveItemById<T extends { id: string }>(items: T[], id: string, d
   const target = index + delta;
   if (index < 0 || target < 0 || target >= items.length) return items;
   return reorderItemById(items, id, items[target].id, delta < 0 ? "before" : "after");
+}
+
+export function stackAnnotationsByLabel(annotations: EditorAnnotation[], labels: Label[]): EditorAnnotation[] {
+  const layerByLabelId = new Map(labels.map((label, index) => [label.id, index]));
+  return [...annotations].sort((left, right) => (
+    (layerByLabelId.get(left.label) ?? labels.length) - (layerByLabelId.get(right.label) ?? labels.length)
+  ));
 }
 
 export function renameLabel(labels: Label[], id: string, name: string): Label[] {

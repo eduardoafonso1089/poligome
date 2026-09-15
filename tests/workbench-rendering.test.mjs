@@ -26,6 +26,10 @@ test("the editor is one shell composing topbar, panels, toolbar and stage", () =
   assert.equal(countClass(markup, "canonical-management-panels"), 1, "the panels must not be rendered twice");
 });
 
+test("quality and review are rendered through the management tabs, not a hidden duplicate panel", () => {
+  assert.equal(countClass(markup, "reviewPanel"), 0);
+});
+
 test("the shell is announced with the product name and the current project", () => {
   const main = markup.match(/<main[^>]*>/)?.[0] ?? "";
   assert.match(main, /aria-label="[^"]*Poligome[^"]*"/);

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import {
-  BarChart3, Check, ClipboardCheck, Eye, EyeOff, FileText, GripVertical,
+  BarChart3, Check, ChevronDown, ChevronUp, ClipboardCheck, Eye, EyeOff, FileText, GripVertical,
   ImagePlus, Menu, MoreHorizontal, Palette, PanelLeftClose, PanelLeftOpen,
   PanelRightClose, PanelRightOpen, Plus, Search, ShieldCheck, Tags, Trash2, X,
 } from "lucide-react";
@@ -49,6 +49,7 @@ type Props = {
   onActiveLabelChange: (id: string) => void;
   onBatchReclassify: (ids: string[], labelId: string) => void;
   onCreateLabel: (name: string, color: string) => void;
+  onMoveLabel: (id: string, delta: -1 | 1) => void;
   onRenameLabel: (id: string, name: string) => void;
   onRecolorLabel: (id: string, color: string) => void;
   onDeleteLabel: (id: string) => void;
@@ -59,6 +60,14 @@ type Props = {
 function stop(event: MouseEvent) { event.stopPropagation(); }
 function classes(...items: Array<string | false | null | undefined>) { return items.filter(Boolean).join(" "); }
 function sentenceCase(value: string) { return value.charAt(0) + value.slice(1).toLocaleLowerCase(); }
+
+function AnnotationTypeIcon({ type, color }: { type: EditorAnnotation["type"]; color: string }) {
+  const common = { stroke: color, strokeWidth: 1.8, fill: "none", strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  if (type === "box") return <svg className="annotation-type-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.25" y="3" width="11.5" height="10" rx="1" {...common} /></svg>;
+  if (type === "polygon") return <svg className="annotation-type-icon" viewBox="0 0 16 16" aria-hidden="true"><polygon points="8,1.8 14,6.1 11.7,13.7 4.2,13.7 2,6.1" {...common} /></svg>;
+  if (type === "line") return <svg className="annotation-type-icon" viewBox="0 0 16 16" aria-hidden="true"><polyline points="1.8,12.6 5.5,7.2 9.2,10 14.2,3.4" {...common} /></svg>;
+  return <svg className="annotation-type-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.3" fill={color} /></svg>;
+}
 
 export function EditorManagementPanels(props: Props) {
   const {
@@ -309,12 +318,12 @@ export function EditorManagementPanels(props: Props) {
             const label = labels.find((item) => item.id === annotation.label);
             const selected = selectedIds.includes(annotation.id);
             const hidden = hiddenAnnotationIds.has(annotation.id) || hiddenLabelIds.has(annotation.label);
-            const dotStyle = { borderColor: label?.color ?? "#929a95" } as CSSProperties;
+            const annotationColor = label?.color ?? "#929a95";
             const displayLabel = label ? labelName(label) : annotation.label;
             return <div key={annotation.id} className={classes("instance-row", selected && "active", hidden && "hidden")}>
               <button className="reorder-handle" aria-label={`${copy.reorderAnnotation}: ${displayLabel} #${index + 1}`} title={copy.reorderAnnotation} disabled={activeAssetAnnotations.length < 2} onClick={() => props.onMoveAnnotation(annotation.id, index === 0 ? 1 : -1)}><GripVertical size={14} /></button>
               <button className={classes("annotation-selector", selected && "selected")} aria-label={`${copy.selectAnnotation}: ${displayLabel} #${index + 1}`} aria-pressed={selected} onClick={(event) => props.onSelectAnnotation(annotation.id, { shift: event.shiftKey, additive: true })}>{selected && <Check size={11} />}</button>
-              <button className="instance-main" onClick={(event) => props.onSelectAnnotation(annotation.id, { shift: event.shiftKey, additive: event.ctrlKey || event.metaKey })}><i style={dotStyle}>{annotation.type === "point" ? "•" : annotation.type === "line" ? "╱" : ""}</i><span>{displayLabel} <small>#{index + 1}</small></span></button>
+              <button className="instance-main" onClick={(event) => props.onSelectAnnotation(annotation.id, { shift: event.shiftKey, additive: event.ctrlKey || event.metaKey })}><AnnotationTypeIcon type={annotation.type} color={annotationColor} /><span>{displayLabel} <small>#{index + 1}</small></span></button>
               <button className="visibility-toggle" title={hidden ? copy.showAnnotation : copy.hideAnnotation} aria-label={`${hidden ? copy.showAnnotation : copy.hideAnnotation}: ${displayLabel} #${index + 1}`} onClick={(event) => { stop(event); props.onToggleAnnotationVisibility(annotation.id); }}>{hidden ? <EyeOff size={14} /> : <Eye size={14} />}</button>
               <button className="delete-annotation" title={copy.deleteShape} aria-label={`${copy.deleteShape}: ${displayLabel} #${index + 1}`} onClick={(event) => { stop(event); confirmAnnotationDelete([annotation.id]); }}><Trash2 size={13} /></button>
             </div>;
@@ -327,23 +336,30 @@ export function EditorManagementPanels(props: Props) {
       <div className="hint"><b>{copy.quickTip}</b><p>{copy.shortcutHint}</p></div>
     </aside>
 
-    {classManagerOpen && <div className="canonical-class-manager-backdrop" role="presentation" onMouseDown={() => setClassManagerOpen(false)}>
-      <section className="canonical-class-manager" role="dialog" aria-modal="true" aria-label={copy.manageClasses} onMouseDown={(event) => event.stopPropagation()}>
-        <header><div><Palette size={18} /><div><b>{copy.classManagerTitle}</b><small>{copy.classManagerHint}</small></div></div><button aria-label={copy.closePanel} onClick={() => setClassManagerOpen(false)}><X size={18} /></button></header>
-        <section className={premerge.quickLabelCard}><div className={premerge.cardHeading}><Palette size={14} /><span><strong>{copy.labelStudio}</strong><small>{copy.labelStudioHint}</small></span></div><div className={premerge.createRow}><input aria-label={copy.className} value={newLabelName} onChange={(event) => setNewLabelName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") createClass(); }} placeholder={copy.className} /><input className={ui.colorInput} aria-label={copy.labelColor} type="color" value={newLabelColor} onChange={(event) => setNewLabelColor(event.target.value)} /><button className={premerge.createButton} onClick={createClass} disabled={!newLabelName.trim()}><Plus size={15} /></button></div></section>
-        <div className="canonical-class-list">
-          {labels.map((label) => {
-            const protectedLabel = label.id === UNLABELED_ID;
-            const hidden = hiddenLabelIds.has(label.id);
-            const count = annotationCountByLabel.get(label.id) ?? 0;
-            return <div key={label.id}>
-              <input type="color" value={label.color} disabled={protectedLabel} onChange={(event) => props.onRecolorLabel(label.id, event.target.value)} />
-              <input defaultValue={labelName(label)} disabled={protectedLabel} onFocus={() => props.onActiveLabelChange(label.id)} onBlur={(event) => props.onRenameLabel(label.id, event.target.value)} />
-              <small>{count}</small>
-              <button onClick={() => props.onToggleLabelVisibility(label.id)}>{hidden ? <EyeOff size={13} /> : <Eye size={13} />}</button>
-              <button disabled={protectedLabel} onClick={() => confirmLabelDelete(label)}><Trash2 size={13} /></button>
-            </div>;
-          })}
+    {classManagerOpen && <div className="class-manager-backdrop canonical-class-manager-backdrop" role="presentation" onMouseDown={() => setClassManagerOpen(false)}>
+      <section className="class-manager-page" role="dialog" aria-modal="true" aria-label={copy.manageClasses} onMouseDown={(event) => event.stopPropagation()}>
+        <header><div><span><Palette size={19} /></span><div><h2>{copy.classManagerTitle}</h2><p>{copy.classManagerHint}</p></div></div><button aria-label={copy.closePanel} onClick={() => setClassManagerOpen(false)}><X size={18} /></button></header>
+        <div className="class-manager-body">
+          <aside className="class-manager-sidebar">
+            <section className={classes("label-creator", premerge.quickLabelCard)}><div className={premerge.cardHeading}><Palette size={14} /><span><strong>{copy.labelStudio}</strong><small>{copy.labelStudioHint}</small></span></div><div className={premerge.createRow}><input aria-label={copy.className} value={newLabelName} onChange={(event) => setNewLabelName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") createClass(); }} placeholder={copy.className} /><input className={ui.colorInput} aria-label={copy.labelColor} type="color" value={newLabelColor} onChange={(event) => setNewLabelColor(event.target.value)} /><button className={premerge.createButton} aria-label={copy.createLabel} onClick={createClass} disabled={!newLabelName.trim()}><Plus size={15} /></button></div></section>
+            <section className="class-manager-active"><div><Tags size={14} /><span><b>{copy.newAnnotationClass}</b><small>{copy.newShapesClass}</small></span></div><select value={activeLabelId} onChange={(event) => props.onActiveLabelChange(event.target.value)} aria-label={copy.newAnnotationClass}>{labels.map((label) => <option key={label.id} value={label.id}>{labelName(label)}</option>)}</select></section>
+          </aside>
+          <section className="class-manager-classes"><header className="class-manager-list-head"><div><b>{copy.classList}</b><span>{copy.classManagerHint}</span></div></header><div className="class-manager-list label-list">
+            {labels.map((label, index) => {
+              const protectedLabel = label.id === UNLABELED_ID;
+              const hidden = hiddenLabelIds.has(label.id);
+              const count = annotationCountByLabel.get(label.id) ?? 0;
+              return <div key={label.id} className={classes("label-row", label.id === activeLabelId && "active", hidden && "hidden")}>
+                <input className={ui.colorInput} aria-label={`${copy.labelColor}: ${labelName(label)}`} type="color" value={label.color} disabled={protectedLabel} onChange={(event) => props.onRecolorLabel(label.id, event.target.value)} />
+                <input aria-label={`${copy.renameClass}: ${labelName(label)}`} defaultValue={labelName(label)} disabled={protectedLabel} onFocus={() => props.onActiveLabelChange(label.id)} onBlur={(event) => props.onRenameLabel(label.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+                <small>{count}</small>
+                <button title={copy.reorderClass} aria-label={`${copy.reorderClass}: ${labelName(label)}`} disabled={index === 0} onClick={() => props.onMoveLabel(label.id, -1)}><ChevronUp size={13} /></button>
+                <button title={copy.reorderClass} aria-label={`${copy.reorderClass}: ${labelName(label)}`} disabled={index === labels.length - 1} onClick={() => props.onMoveLabel(label.id, 1)}><ChevronDown size={13} /></button>
+                <button title={hidden ? copy.showClass : copy.hideClass} aria-label={`${hidden ? copy.showClass : copy.hideClass}: ${labelName(label)}`} onClick={() => props.onToggleLabelVisibility(label.id)}>{hidden ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+                <button className="delete-label" title={protectedLabel ? copy.unlabeledProtected : copy.deleteClass} disabled={protectedLabel} onClick={() => confirmLabelDelete(label)}><Trash2 size={13} /></button>
+              </div>;
+            })}
+          </div></section>
         </div>
       </section>
     </div>}
