@@ -28,7 +28,7 @@ import { demoRouteTarget } from "../session/demo-route";
 import { QualityReviewPanel } from "../review/quality-review-panel";
 import { setAssetReviewScore, setLabelReviewScore } from "../review/quality-review-model";
 import { EditorManagementPanels } from "../panels/editor-management-panels";
-import { createLabel as createPanelLabel, moveItemById, recolorLabel, renameLabel, UNLABELED_ID } from "../panels/panel-model";
+import { createLabel as createPanelLabel, ensureUnlabeledLabel, moveItemById, recolorLabel, renameLabel, stackAnnotationsByLabel, UNLABELED_ID } from "../panels/panel-model";
 import { selectRange } from "../selection/selection-model";
 import { commandFromKeyboard, isEditableShortcutTarget, type VectorTool } from "../commands/editor-shortcuts";
 import { simplifyPolygonAnnotation, unionPolygonAnnotations } from "../geometry/vector-operations";
@@ -62,8 +62,8 @@ function labelsMatch(current: Label[], next: Label[]) {
 
 export function CanonicalEditorWorkbench() {
   const [assets, setAssets] = useState<Asset[]>([]);
-  const [labels, setLabels] = useState<Label[]>(EMPTY_LABELS);
-  const [activeLabel, setActiveLabel] = useState(EMPTY_LABELS[0].id);
+  const [labels, setLabels] = useState<Label[]>([]);
+  const [activeLabel, setActiveLabel] = useState("");
   const [tool, setTool] = useState<DrawingTool>("select");
   const [vectorTool, setVectorTool] = useState<VectorTool>(null);
   const [snapEnabled, setSnapEnabled] = useState(true);
@@ -76,7 +76,6 @@ export function CanonicalEditorWorkbench() {
   const [language, setLanguage] = useState<Language>("pt");
   const [saveMode, setSaveMode] = useState<ProjectSaveMode>("complete");
   const [strokePx, setStrokePx] = useState(1);
-  const [reviewMode, setReviewMode] = useState<"quality" | "review">("quality");
   const [hiddenAnnotationIds, setHiddenAnnotationIds] = useState<Set<string>>(() => new Set());
   const [hiddenLabelIds, setHiddenLabelIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(false);
@@ -115,8 +114,11 @@ export function CanonicalEditorWorkbench() {
     [asset, annotationIndex.byAsset],
   );
   const visibleAnnotations = useMemo(
-    () => activeAssetAnnotations.filter((annotation) => !hiddenAnnotationIds.has(annotation.id) && !hiddenLabelIds.has(annotation.label)),
-    [activeAssetAnnotations, hiddenAnnotationIds, hiddenLabelIds],
+    () => stackAnnotationsByLabel(
+      activeAssetAnnotations.filter((annotation) => !hiddenAnnotationIds.has(annotation.id) && !hiddenLabelIds.has(annotation.label)),
+      labels,
+    ),
+    [activeAssetAnnotations, hiddenAnnotationIds, hiddenLabelIds, labels],
   );
   const selectedIds = useMemo(
     () => editor.selection.multiSelected.length ? editor.selection.multiSelected : editor.selection.selected ? [editor.selection.selected] : [],
@@ -149,6 +151,17 @@ export function CanonicalEditorWorkbench() {
     renderedWidth: viewport.layout.width,
     snap,
   });
+  const addAnnotationWithFallbackLabel = useCallback((annotation: EditorAnnotation) => {
+    if (labels.some((label) => label.id === annotation.label)) {
+      editor.addAnnotation(annotation);
+      return;
+    }
+    const fallbackLabels = ensureUnlabeledLabel(labels, copy.unlabeled);
+    setLabels(fallbackLabels);
+    setActiveLabel(UNLABELED_ID);
+    setSessionDirty(true);
+    editor.addAnnotation({ ...annotation, label: UNLABELED_ID });
+  }, [copy.unlabeled, editor, labels]);
   const drawing = useDrawingInteractions({
     svgRef: viewport.canvasRef,
     imageSize,
@@ -156,7 +169,7 @@ export function CanonicalEditorWorkbench() {
     assetId: current || null,
     labelId: activeLabel,
     makeId,
-    addAnnotation: editor.addAnnotation,
+    addAnnotation: addAnnotationWithFallbackLabel,
     snap,
   });
 
@@ -237,10 +250,9 @@ export function CanonicalEditorWorkbench() {
 
   function resetProjectState() {
     replaceObjectUrls([]);
-    const unlabeled = { ...EMPTY_LABELS[0], name: copy.unlabeled };
     setAssets([]);
-    setLabels([unlabeled]);
-    setActiveLabel(unlabeled.id);
+    setLabels([]);
+    setActiveLabel("");
     setCurrent("");
     setProjectName(copy.newProject);
     setSaveMode("complete");
@@ -618,17 +630,27 @@ export function CanonicalEditorWorkbench() {
     });
   }
 
+  function moveLabel(id: string, delta: -1 | 1) {
+    setLabels((items) => {
+      const next = moveItemById(items, id, delta);
+      if (next !== items) setSessionDirty(true);
+      return next;
+    });
+  }
+
   function deleteLabel(id: string) {
     if (id === UNLABELED_ID || !labels.some((label) => label.id === id)) return;
     const affected = editor.annotations.filter((annotation) => annotation.label === id).map((annotation) => annotation.id);
+    const remainingLabels = labels.filter((label) => label.id !== id);
+    const nextLabels = affected.length ? ensureUnlabeledLabel(remainingLabels, copy.unlabeled) : remainingLabels;
     if (affected.length) editor.dispatch({ type: "reclassify-annotations", ids: affected, labelId: UNLABELED_ID });
-    setLabels((items) => items.filter((label) => label.id !== id));
+    setLabels(nextLabels);
     setHiddenLabelIds((currentHidden) => {
       const next = new Set(currentHidden);
       next.delete(id);
       return next;
     });
-    if (activeLabel === id) setActiveLabel(UNLABELED_ID);
+    if (activeLabel === id) setActiveLabel(nextLabels[0]?.id ?? "");
     setSessionDirty(true);
   }
 
@@ -989,9 +1011,46 @@ export function CanonicalEditorWorkbench() {
         onActiveLabelChange={setActiveLabel}
         onBatchReclassify={batchReclassify}
         onCreateLabel={createLabel}
+        onMoveLabel={moveLabel}
         onRenameLabel={changeLabelName}
         onRecolorLabel={changeLabelColor}
         onDeleteLabel={deleteLabel}
+        qualityContent={<QualityReviewPanel
+          mode="quality"
+          assets={assets}
+          labels={labels}
+          annotations={editor.annotations}
+          activeAsset={asset}
+          activeAnnotation={editor.selectedAnnotation}
+          activeLabelId={activeLabel}
+          copy={copy}
+          language={language}
+          onModeChange={() => undefined}
+          onActiveLabelChange={setActiveLabel}
+          onAssetReview={reviewAsset}
+          onAnnotationReview={reviewAnnotation}
+          onLabelReview={reviewLabel}
+          onFocusAsset={selectAsset}
+          onFocusLabel={setActiveLabel}
+          showTabs={false}
+        />}
+        reviewContent={<QualityReviewPanel
+          mode="review"
+          assets={assets}
+          labels={labels}
+          annotations={editor.annotations}
+          activeAsset={asset}
+          activeAnnotation={editor.selectedAnnotation}
+          activeLabelId={activeLabel}
+          copy={copy}
+          language={language}
+          onModeChange={() => undefined}
+          onActiveLabelChange={setActiveLabel}
+          onAssetReview={reviewAsset}
+          onAnnotationReview={reviewAnnotation}
+          onLabelReview={reviewLabel}
+          showTabs={false}
+        />}
       />
 
       <section className={`editor ${touch.touchMode ? "touch-editor" : ""}`}>
@@ -1064,24 +1123,5 @@ export function CanonicalEditorWorkbench() {
       onExploreModels={exploreDemoModels}
       onClose={exitDemoTutorial}
     />
-
-    <div className={exact.reviewHidden}>
-      <QualityReviewPanel
-        mode={reviewMode}
-        assets={assets}
-        labels={labels}
-        annotations={editor.annotations}
-        activeAsset={asset}
-        activeAnnotation={editor.selectedAnnotation}
-        activeLabelId={activeLabel}
-        copy={copy}
-        language={language}
-        onModeChange={setReviewMode}
-        onActiveLabelChange={setActiveLabel}
-        onAssetReview={reviewAsset}
-        onAnnotationReview={reviewAnnotation}
-        onLabelReview={reviewLabel}
-      />
-    </div>
   </main>;
 }

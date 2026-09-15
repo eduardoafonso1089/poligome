@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createEditorState, editorReducer } from '../app/editor/state/editor-state.ts';
-import { createLabel, moveItemById, recolorLabel, removeLabelsAndReclassify, renameLabel } from '../app/editor/panels/panel-model.ts';
+import { createLabel, ensureUnlabeledLabel, moveItemById, recolorLabel, removeLabelsAndReclassify, renameLabel, stackAnnotationsByLabel } from '../app/editor/panels/panel-model.ts';
 
 const labels = [
   { id: 'unlabeled', name: 'Sem label', color: '#929a95', key: '' },
@@ -36,6 +36,25 @@ test('class creation rejects duplicate names and image reorder is stable', () =>
   assert.equal(created.at(-1).name, 'Tree');
   const assets = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
   assert.deepEqual(moveItemById(assets, 'b', -1).map((item) => item.id), ['b', 'a', 'c']);
+});
+
+test('unlabeled class is created only when an annotation needs a fallback class', () => {
+  const fallback = ensureUnlabeledLabel([], 'Sem label');
+  assert.deepEqual(fallback, [{ id: 'unlabeled', name: 'Sem label', color: '#929a95', key: '' }]);
+  assert.equal(ensureUnlabeledLabel(fallback, 'Outro nome'), fallback);
+});
+
+test('annotation stacking draws classes from the first list item in back to the last item in front', () => {
+  const overlapping = [
+    { id: 'crop-first', asset: 'img-a', label: 'crop', type: 'point', x: 10, y: 10 },
+    { id: 'weed', asset: 'img-a', label: 'weed', type: 'point', x: 10, y: 10 },
+    { id: 'crop-second', asset: 'img-a', label: 'crop', type: 'point', x: 10, y: 10 },
+  ];
+
+  assert.deepEqual(
+    stackAnnotationsByLabel(overlapping, labels).map((annotation) => annotation.id),
+    ['weed', 'crop-first', 'crop-second'],
+  );
 });
 
 test('annotation reorder stays inside the same asset even when global array is interleaved', () => {
