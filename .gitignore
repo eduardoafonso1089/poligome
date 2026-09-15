@@ -44,3 +44,6 @@ next-env.d.ts
 /outputs/
 /work/
 public/amostras/
+
+# audit output
+/interaction-audit/

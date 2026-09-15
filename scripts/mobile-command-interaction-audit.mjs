@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { launchAuditBrowser } from "./audit-browser.mjs";
 import fs from "node:fs/promises";
 
 const BASE = process.env.AUDIT_BASE_URL ?? "http://127.0.0.1:4174";
@@ -91,7 +91,7 @@ async function drawBox(page, cdp, from = [.56, .56], to = [.70, .69]) {
   return id;
 }
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchAuditBrowser();
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const page = await context.newPage();
 const cdp = await context.newCDPSession(page);
