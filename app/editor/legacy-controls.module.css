@@ -1,0 +1,52 @@
+.iconToolButton {
+  width: 32px;
+  min-width: 32px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 !important;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 6px !important;
+}
+
+.iconToolButton svg {
+  pointer-events: none;
+}
+
+.iconActionButton {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 !important;
+  display: inline-grid;
+  place-items: center;
+}
+
+.mobileIconButton {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 !important;
+  display: inline-grid;
+  place-items: center;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.toolPoint {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+@media (max-width: 860px) {
+  .iconToolButton {
+    width: 34px;
+    min-width: 34px;
+    height: 32px;
+    min-height: 32px;
+  }
+}

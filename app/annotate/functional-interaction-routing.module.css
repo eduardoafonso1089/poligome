@@ -1,0 +1,20 @@
+/*
+ * The canonical workbench intentionally keeps the base drawing tool on `select`
+ * while an advanced vector tool is active. The legacy chrome exposes the vector
+ * mode through the pressed state of the Hole/Split/Transform/Reshape buttons.
+ * During those modes existing annotation layers must not consume pointer events;
+ * the SVG canvas owns the gesture and routes it to useAdvancedVectorInteractions.
+ */
+.contract :global(.editor:has(.edit-tools > .tool-btn:nth-child(4)[aria-pressed="true"]) .canvas [data-annotation-id]),
+.contract :global(.editor:has(.edit-tools > .tool-btn:nth-child(5)[aria-pressed="true"]) .canvas [data-annotation-id]),
+.contract :global(.editor:has(.edit-tools > .tool-btn:nth-child(6)[aria-pressed="true"]) .canvas [data-annotation-id]),
+.contract :global(.editor:has(.edit-tools > .tool-btn:nth-child(7)[aria-pressed="true"]) .canvas [data-annotation-id]) {
+  pointer-events: none !important;
+}
+
+.contract :global(.editor:has(.edit-tools > .tool-btn:nth-child(4)[aria-pressed="true"]) .canvas [data-annotation-id] *),
+.contract :global(.editor:has(.edit-tools > .tool-btn:nth-child(5)[aria-pressed="true"]) .canvas [data-annotation-id] *),
+.contract :global(.editor:has(.edit-tools > .tool-btn:nth-child(6)[aria-pressed="true"]) .canvas [data-annotation-id] *),
+.contract :global(.editor:has(.edit-tools > .tool-btn:nth-child(7)[aria-pressed="true"]) .canvas [data-annotation-id] *) {
+  pointer-events: none !important;
+}

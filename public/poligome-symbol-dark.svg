@@ -1,9 +1,0 @@
-<!-- Poligome - simbolo isolado para fundos escuros. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-24.5 -108.4 130.9 209.2" width="131" height="209" role="img" aria-label="Poligome">
-  <g fill="none" stroke="#F2F5F3" stroke-width="8.2" stroke-linecap="round">
-    <path d="M0 -98.3V90.7"/>
-    <path d="M0 0 96.3 -76.3"/>
-    <path d="M0 0 96.3 79.3"/>
-  </g>
-  <circle r="18.5" fill="#44C995"/>
-</svg>

@@ -1,0 +1,27 @@
+{
+  "coco.point_bbox_area": {
+    "main": "point helper bbox/area derived from the legacy normalized annotation marker",
+    "refactor": "fixed 8-source-pixel keypoint helper bbox with area 0",
+    "reason": "Keypoint coordinates are equivalent, but auxiliary bbox/area semantics changed when the normalized annotation space was removed. This remains an explicit compatibility decision."
+  },
+  "project.manifest.version": {
+    "main": 2,
+    "refactor": 4,
+    "reason": "Intentional V4 canonical source-image-pixel project format."
+  },
+  "project.coordinate_space": {
+    "main": null,
+    "refactor": "image-pixels",
+    "reason": "V4 explicitly declares the canonical source-image coordinate space."
+  },
+  "project.annotation_model": {
+    "main": "legacy-normalized",
+    "refactor": "canonical-source-pixels",
+    "reason": "Intentional project-model migration; semantic geometry is compared after converting the main fixture to source-image pixels."
+  },
+  "geojson.property_names": {
+    "main": "classe, classe_id, cor, forma, rotacao, recorte, origem",
+    "refactor": "class, class_id, color, shape, rotation, source_image, source_raster",
+    "reason": "Deliberate breaking rename of the GeoJSON feature properties to English. Geometry, CRS and every value are unchanged; the golden maps the old names onto the new ones and separately asserts that the old names are gone. QGIS styles or filters keyed on the Portuguese names must be updated; documented in docs/RASTER_WORKFLOW.md."
+  }
+}

@@ -1,0 +1,49 @@
+name: Bug report
+description: Report reproducible incorrect behavior
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thank you for helping improve Poligome. Do not attach private datasets; use a minimal synthetic example.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Image annotation
+        - LLM/text annotation
+        - Import or export
+        - SAM connector
+        - GeoTIFF/COG
+        - Interface or accessibility
+        - Installation or deployment
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include the expected behavior and the actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Open ...\n2. Select ...\n3. Export ..."
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser, operating system, and Poligome URL or commit.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Additional context
+      description: Screenshots, console errors, or a link to a synthetic sample.
+

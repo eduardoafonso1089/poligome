@@ -1,0 +1,49 @@
+name: Editor Interaction Audit
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Tier 3: the editor driven in a real browser. Playwright is a declared
+  # devDependency now, and scripts/run-audits.sh is the same entry point a
+  # contributor runs locally with `npm run test:audit`.
+  interaction-audit:
+    name: Functional audits in Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build static editor
+        run: npm run build:pages
+
+      - name: Run every interaction audit
+        run: npm run test:audit
+
+      - name: Upload audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-interaction-audit
+          path: interaction-audit/
+          retention-days: 7

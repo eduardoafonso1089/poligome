@@ -1,0 +1,64 @@
+Poligome
+Copyright (C) 2026 Eduardo Afonso
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, version 3.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License along
+with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
+OWNERSHIP
+---------
+
+Copyright holder: Eduardo Afonso.
+
+Independent work. This code was not produced under employment, a services
+contract, or a commission from a third party, and no legal entity holds any
+rights over it.
+
+
+LICENSE IDENTIFIER
+------------------
+
+SPDX-License-Identifier: AGPL-3.0-only
+
+The choice of "only" rather than "or-later" is deliberate: future versions of
+the AGPL do not apply to this code automatically. Any change of version depends
+on an express decision by the copyright holder.
+
+
+CONTRIBUTORS
+------------
+
+- Eduardo Afonso <eduardoafonso1089@gmail.com> - author and copyright holder
+- Lucas Betioli - contributions on the `BYOM` branch, published under
+  AGPL-3.0-only with the author's consent.
+
+
+TRADEMARKS
+----------
+
+The name "Poligome" and the Poligome logos are not licensed under the AGPL. The license
+grants rights over the source code, not over the project's identity.
+
+A fork is free to use, modify and redistribute the code under the terms of the
+AGPL-3.0-only, but must not use the Poligome name or logos to identify itself, nor suggest
+endorsement by or affiliation with this project. Pick your own name.
+
+
+NETWORK USE (AGPL SECTION 13)
+-----------------------------
+
+Poligome is a web application. Section 13 of the AGPL-3.0 requires anyone who
+modifies this program and makes it available for remote use over a network to
+offer those users the corresponding source code of the modified version. A
+public instance must therefore expose a link to the source code in its own
+interface.
+
+Official source code: https://github.com/eduardoafonso1089/poligome

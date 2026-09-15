@@ -1,0 +1,7 @@
+import test from 'node:test'; import assert from 'node:assert/strict'; import JSZip from 'jszip'; import { savePoligomeProjectV4 } from '../app/lib/project.ts'; import { getCopy } from '../app/lib/i18n.ts';
+test('runtime raster handle stays out of manifest while bytes are bundled',async()=>{
+  const od=globalThis.document, ow=globalThis.window, oc=URL.createObjectURL, or=URL.revokeObjectURL; let saved;
+  URL.createObjectURL=b=>{saved=b;return 'blob:p'}; URL.revokeObjectURL=()=>{}; globalThis.document={createElement:()=>({style:{},click(){},remove(){}}),body:{appendChild(){}}}; globalThis.window={setTimeout:f=>{f();return 1;}};
+  const bytes=new Uint8Array([73,73,42,0,1,2,3,4]); const asset={id:'c',name:'o.tif',src:'blob:c',local:true,width:50000,height:30000,raster:{kind:'cog',mode:'tiled',sourceType:'local'},runtimeRasterSource:bytes};
+  try{await savePoligomeProjectV4('COG',[asset],[{id:'u',name:'U',color:'#aaa',key:''}],[],'complete',getCopy('en')); const z=await JSZip.loadAsync(await saved.arrayBuffer()); const m=JSON.parse(await z.file('project.json').async('string')); assert.equal(Object.hasOwn(m.assets[0],'runtimeRasterSource'),false); assert.equal(typeof m.assets[0].bundled_path,'string'); assert.deepEqual([...(await z.file(m.assets[0].bundled_path).async('uint8array'))],[...bytes]);} finally {globalThis.document=od;globalThis.window=ow;URL.createObjectURL=oc;URL.revokeObjectURL=or;}
+});

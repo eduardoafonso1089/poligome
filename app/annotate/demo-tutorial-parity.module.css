@@ -1,0 +1,76 @@
+.contract :global(.pre-refactor-demo-card) {
+  display: none !important;
+}
+
+/* The exact walkthrough owns the Demo mask and target geometry. The temporary
+   one-card compatibility guide remains in the presentation DOM for now, so it
+   must not hide the canonical SVG or paint its obsolete full-frame dimmer. */
+.contract :global(.editor:has(.pre-refactor-demo-card) .stage svg) {
+  visibility: visible !important;
+}
+.contract :global(.editor:has(.pre-refactor-demo-card) .stage) > section > div > div::after {
+  content: none !important;
+  display: none !important;
+  background: transparent !important;
+  pointer-events: none !important;
+}
+.contract :global(.shell:has(.pre-refactor-demo-card) .status p svg) {
+  display: block !important;
+}
+.contract :global(.shell:has(.pre-refactor-demo-card) .status p)::before {
+  content: none !important;
+  display: none !important;
+}
+
+/* Once the exact tutorial is closed, release every presentation-only override
+   that used the obsolete compatibility card as its state flag. The restored
+   full Demo has annotations on all three images, so its progress is complete. */
+.contract:not(:has(:global(.demo-tutorial-card:not(.pre-refactor-demo-card)))) :global(.workspace:has(.pre-refactor-demo-card) .progress b) {
+  font-size: 11px !important;
+}
+.contract:not(:has(:global(.demo-tutorial-card:not(.pre-refactor-demo-card)))) :global(.workspace:has(.pre-refactor-demo-card) .progress b)::after {
+  content: none !important;
+}
+.contract:not(:has(:global(.demo-tutorial-card:not(.pre-refactor-demo-card)))) :global(.workspace:has(.pre-refactor-demo-card) .progress em) {
+  width: 100% !important;
+}
+.contract:not(:has(:global(.demo-tutorial-card:not(.pre-refactor-demo-card)))) :global(.workspace:has(.pre-refactor-demo-card) .asset-selector.selected) {
+  background: var(--green) !important;
+  border-color: var(--green) !important;
+  color: var(--on-brand) !important;
+}
+.contract:not(:has(:global(.demo-tutorial-card:not(.pre-refactor-demo-card)))) :global(.workspace:has(.pre-refactor-demo-card) .asset-selector.selected svg),
+.contract:not(:has(:global(.demo-tutorial-card:not(.pre-refactor-demo-card)))) :global(.workspace:has(.pre-refactor-demo-card) .asset-main i.checked svg) {
+  display: block !important;
+}
+.contract:not(:has(:global(.demo-tutorial-card:not(.pre-refactor-demo-card)))) :global(.workspace:has(.pre-refactor-demo-card) .asset-main i.checked) {
+  background: var(--green) !important;
+  border-color: var(--green) !important;
+}
+.contract:not(:has(:global(.demo-tutorial-card:not(.pre-refactor-demo-card)))) :global(.workspace:has(.pre-refactor-demo-card) .annotation-editor .instances) {
+  display: block !important;
+}
+.contract:not(:has(:global(.demo-tutorial-card:not(.pre-refactor-demo-card)))) :global(.workspace:has(.pre-refactor-demo-card) .annotation-panel-head > div:first-child b) {
+  font-size: 11px !important;
+}
+.contract:not(:has(:global(.demo-tutorial-card:not(.pre-refactor-demo-card)))) :global(.workspace:has(.pre-refactor-demo-card) .annotation-panel-head > div:first-child b)::after {
+  content: none !important;
+}
+.contract:not(:has(:global(.demo-tutorial-card:not(.pre-refactor-demo-card)))) :global(.workspace:has(.pre-refactor-demo-card) .annotation-panel-actions button:first-child) {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* The exact component renders its own fixed callout. Suppress the obsolete
+   pseudo-callout left by the one-card compatibility implementation, while
+   preserving the mint halo controlled by DemoTutorialChrome. */
+.contract :global(.demo-tutorial-tool-target)::before,
+.contract :global(.demo-tutorial-tool-target)::after {
+  content: none !important;
+  display: none !important;
+}
+.contract:not(:has(:global(.demo-tutorial-tool-hint))) :global(.demo-tutorial-tool-target) {
+  box-shadow: none !important;
+  animation: none !important;
+  border-color: transparent !important;
+}

@@ -1,21 +1,43 @@
-export type Tool =
-  | "select"
-  | "pan"
-  | "box"
-  | "polygon"
-  | "freehand"
-  | "line"
-  | "point"
-  | "sam"
-  | "split"
-  | "transform"
-  | "reshape";
-
 export type Label = {
   id: string;
   name: string;
   color: string;
   key: string;
+  /** Optional 1–5 review score, saved with the project. */
+  reviewScore?: number;
+};
+
+/** X = a*x + b*y + c; Y = d*x + e*y + f, measured at source-raster pixel edges. */
+export type RasterTransform = [number, number, number, number, number, number];
+
+export type GeoRef = {
+  /** Affine transform from source-raster pixels to source CRS coordinates. */
+  transform?: RasterTransform;
+  /** Name or URL of the source raster. */
+  source: string;
+  /** EPSG code/definition of the file, or "sem CRS". */
+  crs: string;
+  /** Upper-left source-raster edge in CRS units. */
+  originX: number;
+  originY: number;
+  /** CRS units per source-raster pixel. */
+  scaleX: number;
+  scaleY: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  /** Window in source-raster pixels. Full tiled rasters use the whole source extent. */
+  window: { x: number; y: number; w: number; h: number };
+  /** Display asset dimensions. For native tiled rasters these equal source dimensions. */
+  cropWidth: number;
+  cropHeight: number;
+};
+
+export type RasterAsset = {
+  kind: "cog";
+  mode: "tiled";
+  sourceType: "local" | "remote" | "bundled";
+  profile?: "complete" | "tiled-no-overviews" | "striped";
+  reference?: { transform?: RasterTransform; crs?: string };
 };
 
 export type Asset = {
@@ -27,24 +49,15 @@ export type Asset = {
   byteSize?: number;
   width?: number;
   height?: number;
-};
-
-export type Annotation = {
-  id: string;
-  instanceId?: string;
-  asset: string;
-  label: string;
-  // "line" é uma polilinha aberta: usa `pts` como o polígono, mas sem fechar o contorno.
-  type: "box" | "polygon" | "line" | "point";
-  // Quem produziu a anotação, quando não foi a mão do usuário. Hoje só o BYOM
-  // preenche, no formato `byom:<model-id>`, para que reexecutar um modelo
-  // substitua o resultado anterior em vez de empilhar máscaras iguais.
-  origin?: string;
-  x?: number;
-  y?: number;
-  w?: number;
-  h?: number;
-  pts?: number[];
+  geo?: GeoRef;
+  raster?: RasterAsset;
+  /**
+   * Runtime-only handle to a local/bundled tiled raster. This field itself is never
+   * serialized into project.json; in a complete .plgm, project.ts may bundle the
+   * underlying raster bytes and restore a new runtime handle when the project opens.
+   */
+  runtimeRasterSource?: File;
+  reviewScore?: number;
 };
 
 export type SamPrompt = {

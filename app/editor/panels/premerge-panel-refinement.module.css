@@ -1,0 +1,215 @@
+.classIntro {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin: 0 1px 7px;
+  color: var(--muted);
+}
+
+.classIntro > svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--green);
+}
+
+.classIntro > span,
+.cardHeading > span {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.classIntro strong,
+.cardHeading strong {
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.classIntro small,
+.cardHeading small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.quickLabelCard,
+.activeLabelCard {
+  border: 1px solid color-mix(in srgb, var(--line) 86%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-soft) 76%, transparent);
+}
+
+.quickLabelCard {
+  margin-bottom: 7px;
+  padding: 8px;
+}
+
+.cardHeading {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.cardHeading > svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--green);
+}
+
+.createRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 31px 30px;
+  gap: 4px;
+}
+
+.createRow > input:not([type="color"]) {
+  min-width: 0;
+  width: 100%;
+  height: 30px;
+  min-height: 30px !important;
+  border-radius: 6px !important;
+  font-size: 10px;
+}
+
+.createRow > input[type="color"] {
+  width: 31px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  padding: 2px !important;
+  border-radius: 6px !important;
+}
+
+.createButton {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px !important;
+  padding: 0 !important;
+  display: grid;
+  place-items: center;
+  border-color: var(--green) !important;
+  border-radius: 6px !important;
+  background: var(--green) !important;
+  color: var(--on-brand) !important;
+}
+
+.createButton:hover:not(:disabled) {
+  background: var(--green) !important;
+  filter: brightness(1.05);
+}
+
+.labelSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 25px;
+  margin: 0 2px 1px;
+  color: var(--muted);
+}
+
+.labelSectionHeader strong {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.labelSectionHeader small {
+  min-width: 23px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: var(--tool-active-bg);
+  color: var(--muted);
+  font-size: 9px;
+  text-align: center;
+}
+
+/* Match the denser pre-merge class rows without changing their editable behaviour. */
+.labelSectionHeader + :global(div) {
+  margin-top: 2px !important;
+  gap: 2px !important;
+}
+
+.labelSectionHeader + :global(div) > :global(div) {
+  position: relative;
+  min-height: 34px !important;
+  padding: 2px 3px !important;
+  border-radius: 7px !important;
+}
+
+.labelSectionHeader + :global(div) > :global(div):hover {
+  background: var(--surface-soft);
+}
+
+.labelSectionHeader + :global(div) > :global(div[class*="rowSelected"]) {
+  border-color: var(--tool-active-border) !important;
+  background: var(--tool-active-bg) !important;
+  box-shadow: inset 3px 0 var(--green);
+}
+
+.labelSectionHeader + :global(div) > :global(div) > :global(input[type="color"]) {
+  width: 28px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  padding: 2px !important;
+  border-radius: 6px !important;
+}
+
+.labelSectionHeader + :global(div) > :global(div) > :global(input:not([type="color"])) {
+  height: 28px !important;
+  min-height: 28px !important;
+  padding-inline: 6px !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 10px !important;
+}
+
+.labelSectionHeader + :global(div) > :global(div) > :global(input:not([type="color"]):focus) {
+  border-color: var(--green) !important;
+  background: var(--surface) !important;
+}
+
+.labelSectionHeader + :global(div) > :global(div) > :global(small) {
+  min-width: 20px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 9px;
+  text-align: center;
+}
+
+.activeLabelCard {
+  margin-top: 7px;
+  padding: 8px;
+  border-top-color: color-mix(in srgb, var(--green) 28%, var(--line));
+}
+
+.activeLabelCard .cardHeading {
+  margin-bottom: 5px;
+}
+
+.activeLabelCard select {
+  width: 100%;
+  max-width: none !important;
+  margin: 0 !important;
+  min-height: 30px;
+  height: 30px;
+  border-radius: 6px !important;
+  font-size: 10px;
+}
+
+@media (max-width: 860px) {
+  .quickLabelCard,
+  .activeLabelCard {
+    border-radius: 7px;
+  }
+
+  .classIntro {
+    margin-top: 2px;
+  }
+}

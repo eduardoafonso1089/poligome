@@ -1,0 +1,154 @@
+.contract { display: contents; }
+
+/* The historical onboarding dimmed the image itself with the SVG overlay below.
+   Keep the canonical annotations loaded, but match the exact first-step mask. */
+.contract :global(.editor:has(.pre-refactor-demo-card)) :global(.stage) > section > div > div::after {
+  background: rgba(7, 13, 10, .68) !important;
+}
+
+/* The old canvas had a soft frame shadow. The canonical canvas wrapper is
+   intentionally geometry-only, so restore the shadow in the presentation layer. */
+.contract :global(.editor:not(:has(.pre-refactor-empty-overlay)) .stage) > section > div > div {
+  box-shadow: 0 13px 35px rgba(36,54,43,.22), 0 0 0 1px rgba(35,55,42,.15);
+}
+
+/* The tutorial target in the historical toolbar used only the mint halo. The
+   canonical bridge also added the theme accent as an inner border, which made
+   the same control look double-selected. */
+.contract :global(.demo-tutorial-tool-target) {
+  border-color: transparent !important;
+}
+
+/* Demo-ready used the historical checkmark in the status bar. Keep the normal
+   sparkle icon everywhere else and swap only while the onboarding card exists. */
+.contract :global(.shell:has(.pre-refactor-demo-card) .status p svg) {
+  display: none !important;
+}
+.contract :global(.shell:has(.pre-refactor-demo-card) .status p)::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* In the old mobile layout the centred fitted image rasterized one pixel lower.
+   This visual offset does not change zoom, scroll state or annotation geometry. */
+@media (max-width: 860px) {
+  .contract :global(.editor:not(:has(.pre-refactor-empty-overlay)) .stage) > section > div > div {
+    transform: translateY(1px);
+  }
+  /* The temporary canonical shell imposed a 152px minimum on both welcome
+     actions. Pre-refactor sized each action to its own icon + label content. */
+  .contract :global(.pre-refactor-empty-card button) {
+    min-width: 0 !important;
+  }
+}
+
+/* Reference/premerge kept File-menu rows visually available even when an empty
+   project made the underlying actions inapplicable. Preserve disabled semantics
+   while matching that presentation. */
+.contract :global(.project-pop button:disabled),
+.contract :global(.project-pop .canonical-file-extras > button:disabled) {
+  opacity: 1 !important;
+  color: var(--ink) !important;
+  cursor: default !important;
+}
+.contract :global(.project-pop button:disabled small),
+.contract :global(.project-pop .canonical-file-extras > button:disabled small) {
+  color: var(--muted) !important;
+}
+
+/* Mobile parity: pre-refactor kept every tool in one continuous horizontal
+   strip. Functional touch actions added during the canonical refactor must join
+   that same strip rather than creating a second toolbar row. */
+@media (max-width: 860px) {
+  .contract :global(.editor-controls) {
+    display: flex !important;
+    align-items: stretch !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+    scrollbar-width: thin;
+    scrollbar-color: var(--tool-active-border) var(--surface-soft);
+    background: var(--surface-soft);
+    border-bottom: 1px solid var(--line);
+  }
+  .contract :global(.editor-controls::-webkit-scrollbar) {
+    height: 5px;
+  }
+  .contract :global(.editor-controls::-webkit-scrollbar-track) {
+    background: var(--surface-soft);
+  }
+  .contract :global(.editor-controls::-webkit-scrollbar-thumb) {
+    background: var(--tool-active-border);
+    border-radius: 999px;
+  }
+  .contract :global(.tools) {
+    flex: 0 0 auto !important;
+    width: max-content !important;
+    min-width: max-content !important;
+    overflow: visible !important;
+    flex-wrap: nowrap !important;
+    border-bottom: 0 !important;
+  }
+  .contract :global(.tools > div),
+  .contract :global(.tools > i),
+  .contract :global(.tools > .tool-btn),
+  .contract :global(.tools > label),
+  .contract :global(.tools > .zoom) {
+    flex: 0 0 auto !important;
+  }
+  .contract :global(.tools .spacer) {
+    flex: 0 0 4px !important;
+    min-width: 4px !important;
+  }
+  .contract :global(.drawing-actions) {
+    flex: 0 0 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 3px !important;
+    min-width: max-content !important;
+    padding: 0 10px 0 2px !important;
+    margin: 0 !important;
+    background: var(--surface-soft) !important;
+    border: 0 !important;
+  }
+  .contract :global(.drawing-actions .touch-instructions) {
+    display: none !important;
+  }
+  .contract :global(.drawing-actions button) {
+    width: 33px !important;
+    min-width: 33px !important;
+    height: 33px !important;
+    min-height: 33px !important;
+    padding: 0 !important;
+    border: 1px solid transparent !important;
+    border-radius: 7px !important;
+    background: transparent !important;
+    color: var(--tool-ink) !important;
+    display: grid !important;
+    place-items: center !important;
+    font-size: 0 !important;
+    line-height: 1 !important;
+  }
+  .contract :global(.drawing-actions button[aria-pressed="true"]) {
+    background: var(--tool-active-bg) !important;
+    color: var(--tool-active-ink) !important;
+    border-color: var(--tool-active-border) !important;
+  }
+  .contract :global(.drawing-actions button:disabled) {
+    color: var(--tool-disabled-ink) !important;
+    opacity: 1 !important;
+  }
+  .contract :global(.drawing-actions button svg) {
+    width: 17px !important;
+    height: 17px !important;
+  }
+}

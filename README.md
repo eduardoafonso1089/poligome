@@ -1,23 +1,66 @@
-# vinext-starter
+# Poligome
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Free, local-first data annotation for AI. Annotate images in
+the browser — no account, no upload, no server holding your dataset.
 
-## Prerequisites
+Poligome runs entirely in the tab. Images and annotations are processed on
+your own machine, and the dataset you export never passes through a backend. AI
+assistance is optional and also local: the SAM connector and the GeoTIFF
+converter run on your computer, not in the cloud.
 
-- Node.js `>=22.13.0`
-- Linux with `flock`, `curl`, and GNU `timeout`
+> [!IMPORTANT]
+> **Status of `refactor/editor-architecture`:** the canonical source-pixel editor is active at
+> `/annotate`. Image/annotation/class management, Quality/Review, advanced vector operations,
+> keyboard shortcuts, selective COCO import and the active editor internationalization surface
+> are restored on the canonical architecture. The local SAM UI is intentionally not part of this
+> branch's merge target; it will be integrated from its dedicated branch after this refactor.
 
-## Sites Lifecycle
+## Image annotator
 
-The Sites lifecycle CLI runs the locked dependency install before returning this checkout. Edit the source under `app/`, then checkpoint when a coherent milestone is ready to inspect or share. The remote Sites builder runs `npm run build` against the pushed commit. Do not repeat install or build as a normal pre-checkpoint step.
+| | Route | What it does | Exports |
+|---|---|---|---|
+| **Computer vision** | `/annotate` | Boxes, polygons, masks, polylines, and keypoints, with vector editing, snapping, per-class visibility, quality/review and large-raster navigation | COCO, YOLO, GeoJSON, portable project |
 
-This starter does not use `wrangler.jsonc`.
+Projects can be saved as a project you can save and reopen later: a single portable file with
+images, labels, and annotations, so work resumes on another machine without a
+server.
 
-`install:ci` is intentionally a single, non-retrying `npm ci`. It refuses a concurrent install for the same project, consumes a matching image-seeded npm cache with `--prefer-offline` while retaining registry fallback for a missing cache object, otherwise downloads and verifies the complete vinext tarball recorded in `package-lock.json`, limits npm to one socket, and terminates a stalled install. `build` applies a short timeout and then validates the Sites artifact. These helpers target Linux and use GNU `timeout`; they are not native macOS scripts.
+The landing page also offers a one-click computer-vision demo. Its three
+synthetic aerial photographs are bundled with the public frontend and arrive
+with boxes, polygons, a polyline, a keypoint, and localized classes ready to
+edit or export. No example dataset is processed or stored by a backend.
 
-Scripts that need writable project-scoped home, npm, XDG, and temporary paths use `scripts/sites-env.sh`. The `dev` and `start` scripts honor the caller's runtime environment and keep Wrangler logs inside the checkout. The generated `.sites-runtime/` directory is disposable and ignored by Git.
+The YOLO export is a complete dataset archive: it includes paired images and
+labels, a deterministic training/validation split, `classes.txt`, and
+`data.yaml`. With a single image, the training image is also used as validation.
+
+## Geospatial input
+
+The refactored image annotator opens GeoTIFF and Cloud Optimized GeoTIFF files directly. COGs can be rendered natively as a tiled raster without a PNG intermediary, while the crop workflow remains available. Annotations over georeferenced assets can be exported as GeoJSON.
+
+Files that are not proper COGs still open, but the reader has to transfer far
+more than it needs. The local converter below turns them into real COGs.
+
+## Local helpers
+
+Two optional connectors run on your own machine. Both are self-contained
+installers downloaded from the app, and neither sends anything to a server.
+
+**Local SAM** — AI pre-annotation, plus BYOM for your own containerized model. The catalog, the installers and the editor UI are described in [SAM local](#sam-local) and [BYOM](#byom--traga-o-seu-próprio-modelo) below.
+
+**Local COG converter** — for large rasters. `public/poligome-cog-windows.bat`
+and `public/poligome-cog-macos-linux.sh` install rasterio and rio-cogeo and
+start a converter on `http://127.0.0.1:7861`. Converting in the browser is not
+an option for the files that need it most: the process has to read the whole
+raster and build the overview pyramid, and a gigapixel GeoTIFF does not fit in a
+tab's memory. The converter also serves the finished COG with Range support, so
+the app reads the result by tiles without downloading it again. The manual route
+is `public/poligome-cog-local.py`.
+
+Both connectors only accept browser requests from the official Poligome origins
+and local development by default. A trusted self-hosted instance can set
+`POLIGOME_ALLOWED_ORIGIN_REGEX` to an anchored regular expression for its own
+origins. Keep both services bound to loopback; they are not public APIs.
 
 ## SAM local
 
@@ -71,91 +114,96 @@ Pesos e dependências nunca são gravados no checkout: Linux, macOS e WSL2 usam 
 
 Por segurança de memória, o serviço limita cada imagem a 16 megapixels, processa no máximo quatro corpos de previsão simultaneamente e devolve no máximo 64 instâncias SAM 3. Esses valores podem ser ajustados conscientemente com `POLIGOME_MAX_IMAGE_PIXELS`, `POLIGOME_MAX_CONCURRENT_REQUESTS` e `POLIGOME_SAM3_MAX_PREDICTIONS`; o limiar conceitual mínimo do SAM 3 usa `POLIGOME_SAM3_MIN_CONCEPT_THRESHOLD` e começa em `0.1`.
 
-## Included Shape
+## Interface
 
-- edit site code under `app/`
-- `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+The landing page and canonical editor share Portuguese, English, French and Spanish preferences plus light, dark and system themes. The canonical editor uses the same global visual tokens as the rest of Poligome, while editor-specific layout classes live under `app/editor` so visual cleanup does not reintroduce coupling to the legacy annotator DOM.
 
-## Workspace Auth Headers
+## Development
 
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
+Requirements: Node.js `>=22.13.0`.
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+npm ci
+npm run dev
 ```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Diagnostic Commands
 
 - `npm run install:ci`: perform the one bounded lockfile install
 - `npm run dev`: start the Vite/Vinext development server
 - `npm run build`: build and validate the deployable Sites artifact
 - `npm run start`: start the built Vinext application
+- `npm run typecheck`: run `tsc --noEmit` over the project
+- `npm run test:unit`: run the Node test suite without building
 - `npm run test:sam-installers`: exercise all five SAM installer paths with isolated mocks and sparse checkpoints
-- `npm test`: build, validate, and verify the rendered development-preview metadata
+- `npm run test:byom`: exercise the BYOM lifecycle script against a mocked Docker
+- `npm test`: typecheck, then run the unit, SAM installer and BYOM suites
 - `npm run validate:artifact`: recheck an existing artifact's manifest and ESM `default.fetch` export
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
-Use build and validation commands for targeted diagnosis after a remote failure, not as part of the normal checkpoint path.
+The npm scripts target Linux and use `flock` and GNU `timeout`. On Windows, run
+Vite directly — see [REINSTALL_WINDOWS.md](REINSTALL_WINDOWS.md) for the full
+path, including the workaround for networks that block the npm registry.
 
-The timeout defaults can be overridden for a controlled canary with `SITES_INSTALL_TIMEOUT`, `SITES_INSTALL_KILL_AFTER`, `SITES_BUILD_TIMEOUT`, and `SITES_BUILD_KILL_AFTER`. A timeout fails the command; the helpers never retry an unchanged install or build.
+## Project layout
 
-## Learn More
+```
+app/page.tsx          landing
+app/annotate/         image annotator route
+app/editor/           canonical editor architecture and interface
+app/lib/              shared project, raster, SAM and i18n utilities
+public/               local connector installers, favicon and cursors
+docs/PLATFORM.md      hosting platform, bindings, and auth notes
+```
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+The stack is React 19 and Next 16 running on
+[vinext](https://github.com/cloudflare/vinext) with Vite, Tailwind CSS 4,
+OpenLayers for map rendering, and optional Cloudflare D1 through Drizzle.
+
+## Platform and deployment
+
+Hosting details, Cloudflare bindings, workspace auth headers, and the optional
+ChatGPT sign-in helpers inherited from the starter live in
+[docs/PLATFORM.md](docs/PLATFORM.md).
+
+## Contributing and security
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), follow
+the [code of conduct](CODE_OF_CONDUCT.md), and use the issue templates for bugs
+and feature proposals. Please report vulnerabilities privately as described in
+[SECURITY.md](SECURITY.md).
+
+## License
+
+Poligome — data annotation for AI
+Copyright (C) 2026 Eduardo Afonso
+
+This program is free software, distributed under the
+[GNU Affero General Public License, version 3](LICENSE) (`AGPL-3.0-only`).
+You may use, study, modify, and redistribute it, provided that any derivative
+version stays under the same license.
+
+Because Poligome is a web application, **section 13** of the AGPL applies:
+anyone who modifies this program and offers it for use over a network must make
+the corresponding source code available to the people using it — in practice,
+exposing a link to the source in the instance's own interface.
+
+Merely using Poligome, including a hosted instance, places no obligation on you,
+and the datasets you export are not derivative works of the program.
+
+No warranty; see [LICENSE](LICENSE) for the full terms and [NOTICE](NOTICE) for
+ownership and contribution credits.
+
+### Commercial license
+
+The AGPL asks derivative work to stay open, and asks a modified network instance to offer
+its source to the people using it. If that does not fit your case — embedding Poligome in a
+closed product, or running a modified instance without publishing the changes — a separate
+commercial license is available from the copyright holder. Write to
+eduardoafonso1089@gmail.com describing the intended use.
+
+The Poligome name and logos are not covered by the AGPL: the license grants rights over the
+code, not over the identity. See [NOTICE](NOTICE).
+
+### Georeferenced rasters
+
+See [Raster import and export](docs/RASTER_WORKFLOW.md) for supported formats,
+sidecars, memory limits, coordinate handling and verification instructions.

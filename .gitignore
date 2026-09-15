@@ -43,6 +43,10 @@ next-env.d.ts
 /.sites-runtime/
 /outputs/
 /work/
+public/amostras/
+
+# audit output
+/interaction-audit/
 
 # SAM runtimes and model weights are always downloaded locally, never versioned.
 /.visionlabel-sam/
