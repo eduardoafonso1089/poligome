@@ -5,10 +5,23 @@ projeto. Escrita originalmente sobre `e816c74` e **revalidada contra o `main`
 em `6b7304f`** (após o PR #14). As duas divergências que o PR #14 introduziu
 estão registradas em **E1** (já resolvido) e **E7** (novo achado).
 
-**Nenhum código de produto foi alterado.** Este documento levanta o que
-encontrei, com arquivo e linha, o impacto e a correção sugerida. Cada item traz
-uma nota de risco de mudança de comportamento, já que a exigência é preservar o
-funcionamento atual da plataforma.
+Este documento levanta o que encontrei, com arquivo e linha, o impacto e a
+correção sugerida. Cada item traz uma nota de risco de mudança de comportamento.
+
+## Estado em 2026-09-15
+
+Parte do plano já foi executada. Os itens abaixo estão marcados no corpo do
+documento; o resto continua valendo como escrito.
+
+| PR | O que entrou | Itens fechados |
+|---|---|---|
+| **#15** | memoização, código morto, lockfile | F1, F2, F3, F4, F5, F6, F7, B2, B3, B4 (parte) |
+| **#16** | os três que mudam comportamento | E2, E3, E5 (parte), D4 |
+
+`main` passou de 209 para 222 testes. A **Onda 2** — converter os 26 arquivos de
+teste que fazem regex sobre o código-fonte — é o próximo gargalo: enquanto ela
+não acontecer, A1 e A4 (os dois arquivos gigantes) não podem ser tocados sem
+quebrar o CI por motivo errado.
 
 ## Sumário executivo
 
@@ -156,7 +169,7 @@ Consequência em cascata: `app/editor/legacy-controls.module.css` (52 linhas) s�
 > nada em runtime, mas destrói essa referência. O mesmo vale para `onMerge` e
 > `canMerge`, que por isso ficam fora da lista de exports mortos em B4.
 
-### B2 — Oito CSS modules órfãos (1.185 linhas)
+### B2 — Oito CSS modules órfãos (1.185 linhas) — ✅ REMOVIDOS (#15)
 
 Nenhum import em todo o repositório (verificado com busca em `app/`, `tests/`,
 `scripts/`, `docs/`):
@@ -177,7 +190,7 @@ asserção negativa de teste (`assert.doesNotMatch(page, /annotate-interface…/
 e da documentação. Risco de remoção: **nenhum** para o runtime; ajustar o teste e
 a doc junto.
 
-### B3 — Modelo legado em `app/lib/types.ts`
+### B3 — Modelo legado em `app/lib/types.ts` — ✅ REMOVIDO (#15)
 
 ```ts
 export type Tool = "select" | "pan" | ... ;        // sem nenhum uso
@@ -189,7 +202,7 @@ declara removido ("no dependency on flat `pts` … or legacy `w/h` box fields").
 Nenhum arquivo importa nenhum dos dois. Mantê-los convida a reintroduzir o
 modelo antigo.
 
-### B4 — Exports sem nenhum consumidor
+### B4 — Exports sem nenhum consumidor — ✅ REMOVIDOS (#15), menos os do merge
 
 | Símbolo | Arquivo |
 |---|---|
@@ -262,7 +275,12 @@ inclusive o `window.setTimeout(..., 1500)` mágico. Extrair para
 - `baseName` (`coco-document-import.ts:40`) e `normalizedName`
   (`image-assets.ts:30`) são a mesma função com nomes diferentes.
 
-### C4 — `boxCorners` / `annotationBounds` duplicados com semântica divergente
+### C4 — `boxCorners` / `annotationBounds` duplicados com semântica divergente — ◐ PARCIAL (#16)
+
+> A divergência de semântica acabou: `boxCorners` agora deriva de
+> `boxCornerPoints`, fonte única. As cópias em `pre-refactor-demo-tutorial.tsx`
+> continuam lá e agora podem ser deduplicadas sem mudar comportamento.
+
 
 `app/editor/demo/pre-refactor-demo-tutorial.tsx:56,74` reimplementa ambos. A
 versão do demo **considera a rotação da caixa**; a canônica
@@ -329,7 +347,17 @@ nenhum Prettier. Daí virem as linhas de 4.500 caracteres do A4.
 Extrair para constantes nomeadas (`FIT_ZOOM = 92`, `HISTORY_LIMIT = 24`,
 `FALLBACK_LABEL_COLOR`, `OBJECT_URL_RELEASE_MS`, `HANDLE_SIZES`).
 
-### D4 — GeoJSON exporta propriedades em português
+### D4 — GeoJSON exporta propriedades em português — ✅ RENOMEADO (#16)
+
+> **Decisão do autor (2026-09-15):** as chaves foram para o inglês, contra a
+> recomendação registrada abaixo. Está feito, com o de-para documentado em
+> `docs/RASTER_WORKFLOW.md`, justificativa no golden e aviso de breaking change
+> no commit. O texto original fica como registro do trade-off avaliado.
+>
+> Correção ao texto abaixo: ele fala em inconsistência com COCO e YOLO, e não
+> existia uma. As chaves do COCO são ditadas pela especificação e o YOLO não tem
+> chave nenhuma — o GeoJSON era o único dos três com propriedades livres.
+
 
 `app/editor/export/export-files.ts:128-137` grava `classe`, `classe_id`, `cor`,
 `forma`, `rotacao`, `recorte`, `origem` — enquanto COCO e YOLO usam nomes em
@@ -426,7 +454,7 @@ não percebido. **Precisa de uma decisão antes de qualquer limpeza** — enquan
 não houver, `VectorToolbar` não deve ser apagado (B1) e `onMerge`/`canMerge` não
 devem entrar na lista de exports mortos (B4).
 
-### E2 — `annotationBounds` ignora a rotação da caixa
+### E2 — `annotationBounds` ignora a rotação da caixa — ✅ CORRIGIDO (#16)
 
 `app/editor/geometry/annotation-geometry.ts:19-24` devolve o retângulo
 não rotacionado para `type === "box"`. Já `exportBounds`
@@ -438,7 +466,7 @@ anotação tem dois "bounds" diferentes dependendo de quem pergunta. A versão d
 tutorial do demo (C4) usa a semântica rotacionada, o que confirma a divergência.
 Unificar muda comportamento de seleção, então precisa de teste dedicado antes.
 
-### E3 — `MIN_VERTEX_DISTANCE` é um limiar fixo em pixels de imagem
+### E3 — `MIN_VERTEX_DISTANCE` é um limiar fixo em pixels de imagem — ✅ CORRIGIDO (#16)
 
 `app/editor/geometry/annotation-geometry.ts:5` — `= 10`, usado para rejeitar
 vértices sobrepostos e arestas curtas. Todo o resto do editor converte limiares
@@ -456,7 +484,13 @@ e comenta explicitamente o motivo ("covers browsers that deny storage access").
 Em Safari privado ou com armazenamento bloqueado, o acesso lança e derruba o
 render.
 
-### E5 — `Math.min(...array)` com vetor grande
+### E5 — `Math.min(...array)` com vetor grande — ◐ PARCIAL (#16)
+
+> `verticesBounds` e `exportBounds` passaram a usar varredura única. O padrão
+> ainda existe em `canonical-editor-workbench.tsx:655-658`,
+> `polygon-transform.ts:10-11`, `quality-review-model.ts:82-84`,
+> `pre-refactor-demo-tutorial.tsx:79-86` e `sam.ts:175`.
+
 
 `annotation-geometry.ts:13-17`, `annotation-export.ts:46-48` e
 `canonical-editor-workbench.tsx:645-650` usam spread sobre as coordenadas. Acima
@@ -474,7 +508,7 @@ muito densos. Versão iterativa com índices (pilha explícita) resolve os dois.
 
 ## F. Performance
 
-### F1 — O listener global de teclado é reinstalado a cada render
+### F1 — O listener global de teclado é reinstalado a cada render — ✅ CORRIGIDO (#15)
 
 `canonical-editor-workbench.tsx:712-742`
 
@@ -488,7 +522,7 @@ roda em todo render, ou seja: `removeEventListener` + `addEventListener` a cada
 `pointermove` durante um arraste. Correção: guardar os handlers em um `ref`
 atualizado por efeito e registrar o listener uma única vez (`[]`).
 
-### F2 — A `memo` de `AnnotationLayer` nunca acerta
+### F2 — A `memo` de `AnnotationLayer` nunca acerta — ✅ CORRIGIDO (#15)
 
 `app/editor/layers/annotation-layer.tsx:41` envolve o componente em `memo` — a
 única memoização de render do editor. Ela nunca acerta, por três motivos
@@ -528,12 +562,12 @@ estável em vez dos ternários. `useEditorViewport` já faz a coisa certa ao
 depender de `[image.height, image.width]` em vez do objeto — o mesmo cuidado
 falta nos hooks de interação.
 
-### F3 — `EditorCanvas` reconstrói Map e Set a cada render
+### F3 — `EditorCanvas` reconstrói Map e Set a cada render — ✅ CORRIGIDO (#15)
 
 `app/editor/canvas/editor-canvas.tsx:60-62` — `new Map(props.labels.map(…))` e
 `new Set(props.selectedIds)` em todo render, e o componente não é `memo`.
 
-### F4 — Cursor SVG gerado por vértice, por render
+### F4 — Cursor SVG gerado por vértice, por render — ✅ CORRIGIDO (#15)
 
 `app/editor/layers/vertex-handles.tsx:135` chama `vertexMoveCursor` dentro do
 `map` dos vértices. Cada chamada monta uma string SVG e roda
@@ -543,7 +577,7 @@ de vértice, há um render por `pointermove`. Correção: `useMemo` sobre
 `vertices` (as direções só mudam quando a geometria muda) ou cache por
 `vertex.id` + posição dos vizinhos.
 
-### F5 — Exportação COCO é O(anotações × (imagens + classes))
+### F5 — Exportação COCO é O(anotações × (imagens + classes)) — ✅ CORRIGIDO (#15)
 
 `app/editor/export/annotation-export.ts:52-53`
 
@@ -556,12 +590,12 @@ Isso roda **por anotação**. Com 50 mil anotações e 5 mil imagens são ~250
 milhões de comparações, síncronas, na thread da UI. Correção: `buildCocoDocument`
 (`export-files.ts:27`) monta dois `Map` uma vez e os passa adiante.
 
-### F6 — Exportação YOLO filtra o array inteiro por imagem
+### F6 — Exportação YOLO filtra o array inteiro por imagem — ✅ CORRIGIDO (#15)
 
 `export-files.ts:57-60` — `annotations.filter(...)` dentro do laço de imagens:
 O(imagens × anotações). Agrupar por asset uma vez antes do laço.
 
-### F7 — `rasterTransform` recalculado por anotação no GeoJSON
+### F7 — `rasterTransform` recalculado por anotação no GeoJSON — ✅ CORRIGIDO (#15)
 
 `export-files.ts:105` chama `rasterTransform(geo)` dentro do `map` de
 anotações, enquanto a projeção de CRS logo acima (linha 104) **é** cacheada num
@@ -721,6 +755,22 @@ script `typecheck` (o `tsc` só roda dentro do build) nem coleta de cobertura
 
 ## H. Ferramental
 
+### H3 — O lockfile fixava tarballs num mirror de terceiros — ✅ CORRIGIDO (#15)
+
+22 das 752 entradas `resolved` do `package-lock.json` apontavam para
+`registry.npmmirror.com`, que entrou junto com as árvores de `ol` e `geotiff`:
+`ol`, `geotiff/pako`, `rbush`, `pbf`, `earcut`, `numcodecs`, `zarrita`,
+`zstddec` e companhia.
+
+Além do problema de reprodutibilidade e de cadeia de suprimentos — o projeto
+buscava bytes de um espelho que ninguém escolheu conscientemente — isso
+inviabilizava o `npm ci` em qualquer rede que só libere o registro oficial. Foi
+exatamente o que travou a validação desta revisão por três tentativas.
+
+Só as URLs mudaram; nenhum `integrity` foi tocado, então cada tarball continua
+sendo verificado contra o mesmo sha512. A instalação é a prova: 565 pacotes
+resolvidos do registro oficial contra hashes inalterados.
+
 ### H1 — ESLint mínimo demais para o tamanho do código
 
 `eslint.config.mjs` só estende `next/core-web-vitals` e `next/typescript`. Nada
@@ -760,7 +810,7 @@ Legenda de esforço: **P** ≤ 1h · **M** meio dia · **G** ≥ 1 dia.
 
 ---
 
-### Onda 0 — Fazer agora (baixo risco, ganho imediato)
+### Onda 0 — Fazer agora (baixo risco, ganho imediato) — ✅ CONCLUÍDA no PR #15
 
 Nada aqui muda estrutura; tudo é verificável pelo suíte atual sem tocar em
 nenhum teste.
@@ -780,9 +830,11 @@ regexes dos testes.
 
 ---
 
-### Onda 1 — Limpeza (risco zero em runtime)
+### Onda 1 — Limpeza (risco zero em runtime) — ◐ em boa parte feita no PR #15
 
 Só remoção. Reduz em ~1.400 linhas o que a Onda 3 teria de refatorar.
+Entraram os itens 7, 9, 10 e 12. Ficaram de fora o 8 (`VectorToolbar`, em espera
+por E7) e o 11 (restos do template).
 
 | # | Item | Esforço | Observação |
 |---|---|---|---|
@@ -795,9 +847,11 @@ Só remoção. Reduz em ~1.400 linhas o que a Onda 3 teria de refatorar.
 
 ---
 
-### Onda 2 — Destravar os testes (pré-requisito da Onda 3)
+### Onda 2 — Destravar os testes (pré-requisito da Onda 3) — ⬅ **próximo gargalo**
 
-Sem isto, qualquer refactor estrutural quebra o CI **por motivo errado**.
+Sem isto, qualquer refactor estrutural quebra o CI **por motivo errado**. Com a
+Onda 0 e a maior parte da Onda 1 fora do caminho, esta virou a etapa que bloqueia
+todo o resto.
 
 | # | Item | Esforço | Detalhe |
 |---|---|---|---|
@@ -817,8 +871,8 @@ Onda 3.
 
 | # | Item | Esforço | Detalhe |
 |---|---|---|---|
-| 17 | **F1 — listener de teclado reinstalado a cada render** | **P** | `canonical-editor-workbench.tsx:712-742`. Handlers num `ref`, listener registrado com `[]`. |
-| 18 | **F3/F4 — `Map`/`Set` do canvas e cursor SVG por vértice** | **M** | `editor-canvas.tsx:62-63` e `vertex-handles.tsx:135`. O F4 é coberto por `vertex-cursor.test.mjs`, que é teste de comportamento sobre as funções exportadas — memoizar é seguro. |
+| ~~17~~ | ~~**F1 — listener de teclado**~~ | — | ✅ feito no #15. |
+| ~~18~~ | ~~**F3/F4 — `Map`/`Set` e cursor SVG**~~ | — | ✅ feito no #15. |
 | 19 | **A4 — quebrar `pre-refactor-chrome.tsx`** | **G** | Formatar (linha de 4.521 caracteres) e dividir em 6 componentes. Depende do item 14. |
 | 20 | **A1/A2 — extrair hooks do workbench** | **G** | `useProjectSession`, `useDemoTutorial`, `useCanvasRouting`, `useEditorShortcuts`. Depende do item 14. |
 | 21 | **A3 — trocar `CustomEvent` global por props** | **M** | Fazer junto do item 20, enquanto a fronteira workbench↔painéis já está aberta. |
@@ -865,6 +919,7 @@ mudam o produto. Fazer um item por PR, depois da Onda 2.
 
 ### Resumo em uma linha
 
-Comece pelo item 1 (`useMemo` no `imageSize`) e pelo item 3 (exportações), que
-são ganho grande com risco quase nulo; limpe o código morto; **depois** conserte
-os testes de grep; e só então encoste nos dois arquivos gigantes.
+~~Comece pelo item 1 e pelo item 3~~ — feitos. **O próximo passo é a Onda 2:**
+converter os testes de grep, porque são eles que hoje impedem quebrar os dois
+arquivos gigantes. Um deles chega a exigir que uma arrow function inteira fique
+na mesma linha, então até rodar um formatador falha o CI.
