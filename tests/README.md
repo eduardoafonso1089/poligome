@@ -97,9 +97,20 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chrome npm run test:audit
 npm run test:coverage
 ```
 
-Currently 87% of lines and 84% of branches over the whole `app/` tree — the
-figure fell from 94% when the CSS-module hooks made the management panels
-measurable for the first time, not because anything stopped being tested.
+Read it per file, not as one number. The aggregate is currently ~41% of lines,
+and it *fell* from 94% while the suite grew from 222 to 318 tests — because
+rendering the whole workbench finally loads the modules that unit tests never
+imported. A file nobody measured was never 94% covered; it was absent from the
+denominator.
 
-The remaining gap is deliberate: `app/lib/sam.ts` is dormant until the SAM
-branch lands.
+What the aggregate hides:
+
+| Kind of module | Lines | Covered by |
+|---|---|---|
+| Models, geometry, import/export, project format | 90–100% | unit tier |
+| Layers, chrome, panels, drafts, export menu | 95–100% | component tier |
+| Pointer and gesture hooks, import dialogs, COG layer | 25–60% | functional tier, which coverage does not measure |
+| `app/lib/sam.ts` | 35% | dormant until the SAM branch lands |
+
+So the number to watch is a file dropping out of the first two rows, not the
+total. CSS modules and the tests themselves are excluded from the report.

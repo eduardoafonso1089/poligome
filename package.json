@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && npm run test:unit",
     "test:unit": "node --import tsx --import ./tests/helpers/register-hooks.mjs --test tests/*.test.mjs",
-    "test:coverage": "node --import tsx --import ./tests/helpers/register-hooks.mjs --test --experimental-test-coverage tests/*.test.mjs",
+    "test:coverage": "node --import tsx --import ./tests/helpers/register-hooks.mjs --test --experimental-test-coverage --test-coverage-exclude='**/*.css' --test-coverage-exclude='tests/**' tests/*.test.mjs",
     "test:build": "npm run build && node --import tsx --import ./tests/helpers/register-hooks.mjs --test tests/*.test.mjs",
     "test:audit": "bash scripts/run-audits.sh",
     "benchmark:cog": "node --import tsx scripts/benchmark-cog.mjs",

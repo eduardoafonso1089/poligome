@@ -17,11 +17,15 @@ documento; o resto continua valendo como escrito.
 |---|---|---|
 | **#15** | memoização, código morto, lockfile | F1, F2, F3, F4, F5, F6, F7, B2, B3, B4 (parte) |
 | **#16** | os três que mudam comportamento | E2, E3, E5 (parte), D4 |
+| **Onda 2** | camadas de teste, guardas em lint, CI em tiers | G1a, G1b, G2, G3, G4, G5 |
 
-`main` passou de 209 para 222 testes. A **Onda 2** — converter os 26 arquivos de
-teste que fazem regex sobre o código-fonte — é o próximo gargalo: enquanto ela
-não acontecer, A1 e A4 (os dois arquivos gigantes) não podem ser tocados sem
-quebrar o CI por motivo errado.
+`main` passou de 209 para 318 testes. A **Onda 2 está concluída**: as asserções
+sobre texto-fonte foram substituídas por testes que renderizam os componentes,
+as guardas de arquitetura viraram regras de ESLint, e o que ainda precisa olhar
+o código-fonte passa por `tests/helpers/source.mjs`, que normaliza espaços em
+branco — rodar um formatador nos dois arquivos gigantes não quebra mais o CI.
+A **Onda 3** (A1/A4, quebrar `canonical-editor-workbench.tsx` e
+`pre-refactor-chrome.tsx`) é o próximo passo, e agora está destravada.
 
 ## Sumário executivo
 
@@ -847,11 +851,26 @@ por E7) e o 11 (restos do template).
 
 ---
 
-### Onda 2 — Destravar os testes (pré-requisito da Onda 3) — ⬅ **próximo gargalo**
+### Onda 2 — Destravar os testes (pré-requisito da Onda 3) — ✅ CONCLUÍDA
 
-Sem isto, qualquer refactor estrutural quebra o CI **por motivo errado**. Com a
-Onda 0 e a maior parte da Onda 1 fora do caminho, esta virou a etapa que bloqueia
-todo o resto.
+Sem isto, qualquer refactor estrutural quebrava o CI **por motivo errado**.
+Como foi feito:
+
+- **13 (G1a)** — as guardas viraram regras em `eslint.config.mjs`
+  (`no-restricted-imports` com `allowTypeImports`, `no-restricted-globals`,
+  `no-restricted-syntax`). `tests/architecture-guards.test.mjs` alimenta o
+  ESLint com código que quebra cada fronteira de propósito, para provar que a
+  regra ainda dispara.
+- **14 (G1b)** — 26 suítes de regex viraram quatro camadas: unitária,
+  de componente (`react-dom/server`, com hooks de módulo que carregam CSS
+  modules), de build e funcional (Playwright). O que sobrou de asserção sobre
+  fonte passa por `tests/helpers/source.mjs`, que colapsa espaços em branco —
+  e a própria guarda falha se algum teste voltar a ler `app/` direto.
+- **15 (G2)** — `tests/repository-invariants.test.mjs` importa os módulos
+  dormentes em vez de procurar frases no README.
+- **16 (G4)** — `typecheck`, `test:unit`, `test:build`, `test:coverage` e
+  `test:audit` separados; o CI virou dois jobs (estático e build) mais o de
+  auditoria.
 
 | # | Item | Esforço | Detalhe |
 |---|---|---|---|

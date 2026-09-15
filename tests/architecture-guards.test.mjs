@@ -134,3 +134,33 @@ test("the formatting guard recognises a direct read when there is one", () => {
   assert.ok(DIRECT_SOURCE_READ.test(`await readFile(new URL('../docs/X.md', import.meta.url), 'utf8')`));
   assert.ok(!DIRECT_SOURCE_READ.test(`sourceOf("app/x.ts")`));
 });
+
+test("the source helper reads a wrapped file the same as a single-line one", async () => {
+  // The property the whole conversion rests on: line breaks and indentation
+  // disappear, so the same code formatted over seven lines reads as the one-line
+  // version a regex was written against. A formatter that also adds a trailing
+  // comma changes a token, not whitespace, which is why the regexes that care
+  // spell it `,? `.
+  const { writeFileSync, mkdirSync, rmSync } = await import("node:fs");
+  const directory = new URL("../.tmp-format-check/", import.meta.url);
+  const single = 'const snap = useMemo(() => ({ enabled, tolerance }), [enabled, tolerance]);\n';
+  const wrapped = [
+    "const snap = useMemo(() => ({",
+    "    enabled,",
+    "    tolerance",
+    "  }),",
+    "  [enabled, tolerance]);",
+    "",
+  ].join("\n");
+
+  mkdirSync(directory, { recursive: true });
+  try {
+    writeFileSync(new URL("single.ts", directory), single);
+    writeFileSync(new URL("wrapped.ts", directory), wrapped);
+    const { sourceOf } = await import("./helpers/source.mjs");
+    assert.equal(sourceOf(".tmp-format-check/wrapped.ts"), sourceOf(".tmp-format-check/single.ts"));
+    assert.doesNotMatch(sourceOf(".tmp-format-check/wrapped.ts"), /\n|  /, "normalized source carries no formatting at all");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
