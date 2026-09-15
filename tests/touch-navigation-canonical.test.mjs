@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { ViewportController } from '../app/editor/viewport/viewport-controller.ts';
 
 const touchSource=readFileSync(new URL('../app/editor/viewport/use-touch-navigation.ts',import.meta.url),'utf8');
+const viewportHookSource=readFileSync(new URL('../app/editor/viewport/use-editor-viewport.ts',import.meta.url),'utf8');
 const drawingSource=readFileSync(new URL('../app/editor/drawing/use-drawing-interactions.ts',import.meta.url),'utf8');
 const workbenchSource=readFileSync(new URL('../app/editor/workbench/canonical-editor-workbench.tsx',import.meta.url),'utf8');
 const chromeSource=readFileSync(new URL('../app/editor/presentation/pre-refactor-chrome.tsx',import.meta.url),'utf8');
@@ -45,6 +46,17 @@ test('pinch-pan combines scale and moving midpoint without annotation rescaling'
   assert.ok(Number.isFinite(after.scrollTop));
 });
 
+test('pinch publishes scroll synchronously so the next touch frame matches controller state',()=>{
+  assert.match(viewportHookSource,/const applyScrollImmediately = useCallback/);
+  assert.match(viewportHookSource,/applyScrollImmediately\(next\);\s*publish\(next\);/);
+});
+
+test('select mode reserves empty-canvas one-finger drag for thresholded pan',()=>{
+  assert.match(touchSource,/tool === "select" && event\.target === event\.currentTarget/);
+  assert.match(touchSource,/PAN_THRESHOLD_PX/);
+  assert.match(touchSource,/cancelEditing\(\)/);
+});
+
 test('second touch cancels editing and drawing before pinch owns the gesture',()=>{
   assert.match(touchSource,/cancelEditing\(\)/);
   assert.match(touchSource,/cancelDrawing\(\)/);
@@ -62,6 +74,7 @@ test('discrete touch drawing commits on pointerup, not pointerdown',()=>{
 test('canonical workbench exposes localized hand tool through presentation and capture-phase touch navigation',()=>{
   assert.match(chromeSource,/title=\{copy\.pan\}[^>]*onClick=\{\(\) => props\.onTool\("pan"\)\}/);
   assert.match(workbenchSource,/onPointerDownCapture=\{touch\.onPointerDownCapture\}/);
-  assert.match(workbenchSource,/onPointerMoveCapture=\{touch\.onPointerMoveCapture\}/);
+  assert.match(workbenchSource,/onPointerMoveCapture=\{routePointerMoveCapture\}/);
+  assert.match(workbenchSource,/routePointerMoveCapture[\s\S]*touch\.onPointerMoveCapture\(event\)/);
   assert.match(workbenchSource,/touchMode=\{touch\.touchMode\}/);
 });
