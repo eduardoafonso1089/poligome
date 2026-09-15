@@ -97,7 +97,10 @@ export function VertexHandles({
   onCancel,
   onInsertVertex,
 }: VertexHandlesProps) {
-  const midpoints = useMemo(() => edgeMidpoints(vertices, open), [vertices, open]);
+  // O handle "+" só cabe numa aresta mais longa que ele. markerRadius já vem
+  // convertido de px de tela, então o limite acompanha o zoom.
+  const minEdgeLength = Math.max(markerRadius * 6, 1);
+  const midpoints = useMemo(() => edgeMidpoints(vertices, open, minEdgeLength), [vertices, open, minEdgeLength]);
   // Each cursor is an encoded SVG data URI. Building one per vertex on every
   // render made a pointermove over a dense polygon rebuild hundreds of strings.
   const cursors = useMemo(

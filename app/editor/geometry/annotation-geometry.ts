@@ -2,6 +2,20 @@ import type { BoxAnnotation, EditorAnnotation } from "../models/annotation-model
 import type { Vertex } from "../models/vertex-model";
 import { deleteVertex, insertVertex, moveVertices, updateVertex } from "../models/vertex-model";
 
+/**
+ * Two different jobs used to share one constant, in source-image pixels, which
+ * meant the guard grew and shrank with the image: ~27 screen px on a thumbnail,
+ * 0.2 screen px on a 40.000 px orthomosaic, where it never fired at all.
+ *
+ * - DEGENERATE_VERTEX_DISTANCE refuses coincident vertices. That is a geometry
+ *   concern, so it stays absolute and tiny.
+ * - VERTEX_SCREEN_DISTANCE is the fat-finger guard. It is a screen measure, so
+ *   callers convert it through screenPixelsToImageUnits like snapping does.
+ */
+export const DEGENERATE_VERTEX_DISTANCE = 0.25;
+export const VERTEX_SCREEN_DISTANCE = 10;
+
+/** Inherited default for callers that cannot derive a zoom-aware tolerance. */
 export const MIN_VERTEX_DISTANCE = 10;
 
 export type Bounds = { x: number; y: number; width: number; height: number };
@@ -104,10 +118,16 @@ export function resizeBoxFromCorner(
   return { ...annotation, x: worldCenter.x - width / 2, y: worldCenter.y - height / 2, width, height };
 }
 
-export function updateAnnotationVertex(annotation: EditorAnnotation, vertexId: string, point: { x: number; y: number }): EditorAnnotation {
+export function updateAnnotationVertex(
+  annotation: EditorAnnotation,
+  vertexId: string,
+  point: { x: number; y: number },
+  minDistance = MIN_VERTEX_DISTANCE,
+): EditorAnnotation {
   if (annotation.type !== "polygon" && annotation.type !== "line") return annotation;
+  const tolerance = Math.max(minDistance, DEGENERATE_VERTEX_DISTANCE);
   const overlaps = annotation.vertices.some((vertex) =>
-    vertex.id !== vertexId && Math.hypot(vertex.x - point.x, vertex.y - point.y) < MIN_VERTEX_DISTANCE,
+    vertex.id !== vertexId && Math.hypot(vertex.x - point.x, vertex.y - point.y) < tolerance,
   );
   if (overlaps) return annotation;
   return { ...annotation, vertices: updateVertex(annotation.vertices, vertexId, point) };
@@ -118,9 +138,11 @@ export function insertAnnotationVertex(
   afterVertexId: string,
   point: { x: number; y: number },
   vertexId: string,
+  minDistance = MIN_VERTEX_DISTANCE,
 ): EditorAnnotation {
   if (annotation.type !== "polygon" && annotation.type !== "line") return annotation;
-  const tooClose = annotation.vertices.some((vertex) => Math.hypot(vertex.x - point.x, vertex.y - point.y) < MIN_VERTEX_DISTANCE);
+  const tolerance = Math.max(minDistance, DEGENERATE_VERTEX_DISTANCE);
+  const tooClose = annotation.vertices.some((vertex) => Math.hypot(vertex.x - point.x, vertex.y - point.y) < tolerance);
   if (tooClose) return annotation;
   return { ...annotation, vertices: insertVertex(annotation.vertices, afterVertexId, point, () => vertexId) };
 }
@@ -132,14 +154,14 @@ export function deleteAnnotationVertex(annotation: EditorAnnotation, vertexId: s
   return { ...annotation, vertices: deleteVertex(annotation.vertices, vertexId, minimum) };
 }
 
-export function edgeMidpoints(vertices: Vertex[], open = false) {
+export function edgeMidpoints(vertices: Vertex[], open = false, minEdgeLength = MIN_VERTEX_DISTANCE * 3) {
   if (vertices.length < 2) return [];
   const limit = open ? vertices.length - 1 : vertices.length;
   const result: Array<{ afterVertexId: string; x: number; y: number }> = [];
   for (let index = 0; index < limit; index += 1) {
     const current = vertices[index];
     const next = vertices[(index + 1) % vertices.length];
-    if (Math.hypot(current.x - next.x, current.y - next.y) < MIN_VERTEX_DISTANCE * 3) continue;
+    if (Math.hypot(current.x - next.x, current.y - next.y) < minEdgeLength) continue;
     result.push({ afterVertexId: current.id, x: (current.x + next.x) / 2, y: (current.y + next.y) / 2 });
   }
   return result;
