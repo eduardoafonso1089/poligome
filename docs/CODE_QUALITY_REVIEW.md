@@ -1,8 +1,9 @@
 # Revisão de código — boas práticas, clean code e otimizações
 
 Revisão estática completa de `app/`, `tests/`, `scripts/` e da configuração do
-projeto, feita sobre `claude/code-review-clean-code-yxwhoc` (base: `main`,
-commit `e816c74`).
+projeto. Escrita originalmente sobre `e816c74` e **revalidada contra o `main`
+em `6b7304f`** (após o PR #14). As duas divergências que o PR #14 introduziu
+estão registradas em **E1** (já resolvido) e **E7** (novo achado).
 
 **Nenhum código de produto foi alterado.** Este documento levanta o que
 encontrei, com arquivo e linha, o impacto e a correção sugerida. Cada item traz
@@ -147,6 +148,11 @@ texto-fonte (`tests/project-lifecycle-parity.test.mjs:7`,
 
 Consequência em cascata: `app/editor/legacy-controls.module.css` (52 linhas) só
 é importado por esse componente morto.
+
+> **Não remover ainda.** Depois do PR #14 (ver E7), `VectorToolbar` passou a ser
+> o único lugar do repositório que liga `onMerge` a um botão. Apagá-lo não muda
+> nada em runtime, mas destrói a referência de como a união de polígonos era
+> acionada. Resolver E7 primeiro.
 
 ### B2 — Oito CSS modules órfãos (1.185 linhas)
 
@@ -359,16 +365,58 @@ API atual (`getCopy`, `storedLanguage`, `fill`). Ver também F15.
 
 ## E. Riscos de correção (levantados, não corrigidos)
 
-### E1 — Bug de tradução: francês misturado com português
+### E1 — Bug de tradução: francês misturado com português — ✅ RESOLVIDO no `main`
 
 `app/editor/presentation/pre-refactor-chrome.tsx:19`
 
 ```ts
+// antes
 fr: ["Sélectionnez l'outil Boîte", "Cliquez sur l'outil mis en évidence para começar."],
 ```
 
-"para começar" é português. Usuários em francês veem a frase quebrada no
-primeiro passo do tutorial do demo. Correção: `…mis en évidence pour commencer.`
+"para começar" era português. Corrigido em `82d2556` ("Move multi-selection to
+mobile toolbar"), que entrou no `main` pelo PR #14 — ou seja, já estava
+resolvido quando esta revisão foi escrita contra `e816c74`. Mantido aqui como
+registro.
+
+### E7 — A união de polígonos ficou sem porta de entrada na interface
+
+Encontrado ao verificar o PR #14 (`6b7304f`, já no `main`).
+
+O commit `82d2556` removeu o botão Merge da toolbar e reaproveitou o lugar — e o
+mesmo ícone `Combine` — para o botão de seleção múltipla em touch:
+
+```diff
+-<ToolButton title={copy.merge} disabled={!props.canMerge} onClick={props.onMerge}><Combine size={18} /></ToolButton>
++{props.touchMode && <ToolButton title={copy.multipleSelection} ... ><Combine size={18} /></ToolButton>}
+```
+
+A remoção foi **deliberada** — o próprio PR diz "falha esperada porque a toolbar
+ainda contém Merge" e o teste `mobile-toolbar-deduplication.test.mjs` passou a
+exigir `assert.doesNotMatch(toolbar, /onClick=\{props\.onMerge\}/)`.
+
+O efeito colateral é que, no `main` de hoje:
+
+- `mergeSelected()` continua implementado (`canonical-editor-workbench.tsx:669`);
+- `canMerge` continua sendo calculado (linha 894) e `onMerge` continua sendo
+  passado (linha 914);
+- `onMerge` sobrevive em `PreRefactorChromeProps` apenas como declaração de tipo
+  — **nenhum elemento renderizado o chama**;
+- o único componente que ainda liga `onMerge` a um botão é `VectorToolbar`, que
+  não é montado em lugar nenhum (ver B1);
+- não existe atalho de teclado para merge (`editor-shortcuts.ts` cobre
+  V/H/B/P/F/L/K/O/X/R/T, sem merge).
+
+Ou seja: `unionPolygonAnnotations` e toda a máquina de merge continuam no
+código, cobertas por testes, mas **o usuário não tem como acionar a união de
+polígonos**. `docs/EDITOR_ARCHITECTURE.md` ainda lista "union/merge" entre as
+operações vetoriais avançadas restauradas.
+
+Isso é decisão de produto, não de código: pode ser intencional (liberar espaço
+na toolbar, com o merge voltando em outro lugar num próximo passo) ou um efeito
+não percebido. **Precisa de uma decisão antes de qualquer limpeza** — enquanto
+não houver, `VectorToolbar` não deve ser apagado (B1) e `onMerge`/`canMerge` não
+devem entrar na lista de exports mortos (B4).
 
 ### E2 — `annotationBounds` ignora a rotação da caixa
 
@@ -712,7 +760,7 @@ nenhum teste.
 | # | Item | Arquivo | Esforço | Como verificar |
 |---|---|---|---|---|
 | 1 | **F2 — `useMemo` no `imageSize`** | `canonical-editor-workbench.tsx:100` | **P** | Nenhum teste referencia `imageSize` no workbench (só `editor-canvas.test.mjs:11`, que olha outro arquivo). É a maior relação ganho/risco do documento: uma linha destrava a `memo` de `AnnotationLayer`. |
-| 2 | **E1 — tradução francesa quebrada** | `pre-refactor-chrome.tsx:19` | **P** | Bug visível ao usuário. Trocar `para começar` por `pour commencer`. |
+| 2 | ~~**E1 — tradução francesa quebrada**~~ | — | — | **Já corrigido no `main`** por `82d2556` (PR #14). Nada a fazer. |
 | 3 | **F5/F6/F7 — exportações O(n·m)** | `annotation-export.ts:52-53`, `export-files.ts:57-60,105` | **M** | Coberto por testes **de comportamento** reais (`canonical-export-files`, `yolo-export`, `georeference-export`, `rotated-box`) **e** pelo golden cross-branch `scripts/check-export-parity.mjs`, que compara a saída contra a do `main`. É a área mais bem protegida do repositório: dá para otimizar com confiança. |
 | 4 | **E4 — `try/catch` no `localStorage`** | `i18n.ts:741,747`, `canonical-editor-workbench.tsx:207`, `pre-refactor-chrome.tsx:44` | **P** | `app/layout.tsx:12` já tem o padrão pronto para copiar. Corrige crash em Safari privado. |
 | 5 | **G5 — gatilhos de CI obsoletos** | `.github/workflows/editor-refactor.yml:4-8` | **P** | Remover `refactor/editor-architecture` e `fix/cloudflare-next-build`. |
@@ -791,6 +839,7 @@ mudam o produto. Fazer um item por PR, depois da Onda 2.
 
 | Item | Por quê |
 |---|---|
+| **E7 — merge de polígonos sem botão** | Depois do PR #14 nenhum elemento renderizado chama `onMerge`. É decisão de produto: o merge deve voltar à toolbar, ir para outro lugar, ou sair de vez? Enquanto não se decidir, B1 e parte de B4 ficam bloqueados. |
 | **E2 — `annotationBounds` ignora rotação** | Unificar com `exportBounds` **muda o comportamento da seleção por marquee** em caixas rotacionadas. Precisa decidir qual semântica é a correta e escrever o teste antes. |
 | **E3 — `MIN_VERTEX_DISTANCE` fixo em pixels de imagem** | Torná-lo relativo ao zoom muda quando o editor aceita um vértice. É correção de design, não de bug. |
 | **E5/E6 — `Math.min(...)` e `rdp` recursivo** | Limites teóricos (>65k vértices). Confirmar se é alcançável com dados reais antes de gastar tempo. |
