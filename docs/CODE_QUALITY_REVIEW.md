@@ -149,10 +149,12 @@ texto-fonte (`tests/project-lifecycle-parity.test.mjs:7`,
 Consequência em cascata: `app/editor/legacy-controls.module.css` (52 linhas) só
 é importado por esse componente morto.
 
-> **Não remover ainda.** Depois do PR #14 (ver E7), `VectorToolbar` passou a ser
-> o único lugar do repositório que liga `onMerge` a um botão. Apagá-lo não muda
-> nada em runtime, mas destrói a referência de como a união de polígonos era
-> acionada. Resolver E7 primeiro.
+> **Não remover — decisão registrada.** Depois do PR #14 (ver E7),
+> `VectorToolbar` passou a ser o único lugar do repositório que liga `onMerge` a
+> um botão. O autor confirmou que a retirada do botão é temporária, então esse
+> arquivo fica como referência de fiação até o merge voltar. Apagá-lo não muda
+> nada em runtime, mas destrói essa referência. O mesmo vale para `onMerge` e
+> `canMerge`, que por isso ficam fora da lista de exports mortos em B4.
 
 ### B2 — Oito CSS modules órfãos (1.185 linhas)
 
@@ -379,9 +381,15 @@ mobile toolbar"), que entrou no `main` pelo PR #14 — ou seja, já estava
 resolvido quando esta revisão foi escrita contra `e816c74`. Mantido aqui como
 registro.
 
-### E7 — A união de polígonos ficou sem porta de entrada na interface
+### E7 — A união de polígonos ficou sem porta de entrada na interface — ✅ DECISÃO CONFIRMADA
 
 Encontrado ao verificar o PR #14 (`6b7304f`, já no `main`).
+
+> **Confirmado pelo autor (2026-09-15):** o botão de união foi retirado de
+> propósito, "por enquanto". Não é regressão. Como a remoção é declarada
+> temporária, `VectorToolbar`, `onMerge` e `canMerge` **permanecem no código**
+> como referência de fiação para quando o merge voltar — ver a ressalva em B1 e
+> a exclusão de B4 abaixo.
 
 O commit `82d2556` removeu o botão Merge da toolbar e reaproveitou o lugar — e o
 mesmo ícone `Combine` — para o botão de seleção múltipla em touch:
@@ -839,7 +847,6 @@ mudam o produto. Fazer um item por PR, depois da Onda 2.
 
 | Item | Por quê |
 |---|---|
-| **E7 — merge de polígonos sem botão** | Depois do PR #14 nenhum elemento renderizado chama `onMerge`. É decisão de produto: o merge deve voltar à toolbar, ir para outro lugar, ou sair de vez? Enquanto não se decidir, B1 e parte de B4 ficam bloqueados. |
 | **E2 — `annotationBounds` ignora rotação** | Unificar com `exportBounds` **muda o comportamento da seleção por marquee** em caixas rotacionadas. Precisa decidir qual semântica é a correta e escrever o teste antes. |
 | **E3 — `MIN_VERTEX_DISTANCE` fixo em pixels de imagem** | Torná-lo relativo ao zoom muda quando o editor aceita um vértice. É correção de design, não de bug. |
 | **E5/E6 — `Math.min(...)` e `rdp` recursivo** | Limites teóricos (>65k vértices). Confirmar se é alcançável com dados reais antes de gastar tempo. |
