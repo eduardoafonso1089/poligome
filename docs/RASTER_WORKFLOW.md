@@ -64,6 +64,25 @@ retain holes and use the required ring winding; lines remain open. Original CRS,
 source filename, crop and class stay in feature properties. No legacy top-level
 `crs` member is emitted.
 
+### Feature properties
+
+| Property | Type | Meaning |
+|---|---|---|
+| `id` | string | Stable annotation id, the same one used inside the project file. |
+| `class` | string | Class display name, or the class id when the class is gone. |
+| `class_id` | string | Class id, stable across renames. |
+| `color` | string \| null | Class colour as `#rrggbb`. |
+| `shape` | string | `box`, `polygon`, `line` or `point`. |
+| `rotation` | number | Box rotation in radians, clockwise around the box centre. Absent for other shapes. |
+| `source_image` | string | File name of the annotated image or crop. |
+| `source_raster` | string | Name or URL of the raster the georeference came from. |
+| `crs` | string | CRS of that source raster, for provenance. Coordinates are always WGS84. |
+
+> **Renamed in a breaking change.** These properties were previously Portuguese:
+> `classe`, `classe_id`, `cor`, `forma`, `rotacao`, `recorte` and `origem`.
+> Geometry, CRS and every value are unchanged, but QGIS styles, filters or
+> scripts keyed on the old names must be updated.
+
 Offline projection definitions include WGS84 geographic/Web Mercator, WGS84 UTM
 north/south, and SIRGAS 2000 geographic/UTM. A supported WKT/PROJ definition in a
 PRJ or the TIFF crop dialog can supply another CRS. Projections that require datum

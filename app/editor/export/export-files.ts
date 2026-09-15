@@ -138,15 +138,18 @@ export function buildGeoJson(assets: Asset[], labels: Label[], annotations: Edit
     return {
       type: "Feature",
       geometry,
+      // Breaking change: these were Portuguese (classe, cor, forma, rotacao,
+      // recorte, origem) up to and including the 1.0 export. Documented in
+      // docs/RASTER_WORKFLOW.md; QGIS styles keyed on the old names need updating.
       properties: {
         id: annotation.id,
-        classe: label?.name ?? annotation.label,
-        classe_id: annotation.label,
-        cor: label?.color ?? null,
-        forma: annotation.type,
-        rotacao: annotation.type === "box" ? annotation.rotation ?? 0 : undefined,
-        recorte: asset.name,
-        origem: geo.source,
+        class: label?.name ?? annotation.label,
+        class_id: annotation.label,
+        color: label?.color ?? null,
+        shape: annotation.type,
+        rotation: annotation.type === "box" ? annotation.rotation ?? 0 : undefined,
+        source_image: asset.name,
+        source_raster: geo.source,
         crs: geo.crs,
       },
     };

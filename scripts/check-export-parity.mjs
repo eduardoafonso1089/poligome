@@ -21,6 +21,31 @@ function round(value) {
   return value;
 }
 
+// The GeoJSON feature properties were renamed from Portuguese to English. The
+// geometry, the CRS and every value are untouched, so the golden keeps comparing
+// the payload by mapping the old key names onto the new ones. Recorded in
+// tests/fixtures/export-parity-justifications.json under geojson.property_names.
+const GEOJSON_RENAMES = {
+  classe: 'class',
+  classe_id: 'class_id',
+  cor: 'color',
+  forma: 'shape',
+  rotacao: 'rotation',
+  recorte: 'source_image',
+  origem: 'source_raster',
+};
+
+function normalizeGeoJson(document) {
+  const clone = JSON.parse(JSON.stringify(document));
+  for (const feature of clone.features ?? []) {
+    const properties = feature.properties ?? {};
+    feature.properties = Object.fromEntries(
+      Object.entries(properties).map(([key, value]) => [GEOJSON_RENAMES[key] ?? key, value]),
+    );
+  }
+  return round(clone);
+}
+
 function normalizeCoco(document) {
   const clone = JSON.parse(JSON.stringify(document));
   for (const annotation of clone.annotations ?? []) {
@@ -160,7 +185,14 @@ try {
   assert.deepEqual(round(branch.yolo), round(main.yolo), 'YOLO canonical main golden diverged');
   assert.deepEqual(round(branchNonUniformYolo), round(mainNonUniformYolo), 'YOLO non-uniform source-dimension golden diverged');
   assert.equal(branchNonUniformYolo['labels/train/0001-nonuniform.txt'], '0 0.250000 0.250000 0.300000 0.300000\n0 0.100000 0.100000 0.900000 0.100000 0.900000 0.900000 0.100000 0.900000');
-  assert.deepEqual(round(branch.geojson), round(main.geojson), 'GeoJSON canonical main golden diverged');
+  assert.deepEqual(normalizeGeoJson(branch.geojson), normalizeGeoJson(main.geojson), 'GeoJSON canonical main golden diverged');
+  // The rename itself is asserted rather than assumed: the branch must carry the
+  // new names and none of the old ones.
+  const branchKeys = new Set(branch.geojson.features.flatMap((feature) => Object.keys(feature.properties)));
+  for (const [oldName, newName] of Object.entries(GEOJSON_RENAMES)) {
+    assert.ok(!branchKeys.has(oldName), `GeoJSON still exports the Portuguese property ${oldName}`);
+    assert.ok(branchKeys.has(newName), `GeoJSON is missing the renamed property ${newName}`);
+  }
   assert.deepEqual(branch.semanticProject, main.semanticProject, 'semantic .plgm canonical main content diverged');
 
   console.log('Canonical-main goldens passed: COCO/YOLO/GeoJSON/.plgm plus non-uniform YOLO source-dimension parity.');

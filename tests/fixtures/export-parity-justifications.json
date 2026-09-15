@@ -18,5 +18,10 @@
     "main": "legacy-normalized",
     "refactor": "canonical-source-pixels",
     "reason": "Intentional project-model migration; semantic geometry is compared after converting the main fixture to source-image pixels."
+  },
+  "geojson.property_names": {
+    "main": "classe, classe_id, cor, forma, rotacao, recorte, origem",
+    "refactor": "class, class_id, color, shape, rotation, source_image, source_raster",
+    "reason": "Deliberate breaking rename of the GeoJSON feature properties to English. Geometry, CRS and every value are unchanged; the golden maps the old names onto the new ones and separately asserts that the old names are gone. QGIS styles or filters keyed on the Portuguese names must be updated; documented in docs/RASTER_WORKFLOW.md."
   }
 }
