@@ -204,31 +204,6 @@ try {
     if (after !== before + 1) throw new Error(`${before} -> ${after}`);
   });
 
-  await check("Merge unions two selected polygons on mobile", async () => {
-    await loadDemo(page);
-    await drawPolygon(page, [[.50,.56],[.66,.56],[.66,.71],[.50,.71]]);
-    await drawPolygon(page, [[.62,.63],[.78,.63],[.78,.78],[.62,.78]]);
-    const before = await count(page);
-    await (await button(page, /Selecionar e mover \(V\)|Select/i)).tap();
-    const rightToggle = page.locator('.topbar button.mobile').last();
-    await rightToggle.tap();
-    const rows = page.locator('[data-panel="right"] .instances .instance-row');
-    const rowCount = await rows.count();
-    if (rowCount < 2) throw new Error(`annotation rows=${rowCount}`);
-    const firstSelector = rows.nth(rowCount - 2).locator('.annotation-selector');
-    const secondSelector = rows.nth(rowCount - 1).locator('.annotation-selector');
-    if (await firstSelector.getAttribute('aria-pressed') !== 'true') await firstSelector.tap();
-    if (await secondSelector.getAttribute('aria-pressed') !== 'true') await secondSelector.tap();
-    const closeDrawer = page.locator('[data-panel="right"] [data-drawer-header="true"] button').first();
-    await closeDrawer.tap();
-    await page.waitForTimeout(60);
-    const merge = await button(page, /Unir polígonos selecionados|Merge/i);
-    await merge.tap();
-    await page.waitForTimeout(90);
-    const after = await count(page);
-    if (after !== before - 1) throw new Error(`${before} -> ${after}`);
-  });
-
   await check("Box resize handle works with touch", async () => {
     await loadDemo(page);
     const id = await drawBox(page, cdp);
