@@ -18,6 +18,14 @@ if (!loadDemoPattern.test(source)) throw new Error(`${sourceName}: loadDemo help
 source = `import { openDemoDataset } from "./demo-audit-helpers.mjs";\n${source}`;
 source = source.replace(loadDemoPattern, `async function loadDemo(page) {\n  await openDemoDataset(page, BASE);\n}\n`);
 
+// Merge was intentionally removed from the mobile toolbar. Keep every other command audit,
+// but retire this legacy scenario so CI validates the current mobile interaction contract.
+if (sourceName === "mobile-command-interaction-audit.mjs") {
+  const obsoleteMergePattern = /\n  await check\("Merge unions two selected polygons on mobile", async \(\) => \{[\s\S]*?\n  \}\);\r?\n(?=\n  await check\("Box resize handle works with touch")/;
+  if (!obsoleteMergePattern.test(source)) throw new Error("Mobile Merge audit changed; update this runner instead of silently weakening the audit.");
+  source = source.replace(obsoleteMergePattern, "\n");
+}
+
 await fs.writeFile(runtimePath, source);
 try {
   await import(`${pathToFileURL(runtimePath).href}?run=${Date.now()}`);
