@@ -35,9 +35,9 @@ Os problemas concentram-se em quatro frentes:
    refactors inofensivos e passam mesmo quando o comportamento quebra — o
    `VectorToolbar` morto é a prova disso.
 
-Prioridade sugerida: **F2/F1** (render), **B1/B2** (código morto), **F5/F6**
-(exportação O(n·m)), **E1** (bug de tradução), **A1/A4** (quebra dos dois
-arquivos gigantes), **G1** (destravar os testes de grep antes de refatorar).
+A ordem de ataque está na seção **[Ordem de correção](#ordem-de-correção)**, no
+fim do documento: 29 itens em 5 ondas, por risco crescente e dependência, mais
+os que precisam de decisão antes de virar tarefa.
 
 ---
 
@@ -693,28 +693,122 @@ Flags de rigor que valeriam a pena, todas com custo de migração:
 
 ---
 
-## Plano sugerido, em ordem
+## Ordem de correção
 
-Cada etapa é independente e mantém o comportamento observável.
+A ordem abaixo não é por gravidade: é por **risco crescente e dependência**.
+Cada onda só depende das anteriores, e cada item traz quem o protege hoje —
+porque em 26 dos 62 arquivos de teste a proteção é uma regex sobre o
+texto-fonte, e é isso que decide se uma correção é barata ou cara.
 
-1. **Destravar** — converter os testes de grep de G1/G2 em testes de
-   comportamento ou regras de lint. Sem isso, qualquer refactor abaixo quebra o
-   CI por motivos errados.
-2. **Limpeza sem risco** — B1, B2, B3, B4, B6, A7 (doc), G5. Só remoção e
-   documentação; nada que rode em produção muda.
-3. **Correções pontuais** — E1 (tradução francesa), E4 (`try/catch` no
-   `localStorage`), F5/F6/F7 (exportações O(n·m)), F12. Pequenas, isoladas,
-   testáveis.
-4. **Render** — F1, F2, F3, F4. É o que o usuário sente: arrastar um vértice num
-   projeto com muitas anotações.
-5. **DRY e convenções** — C1–C7, D1–D3, D5, D7. Muito arquivo tocado, zero
-   mudança semântica; fazer em PRs pequenos.
-6. **Estrutura** — A1, A2, A3, A4, A5. Os refactors maiores, já com os testes
-   arrumados e o código morto fora do caminho.
-7. **Ferramental** — H1 primeiro (barato, evita regressão dos itens acima),
-   H2 depois, com medição.
+Legenda de esforço: **P** ≤ 1h · **M** meio dia · **G** ≥ 1 dia.
 
-Itens deixados de fora de propósito: **D4** (nomes em português no GeoJSON são
-contrato público), **F15** (só com medição), **H2 target** (muda a saída
-emitida) e tudo que envolve `app/lib/sam.ts` / `model-output.ts`, protegidos por
-decisão registrada na documentação.
+---
+
+### Onda 0 — Fazer agora (baixo risco, ganho imediato)
+
+Nada aqui muda estrutura; tudo é verificável pelo suíte atual sem tocar em
+nenhum teste.
+
+| # | Item | Arquivo | Esforço | Como verificar |
+|---|---|---|---|---|
+| 1 | **F2 — `useMemo` no `imageSize`** | `canonical-editor-workbench.tsx:100` | **P** | Nenhum teste referencia `imageSize` no workbench (só `editor-canvas.test.mjs:11`, que olha outro arquivo). É a maior relação ganho/risco do documento: uma linha destrava a `memo` de `AnnotationLayer`. |
+| 2 | **E1 — tradução francesa quebrada** | `pre-refactor-chrome.tsx:19` | **P** | Bug visível ao usuário. Trocar `para começar` por `pour commencer`. |
+| 3 | **F5/F6/F7 — exportações O(n·m)** | `annotation-export.ts:52-53`, `export-files.ts:57-60,105` | **M** | Coberto por testes **de comportamento** reais (`canonical-export-files`, `yolo-export`, `georeference-export`, `rotated-box`) **e** pelo golden cross-branch `scripts/check-export-parity.mjs`, que compara a saída contra a do `main`. É a área mais bem protegida do repositório: dá para otimizar com confiança. |
+| 4 | **E4 — `try/catch` no `localStorage`** | `i18n.ts:741,747`, `canonical-editor-workbench.tsx:207`, `pre-refactor-chrome.tsx:44` | **P** | `app/layout.tsx:12` já tem o padrão pronto para copiar. Corrige crash em Safari privado. |
+| 5 | **G5 — gatilhos de CI obsoletos** | `.github/workflows/editor-refactor.yml:4-8` | **P** | Remover `refactor/editor-architecture` e `fix/cloudflare-next-build`. |
+| 6 | **G3 — declarar `playwright`** | `package.json`, `editor-interaction-audit.yml:27` | **P** | Mover para `devDependencies` com a versão do lockfile e adicionar `npm run audit`. Hoje 1.400 linhas de audit não rodam localmente. |
+
+**Por que primeiro:** os itens 1 e 3 são os dois únicos ganhos de performance
+grandes que não exigem refactor nenhum, e ambos estão fora do alcance das
+regexes dos testes.
+
+---
+
+### Onda 1 — Limpeza (risco zero em runtime)
+
+Só remoção. Reduz em ~1.400 linhas o que a Onda 3 teria de refatorar.
+
+| # | Item | Esforço | Observação |
+|---|---|---|---|
+| 7 | **B2 — 8 CSS modules órfãos** (1.185 linhas) | **P** | Ajustar junto a asserção negativa em `editor-interface-structure.test.mjs:15` e a menção em `EDITOR_ARCHITECTURE.md` (**A7**). |
+| 8 | **B1 — `VectorToolbar` + `legacy-controls.module.css`** (117 linhas) | **P** | Exige editar `project-lifecycle-parity.test.mjs:7,26-27` e `editor-interface-structure.test.mjs:29` — os dois testes que hoje protegem código morto. Substituir por asserção sobre a toolbar real em `pre-refactor-chrome.tsx`. |
+| 9 | **B3 — tipos `Annotation` e `Tool` legados** | **P** | Zero importadores. Contradizem a invariante documentada do modelo canônico. |
+| 10 | **B4/B5 — exports mortos e exports que deveriam ser privados** | **P** | `verticesFromFlatPoints`/`flatPointsFromVertices` só têm uso em teste: decidir entre remover código + teste, ou assumir como API pública. |
+| 11 | **B6 — restos do template** (`chatgpt-auth.ts`, `db/`, `drizzle.config.ts`, `drizzle-orm` em `dependencies`, `app/texto/page.tsx`) | **M** | Confirmar antes que o deploy Cloudflare não depende do binding D1. |
+| 12 | **A7 — corrigir a documentação** | **P** | Fecha as duas divergências que os itens 7 e 8 expõem. |
+
+---
+
+### Onda 2 — Destravar os testes (pré-requisito da Onda 3)
+
+Sem isto, qualquer refactor estrutural quebra o CI **por motivo errado**.
+
+| # | Item | Esforço | Detalhe |
+|---|---|---|---|
+| 13 | **G1a — guardas de arquitetura viram lint** | **M** | `editor-architecture-boundaries.test.mjs` e `no-normalized-editor-space.test.mjs` verificam imports proibidos e uso de `window.`/`document.` em módulos puros. Isso é trabalho de `no-restricted-imports` no ESLint, e ali funciona melhor (roda no editor, não só no CI). |
+| 14 | **G1b — asserções de formatação viram testes de comportamento** | **G** | As piores são as que fixam espaçamento literal, p. ex. `project-lifecycle-parity.test.mjs:14` exige `onRenameProject: (name: string) => { setProjectName(name); setSessionDirty(true); }` na mesma linha. Rodar um formatador no workbench quebra o CI hoje. |
+| 15 | **G2 — travas de documentação** | **P** | `dormant-module-policy.test.mjs` e `application-parity-docs.test.mjs` fazem regex em prosa de README/doc. A intenção (proteger o SAM de limpeza) é legítima; o mecanismo não é teste. Um `CODEOWNERS` ou um comentário no topo dos arquivos resolve. |
+| 16 | **G4 — script `typecheck` e ciclo rápido** | **P** | `npm test` roda `npm run build` antes (`package.json:15`). Separar `test:unit` sem build e adicionar `typecheck: tsc --noEmit`. |
+
+**Arquivos mais travados hoje** (quantos testes fazem regex sobre eles):
+`canonical-editor-workbench.tsx` — 10; `pre-refactor-chrome.tsx` — 6;
+`use-editor-viewport.ts` — 3. Não por acaso, são exatamente os arquivos da
+Onda 3.
+
+---
+
+### Onda 3 — Render e estrutura (o refactor de verdade)
+
+| # | Item | Esforço | Detalhe |
+|---|---|---|---|
+| 17 | **F1 — listener de teclado reinstalado a cada render** | **P** | `canonical-editor-workbench.tsx:712-742`. Handlers num `ref`, listener registrado com `[]`. |
+| 18 | **F3/F4 — `Map`/`Set` do canvas e cursor SVG por vértice** | **M** | `editor-canvas.tsx:62-63` e `vertex-handles.tsx:135`. O F4 é coberto por `vertex-cursor.test.mjs`, que é teste de comportamento sobre as funções exportadas — memoizar é seguro. |
+| 19 | **A4 — quebrar `pre-refactor-chrome.tsx`** | **G** | Formatar (linha de 4.521 caracteres) e dividir em 6 componentes. Depende do item 14. |
+| 20 | **A1/A2 — extrair hooks do workbench** | **G** | `useProjectSession`, `useDemoTutorial`, `useCanvasRouting`, `useEditorShortcuts`. Depende do item 14. |
+| 21 | **A3 — trocar `CustomEvent` global por props** | **M** | Fazer junto do item 20, enquanto a fronteira workbench↔painéis já está aberta. |
+| 22 | **F8/F9/F10 — geometria e ponteiro** | **G** | `isValidRing` O(n²), `snapPointToAnnotations` em duas passadas, CTM invertida 2–3× por evento. Precisam de benchmark antes e depois; `scripts/benchmark-cog.mjs` serve de modelo. |
+
+---
+
+### Onda 4 — Consistência (muito arquivo, zero semântica)
+
+Deixar por último de propósito: são os PRs que mais poluem o histórico e menos
+mudam o produto. Fazer um item por PR, depois da Onda 2.
+
+| # | Item | Esforço |
+|---|---|---|
+| 23 | **H1 — regras de ESLint** (`no-unused-vars`, `max-lines`, `no-restricted-imports`, `knip`/`ts-prune`, Prettier) | **M** |
+| 24 | **C1–C7 — deduplicação** (`ringArea` ×4, `downloadBlob` ×2, `safeBaseName` divergente, `BrandLockup`, paletas) | **M** |
+| 25 | **D3 — números mágicos** (`92` ×8, `24` ×4, `#929a95` ×3, `1000×650`) | **P** |
+| 26 | **D1 — identificadores em português** em `cog.ts`/`sam.ts` e o vazamento para `app/editor/raster/` | **M** |
+| 27 | **D5 — unificar o padrão de erro** em códigos + `translateErrorCode` | **M** |
+| 28 | **D2/D6/D7 — aspas, `i18n.ts` por idioma, estilo de laço** | **M** |
+| 29 | **A5 — renomear os módulos `pre-refactor-*`/`premerge-*`** | **P** |
+
+---
+
+### Precisa de decisão antes (não agendado)
+
+| Item | Por quê |
+|---|---|
+| **E2 — `annotationBounds` ignora rotação** | Unificar com `exportBounds` **muda o comportamento da seleção por marquee** em caixas rotacionadas. Precisa decidir qual semântica é a correta e escrever o teste antes. |
+| **E3 — `MIN_VERTEX_DISTANCE` fixo em pixels de imagem** | Torná-lo relativo ao zoom muda quando o editor aceita um vértice. É correção de design, não de bug. |
+| **E5/E6 — `Math.min(...)` e `rdp` recursivo** | Limites teóricos (>65k vértices). Confirmar se é alcançável com dados reais antes de gastar tempo. |
+| **F11 — concorrência no `portableAssets`** | Medir o pico de memória num projeto grande antes de limitar. |
+| **F15 — i18n sob demanda** | Torna `getCopy` assíncrono. Só com medição de bundle. |
+| **H2 — `target: ES2022`** | Muda a saída emitida; exige verificação visual e o build de Pages. |
+
+### Fora de escopo por decisão registrada
+
+- **D4** — nomes em português nas propriedades do GeoJSON: é contrato de dados
+  público; mudar quebra consumidores. Documentar, não alterar.
+- **`app/lib/sam.ts` e `app/editor/models/model-output.ts`** — dormentes por
+  decisão em `docs/EDITOR_ARCHITECTURE.md`; a integração vem de outro branch.
+
+---
+
+### Resumo em uma linha
+
+Comece pelo item 1 (`useMemo` no `imageSize`) e pelo item 3 (exportações), que
+são ganho grande com risco quase nulo; limpe o código morto; **depois** conserte
+os testes de grep; e só então encoste nos dois arquivos gigantes.
