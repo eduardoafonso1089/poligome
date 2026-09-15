@@ -64,6 +64,20 @@ export function EditorCanvas(props: EditorCanvasProps) {
   const width = Math.max(1, props.imageSize.width);
   const height = Math.max(1, props.imageSize.height);
 
+  function handlePointerMoveCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    props.onPointerMoveCapture?.(event);
+    if (event.isPropagationStopped()) return;
+    props.onResizeMove(event);
+    props.onTransformMove(event);
+  }
+
+  function handlePointerUpCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    props.onPointerUpCapture?.(event);
+    if (event.isPropagationStopped()) return;
+    props.onResizeEnd(event);
+    props.onTransformEnd(event);
+  }
+
   return <svg
     ref={props.svgRef}
     className={props.className}
@@ -72,8 +86,8 @@ export function EditorCanvas(props: EditorCanvasProps) {
     viewBox={`0 0 ${width} ${height}`}
     preserveAspectRatio="none"
     onPointerDownCapture={props.onPointerDownCapture}
-    onPointerMoveCapture={props.onPointerMoveCapture}
-    onPointerUpCapture={props.onPointerUpCapture}
+    onPointerMoveCapture={handlePointerMoveCapture}
+    onPointerUpCapture={handlePointerUpCapture}
     onPointerCancelCapture={props.onPointerCancelCapture}
     onPointerDown={props.onPointerDown}
     onPointerMove={props.onPointerMove}
