@@ -10,9 +10,10 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
 
-const eslint = new ESLint({ cwd: new URL("..", import.meta.url).pathname });
+const eslint = new ESLint({ cwd: fileURLToPath(new URL("..", import.meta.url)) });
 
 async function lint(filePath, code) {
   const [result] = await eslint.lintText(code, { filePath, warnIgnored: false });
