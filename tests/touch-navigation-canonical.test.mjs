@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { ViewportController } from '../app/editor/viewport/viewport-controller.ts';
 
 const touchSource=readFileSync(new URL('../app/editor/viewport/use-touch-navigation.ts',import.meta.url),'utf8');
+const viewportHookSource=readFileSync(new URL('../app/editor/viewport/use-editor-viewport.ts',import.meta.url),'utf8');
 const drawingSource=readFileSync(new URL('../app/editor/drawing/use-drawing-interactions.ts',import.meta.url),'utf8');
 const workbenchSource=readFileSync(new URL('../app/editor/workbench/canonical-editor-workbench.tsx',import.meta.url),'utf8');
 const chromeSource=readFileSync(new URL('../app/editor/presentation/pre-refactor-chrome.tsx',import.meta.url),'utf8');
@@ -43,6 +44,11 @@ test('pinch-pan combines scale and moving midpoint without annotation rescaling'
   assert.deepEqual(after.image,before.image);
   assert.ok(Number.isFinite(after.scrollLeft));
   assert.ok(Number.isFinite(after.scrollTop));
+});
+
+test('pinch publishes scroll synchronously so the next touch frame matches controller state',()=>{
+  const pinchBody=viewportHookSource.match(/const pinchPan = useCallback\([\s\S]*?\n  }, \[publish, syncBeforeGesture\]\);/)?.[0] ?? '';
+  assert.match(pinchBody,/applyScrollImmediately\(next\)/);
 });
 
 test('second touch cancels editing and drawing before pinch owns the gesture',()=>{
