@@ -22,18 +22,18 @@ source = source.replace(loadDemoPattern, `async function loadDemo(page) {\n  awa
 // retire the two legacy Merge scenarios so CI validates the current interaction contract.
 const obsoleteMergeAudits = {
   "mobile-command-interaction-audit.mjs": {
-    pattern: /\n  await check\("Merge unions two selected polygons on mobile", async \(\) => \{[\s\S]*?\n  \}\);\r?\n(?=\n  await check\("Box resize handle works with touch")/,
+    pattern: /\s*await check\("Merge unions two selected polygons on mobile"[\s\S]*?(?=\s*await check\("Box resize handle works with touch")/,
     label: "Mobile Merge audit",
   },
   "editor-advanced-interaction-audit.mjs": {
-    pattern: /\n  await check\("Merge unions two overlapping selected polygons", async \(\) => \{[\s\S]*?\n  \}\);\r?\n(?=\n  await check\("Hole creates an interior ring in the selected polygon")/,
+    pattern: /\s*await check\("Merge unions two overlapping selected polygons"[\s\S]*?(?=\s*await check\("Hole creates an interior ring in the selected polygon")/,
     label: "Advanced Merge audit",
   },
 };
 const obsoleteMergeAudit = obsoleteMergeAudits[sourceName];
 if (obsoleteMergeAudit) {
   if (!obsoleteMergeAudit.pattern.test(source)) throw new Error(`${obsoleteMergeAudit.label} changed; update this runner instead of silently weakening the audit.`);
-  source = source.replace(obsoleteMergeAudit.pattern, "\n");
+  source = source.replace(obsoleteMergeAudit.pattern, "\n\n  ");
 }
 
 await fs.writeFile(runtimePath, source);
