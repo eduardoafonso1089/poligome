@@ -23,7 +23,7 @@ test("the image-panel COCO action opens the canonical annotation importer", asyn
   assert.match(importer, /function currentImportSelection\(currentPending: PendingCoco\)/);
   assert.match(importer, /updateImportSelection\(plan\.geometryTypes, plan\.candidates\.map\(\(candidate\) => candidate\.index\), false\)/);
   assert.match(importer, /candidates\.find\(\(candidate\) => candidate\.index === index\)\?\.geometries\.some\(\(item\) => nextGeometryTypes\.includes\(item\)\)/);
-  assert.match(importer, /const chunkSize = selectedGeometryTypes\.includes\("polygon"\) \? 25 : 500/);
+  assert.match(importer, /const chunkSize = selectedGeometryTypes\.includes\("polygon"\) \? 100 : 500/);
   assert.match(importer, /updateImportSelection\(plan\.geometryTypes, plan\.candidates\.map/);
   assert.match(importer, /flushSync\(\(\) => \{\s*setImporting\(true\);\s*close\(\);/);
   assert.match(importer, /importedAnnotations\.push\(\.\.\.chunkResult\.annotations\);\s*unmatched \+= chunkResult\.unmatched;/);
