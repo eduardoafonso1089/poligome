@@ -59,3 +59,44 @@ export function pyramidFile() {
   });
   return new File([buffer],'pyramid.tif');
 }
+
+/**
+ * Minimal *tiled* TIFF: a single tile, uncompressed, no georeference.
+ *
+ * geotiff reports `isTiled` from the absence of StripOffsets, and that flag is
+ * what separates a tiled raster (opened lazily, tile by tile) from an ordinary
+ * image in this codebase. pyramidFile above writes strips, so it cannot stand
+ * in for one.
+ */
+export function tiledTiffFile({ width = 16, height = 16, name = 'tiled.tif' } = {}) {
+  // TIFF requires tile dimensions to be multiples of 16; one tile covers the image.
+  const tileWidth = Math.ceil(width / 16) * 16;
+  const tileHeight = Math.ceil(height / 16) * 16;
+  const pixels = new Uint8Array(tileWidth * tileHeight).fill(128);
+  const entries = [
+    [256, 4, width], [257, 4, height], [258, 3, 8], [259, 3, 1], [262, 3, 1],
+    [277, 3, 1], [284, 3, 1], [322, 4, tileWidth], [323, 4, tileHeight],
+    [324, 4, 0], [325, 4, pixels.length],
+  ];
+  const ifdSize = 2 + entries.length * 12 + 4;
+  const dataOffset = 8 + ifdSize;
+  entries.find(([tag]) => tag === 324)[2] = dataOffset;
+
+  const buffer = new ArrayBuffer(dataOffset + pixels.length);
+  const view = new DataView(buffer);
+  view.setUint16(0, 0x4949);
+  view.setUint16(2, 42, true);
+  view.setUint32(4, 8, true);
+  view.setUint16(8, entries.length, true);
+  entries.forEach(([tag, type, value], index) => {
+    const at = 8 + 2 + index * 12;
+    view.setUint16(at, tag, true);
+    view.setUint16(at + 2, type, true);
+    view.setUint32(at + 4, 1, true);
+    if (type === 3) view.setUint16(at + 8, value, true);
+    else view.setUint32(at + 8, value, true);
+  });
+  view.setUint32(8 + 2 + entries.length * 12, 0, true);
+  new Uint8Array(buffer, dataOffset, pixels.length).set(pixels);
+  return new File([buffer], name, { type: 'image/tiff' });
+}
