@@ -55,6 +55,22 @@ test("every annotation reaches the canvas, in order", () => {
   );
 });
 
+test("a selected annotation is painted last, so its handles win the hit test", () => {
+  const annotations = [polygon(), box(), point(), line()];
+  assert.deepEqual(
+    uniqueAttributeValues(canvas({ annotations, selectedIds: ["box"], selectedId: "box" }), "data-annotation-id"),
+    ["poly", "point", "line", "box"],
+  );
+});
+
+test("painting a selection last keeps the class stack of everything else", () => {
+  const annotations = [polygon(), box(), point(), line()];
+  assert.deepEqual(
+    uniqueAttributeValues(canvas({ annotations, selectedIds: ["poly", "box"], selectedId: "poly" }), "data-annotation-id"),
+    ["point", "line", "poly", "box"],
+  );
+});
+
 test("each annotation is painted with its own class colour", () => {
   const markup = canvas({ annotations: [polygon(), point()] });
   // class-a is #6c8cff, class-b is #ff8a65 in the fixture labels.

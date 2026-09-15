@@ -63,6 +63,16 @@ export function EditorCanvas(props: EditorCanvasProps) {
   const selected = useMemo(() => new Set(props.selectedIds), [props.selectedIds]);
   const width = Math.max(1, props.imageSize.width);
   const height = Math.max(1, props.imageSize.height);
+  // Painting order is the class stack, so an annotation can sit under the shapes of a
+  // class above it. Its edit handles are what the pointer is reaching for, and an SVG
+  // shape painted later wins the hit test, so a selected annotation is painted last.
+  // Without this the resize handles of a box under another class are unreachable.
+  const painted = useMemo(
+    () => selected.size
+      ? [...props.annotations].sort((left, right) => Number(selected.has(left.id)) - Number(selected.has(right.id)))
+      : props.annotations,
+    [props.annotations, selected],
+  );
 
   function handlePointerMoveCapture(event: ReactPointerEvent<SVGSVGElement>) {
     props.onPointerMoveCapture?.(event);
@@ -97,7 +107,7 @@ export function EditorCanvas(props: EditorCanvasProps) {
     onContextMenu={props.onContextMenu}
     onDoubleClick={props.onDoubleClick}
   >
-    {props.annotations.map((annotation) => {
+    {painted.map((annotation) => {
       const label = labelById.get(annotation.label);
       return <AnnotationLayer
         key={annotation.id}
