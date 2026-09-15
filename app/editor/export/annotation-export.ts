@@ -50,9 +50,37 @@ export function exportBounds(annotation: EditorAnnotation) {
   return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
 }
 
-export function annotationToCoco(annotation: EditorAnnotation, annotationIndex: number, assets: Asset[], labels: Label[]) {
-  const imageIndex = assets.findIndex((asset) => asset.id === annotation.asset);
-  const categoryIndex = labels.findIndex((label) => label.id === annotation.label);
+/**
+ * Position of the first item carrying each id, matching `findIndex` semantics
+ * for the duplicate-id case so the exported ids stay identical.
+ */
+function firstIndexById(items: ReadonlyArray<{ id: string }>) {
+  const indexes = new Map<string, number>();
+  items.forEach((item, index) => {
+    if (!indexes.has(item.id)) indexes.set(item.id, index);
+  });
+  return indexes;
+}
+
+export type ExportIndexes = {
+  imageIndexById: ReadonlyMap<string, number>;
+  categoryIndexById: ReadonlyMap<string, number>;
+};
+
+/** Built once per document so a large export does not rescan the arrays per annotation. */
+export function buildExportIndexes(assets: Asset[], labels: Label[]): ExportIndexes {
+  return { imageIndexById: firstIndexById(assets), categoryIndexById: firstIndexById(labels) };
+}
+
+export function annotationToCoco(
+  annotation: EditorAnnotation,
+  annotationIndex: number,
+  assets: Asset[],
+  labels: Label[],
+  indexes: ExportIndexes = buildExportIndexes(assets, labels),
+) {
+  const imageIndex = indexes.imageIndexById.get(annotation.asset) ?? -1;
+  const categoryIndex = indexes.categoryIndexById.get(annotation.label) ?? -1;
   const bounds = exportBounds(annotation);
   const segmentation = annotation.type === "polygon"
     ? [annotation.vertices, ...annotation.holes].map(verticesToFlat)
@@ -83,8 +111,13 @@ export function annotationToCoco(annotation: EditorAnnotation, annotationIndex: 
   };
 }
 
-export function annotationToYolo(annotation: EditorAnnotation, labels: Label[], asset: Asset) {
-  const classIndex = labels.findIndex((label) => label.id === annotation.label);
+export function annotationToYolo(
+  annotation: EditorAnnotation,
+  labels: Label[],
+  asset: Asset,
+  categoryIndexById: ReadonlyMap<string, number> = firstIndexById(labels),
+) {
+  const classIndex = categoryIndexById.get(annotation.label) ?? -1;
   const width = Number(asset.width);
   const height = Number(asset.height);
   if (classIndex < 0 || !Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) return null;

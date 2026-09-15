@@ -38,26 +38,3 @@ export type EditorAnnotation =
   | PolygonAnnotation
   | PolylineAnnotation
   | PointAnnotation;
-
-export function annotationVertices(annotation: EditorAnnotation): Vertex[] {
-  return annotation.type === "polygon" || annotation.type === "line" ? annotation.vertices : [];
-}
-
-export function replaceAnnotationVertices(annotation: EditorAnnotation, vertices: Vertex[]): EditorAnnotation {
-  if (annotation.type === "polygon" || annotation.type === "line") return { ...annotation, vertices };
-  return annotation;
-}
-
-export function cloneAnnotation(annotation: EditorAnnotation): EditorAnnotation {
-  if (annotation.type === "polygon") {
-    return {
-      ...annotation,
-      vertices: annotation.vertices.map((vertex) => ({ ...vertex })),
-      holes: annotation.holes.map((hole) => hole.map((vertex) => ({ ...vertex }))),
-    };
-  }
-  if (annotation.type === "line") {
-    return { ...annotation, vertices: annotation.vertices.map((vertex) => ({ ...vertex })) };
-  }
-  return { ...annotation };
-}

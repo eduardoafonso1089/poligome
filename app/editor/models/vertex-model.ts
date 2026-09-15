@@ -58,7 +58,3 @@ export function deleteVertex(vertices: Vertex[], vertexId: VertexId, minimumVert
 export function moveVertices(vertices: Vertex[], dx: number, dy: number): Vertex[] {
   return vertices.map((vertex) => ({ ...vertex, x: vertex.x + dx, y: vertex.y + dy }));
 }
-
-export function vertexById(vertices: Vertex[], vertexId: VertexId) {
-  return vertices.find((vertex) => vertex.id === vertexId) ?? null;
-}

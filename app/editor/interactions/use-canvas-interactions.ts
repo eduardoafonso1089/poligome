@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, RefObject } from "react";
 import type { Size2D } from "../../lib/editor-viewport";
 import type { EditorAnnotation } from "../models/annotation-model";
 import type { BoxCorner } from "../layers/box-layer";
 import type { EditorAction, EditorState } from "../state/editor-state";
-import { annotationBounds, resizeBoxFromCorner } from "../geometry/annotation-geometry";
+import { resizeBoxFromCorner } from "../geometry/annotation-geometry";
 import { snapPointToAnnotations } from "../geometry/vector-operations";
 import { clientPointToImage } from "../viewport/svg-image-space";
 import { selectRange, selectSingle, selectionFromMarquee, type SelectionMarquee } from "../selection/selection-model";
@@ -47,8 +47,16 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
   const marqueePointerRef = useRef<number | null>(null);
   const [selectionMarquee, setSelectionMarquee] = useState<SelectionMarquee | null>(null);
 
-  const selectionScope = activeAssetId ? activeAnnotations ?? state.annotations.filter((annotation) => annotation.asset === activeAssetId) : state.annotations;
-  const selectedIds = state.selection.multiSelected.length ? state.selection.multiSelected : state.selection.selected ? [state.selection.selected] : [];
+  // Both feed useCallback dependency lists. Recomputing them inline produced a new
+  // array on every render, so the callbacks below were rebuilt on every render too.
+  const selectionScope = useMemo(
+    () => activeAssetId ? activeAnnotations ?? state.annotations.filter((annotation) => annotation.asset === activeAssetId) : state.annotations,
+    [activeAssetId, activeAnnotations, state.annotations],
+  );
+  const selectedIds = useMemo(
+    () => state.selection.multiSelected.length ? state.selection.multiSelected : state.selection.selected ? [state.selection.selected] : [],
+    [state.selection.multiSelected, state.selection.selected],
+  );
 
   const toggleOnly = useCallback((event: ReactPointerEvent<SVGElement>, annotationId: string) => {
     event.preventDefault();
@@ -240,15 +248,7 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     dispatch({ type: "cancel-gesture" });
   }, [dispatch]);
 
-  const activeBounds = state.selection.selected
-    ? (() => {
-        const annotation = state.annotations.find((item) => item.id === state.selection.selected);
-        return annotation ? annotationBounds(annotation) : null;
-      })()
-    : null;
-
   return {
-    activeBounds,
     selectionMarquee,
     beginAnnotationDrag,
     moveAnnotation,

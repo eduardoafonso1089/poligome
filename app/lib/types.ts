@@ -1,17 +1,3 @@
-export type Tool =
-  | "select"
-  | "pan"
-  | "box"
-  | "polygon"
-  | "freehand"
-  | "line"
-  | "point"
-  | "ring"
-  | "sam"
-  | "split"
-  | "transform"
-  | "reshape";
-
 export type Label = {
   id: string;
   name: string;
@@ -71,22 +57,6 @@ export type Asset = {
    * underlying raster bytes and restore a new runtime handle when the project opens.
    */
   runtimeRasterSource?: File;
-  reviewScore?: number;
-};
-
-export type Annotation = {
-  id: string;
-  asset: string;
-  label: string;
-  type: "box" | "polygon" | "line" | "point";
-  x?: number;
-  y?: number;
-  w?: number;
-  h?: number;
-  /** Clockwise rotation in radians around the centre of a bounding box. */
-  rotation?: number;
-  pts?: number[];
-  holes?: number[][];
   reviewScore?: number;
 };
 

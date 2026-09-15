@@ -128,7 +128,9 @@ The outer browser UI is described throughout this documentation as the **editor 
 The canonical editor reuses the application-wide design tokens from `app/globals.css` (`--paper`, `--surface`, `--line`, `--green`, `--canvas-bg`, and related tokens) rather than defining a separate theme. Editor-specific composition lives in:
 
 - `app/editor/editor-interface.module.css` for management, vector and review surfaces;
-- `app/annotate/annotate-interface.module.css` for the `/annotate` route frame and responsive layout.
+- `app/editor/presentation/pre-refactor-canonical.module.css` for the editor chrome;
+- `app/annotate/exact-pre-refactor-refinements.module.css` and its companions for
+  the `/annotate` route frame and responsive layout.
 
 The goal is to preserve the Poligome visual identity without re-coupling the canonical editor to the legacy annotator DOM. Inline styles are reserved for values that are genuinely runtime-derived, such as canvas position/size, class colors and metric widths.
 

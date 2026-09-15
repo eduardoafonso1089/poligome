@@ -1,8 +1,0 @@
-.reviewContract {}
-
-/* Quality/review remains available in the canonical architecture, but it was not part of
- * the standard annotator workspace immediately before the refactor merge. Keep it out of
- * the visual composition so it cannot auto-place into the image rail or cover the stage. */
-.reviewContract > :global(main) > :global(div) > :global(aside) {
-  display: none !important;
-}

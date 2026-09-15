@@ -97,7 +97,11 @@ export function CanonicalEditorWorkbench() {
   const annotationIndex = useAnnotationIndex(editor.annotations);
   const copy = getCopy(language);
   const asset = assets.find((item) => item.id === current) ?? assets[0] ?? null;
-  const imageSize = { width: asset?.width ?? 1, height: asset?.height ?? 1 };
+  // A fresh object here would invalidate every interaction callback that lists
+  // imageSize as a dependency, which in turn defeats the memo on AnnotationLayer.
+  const imageWidth = asset?.width ?? 1;
+  const imageHeight = asset?.height ?? 1;
+  const imageSize = useMemo(() => ({ width: imageWidth, height: imageHeight }), [imageWidth, imageHeight]);
   const viewport = useEditorViewport({ image: imageSize, initialZoom: 92 });
 
   const makeId = useCallback((prefix: string) => {
@@ -709,37 +713,43 @@ export function CanonicalEditorWorkbench() {
     }
   }
 
+  // The handler closes over render-scoped state, so it is refreshed on every commit
+  // while the window listener itself is registered once. Re-subscribing per render
+  // meant add/removeEventListener ran at pointermove rate during a drag.
+  const keydownRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  keydownRef.current = (event: KeyboardEvent) => {
+    if (isEditableShortcutTarget(event.target)) return;
+    const command = commandFromKeyboard(event);
+    if (!command) return;
+    if (["undo", "redo", "delete", "finish-draft", "escape"].includes(command.type)) event.preventDefault();
+    if (command.type === "undo") { editor.undo(); return; }
+    if (command.type === "redo") { editor.redo(); return; }
+    if (command.type === "delete") {
+      if (editor.selectedVertex) deleteCurrentSelection();
+      else if (vectorTool === "hole" && advanced.canRemoveLastPoint) advanced.removeLastPoint();
+      else if (drawing.canRemoveLastPoint) drawing.removeLastPoint();
+      else deleteAnnotations(selectedIds);
+      return;
+    }
+    if (command.type === "finish-draft") { finishActiveDraft(); return; }
+    if (command.type === "escape") {
+      cancelActiveDraft(); interactions.cancel(); setVectorTool(null); setAddToSelection(false);
+      if (tool !== "select") setTool("select"); else editor.dispatch({ type: "clear-selection" });
+      return;
+    }
+    if (command.type === "tool") { if (asset && !asset.missing) chooseTool(command.tool); return; }
+    if (command.type === "vector-tool") { if (activePolygon) chooseVectorTool(command.tool); return; }
+    if (command.type === "label-key") {
+      const label = labels.find((item) => item.key === command.key);
+      if (label) setActiveLabel(label.id);
+    }
+  };
+
   useEffect(() => {
-    const keydown = (event: KeyboardEvent) => {
-      if (isEditableShortcutTarget(event.target)) return;
-      const command = commandFromKeyboard(event);
-      if (!command) return;
-      if (["undo", "redo", "delete", "finish-draft", "escape"].includes(command.type)) event.preventDefault();
-      if (command.type === "undo") { editor.undo(); return; }
-      if (command.type === "redo") { editor.redo(); return; }
-      if (command.type === "delete") {
-        if (editor.selectedVertex) deleteCurrentSelection();
-        else if (vectorTool === "hole" && advanced.canRemoveLastPoint) advanced.removeLastPoint();
-        else if (drawing.canRemoveLastPoint) drawing.removeLastPoint();
-        else deleteAnnotations(selectedIds);
-        return;
-      }
-      if (command.type === "finish-draft") { finishActiveDraft(); return; }
-      if (command.type === "escape") {
-        cancelActiveDraft(); interactions.cancel(); setVectorTool(null); setAddToSelection(false);
-        if (tool !== "select") setTool("select"); else editor.dispatch({ type: "clear-selection" });
-        return;
-      }
-      if (command.type === "tool") { if (asset && !asset.missing) chooseTool(command.tool); return; }
-      if (command.type === "vector-tool") { if (activePolygon) chooseVectorTool(command.tool); return; }
-      if (command.type === "label-key") {
-        const label = labels.find((item) => item.key === command.key);
-        if (label) setActiveLabel(label.id);
-      }
-    };
+    const keydown = (event: KeyboardEvent) => keydownRef.current(event);
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [activePolygon, advanced, asset, drawing, editor, interactions, labels, selectedIds, tool, vectorTool]);
+  }, []);
 
   const noopElement = useCallback((_event: ReactPointerEvent<SVGElement>) => undefined, []);
   const noopAnnotation = useCallback((_event: ReactPointerEvent<SVGElement>, _annotation: EditorAnnotation) => undefined, []);
