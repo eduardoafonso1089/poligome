@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { launchAuditBrowser } from "./audit-browser.mjs";
 import fs from "node:fs/promises";
 import { openDemoDataset } from "./demo-audit-helpers.mjs";
 
@@ -76,7 +76,7 @@ async function audit(browser, width) {
   await context.close();
 }
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchAuditBrowser();
 try {
   await audit(browser, 390);
   await audit(browser, 360);

@@ -4,25 +4,55 @@ on:
   push:
     branches:
       - main
-      - refactor/editor-architecture
-      - fix/cloudflare-next-build
   pull_request:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  validate:
+  # Tier 1: everything that needs no build and no browser. Fails fast so a typo
+  # or a broken unit never costs a full build.
+  static:
+    name: Types, lint and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint, including the architecture boundaries
+        run: npx eslint . --ignore-pattern dist --ignore-pattern .next --max-warnings 60
+
+      - name: Unit, model and component tests
+        run: npm run test:unit
+
+      - name: Coverage report
+        if: always()
+        run: npm run test:coverage 2>&1 | tail -40
+
+  # Tier 2: the built artifact and the export contracts.
+  build:
+    name: Build and export contracts
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22.13.0'
           cache: npm
@@ -39,7 +69,7 @@ jobs:
       - name: Build Cloudflare Pages artifact
         run: npm run build:pages
 
-      - name: Run tests
+      - name: Tests against the built artifact
         run: node --import tsx --test tests/*.test.mjs
 
       - name: Check editor i18n parity debt
@@ -47,9 +77,6 @@ jobs:
 
       - name: Check cross-branch export goldens
         run: node --import tsx scripts/check-export-parity.mjs
-
-      - name: Smoke demo route
-        run: node --import tsx --test tests/demo-route.test.mjs
 
       - name: Report COG tile benchmark
         run: COG_BENCH_ITERATIONS=5000 npm run benchmark:cog

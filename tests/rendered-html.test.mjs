@@ -2,10 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { access } from "node:fs/promises";
 
+/**
+ * This is the build tier: it asserts on the artifact `vinext build` produces.
+ * `npm run test:unit` is meant to be fast and buildless, so the test announces
+ * itself as skipped there instead of failing. CI runs it after the build, via
+ * `npm run test:build`, where the artifact is always present.
+ */
+const built = await access(new URL("../dist/server/index.js", import.meta.url)).then(() => true, () => false);
+
 const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
 
-test("renders development preview metadata", async () => {
+test("renders development preview metadata", { skip: built ? false : "run npm run build first (covered by npm run test:build in CI)" }, async () => {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);

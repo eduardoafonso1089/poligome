@@ -22,8 +22,20 @@ Before submitting a pull request, run:
 
 ```bash
 npm run lint
-npm test
+npm test          # typecheck + unit and component tests, no build
 ```
+
+For a change that touches the build, the export formats or the editor's
+interactions, also run the slower tiers:
+
+```bash
+npm run test:build   # the built artifact, export goldens, i18n parity
+npm run test:audit   # the editor driven in Chromium
+```
+
+`tests/README.md` describes the four tiers and how to write a test in each.
+Assert on what a component renders, never on the text of its source file;
+architecture boundaries are lint rules in `eslint.config.mjs`, not tests.
 
 Describe the user problem, the behavior before and after the change, and how you verified it. Include screenshots or a short recording for interface changes. Do not include private datasets, credentials, model checkpoints, or generated build artifacts.
 

@@ -64,4 +64,6 @@ export function PreRefactorToolbar(props: PreRefactorChromeProps) {
   </>;
 }
 
-export function PreRefactorStatus(props: PreRefactorChromeProps) { return <div className="status"><div><button onClick={props.onPreviousImage} disabled={props.imageIndex <= 0}><ChevronLeft size={16} /></button><span><b>{props.hasAsset ? props.imageIndex + 1 : 0}</b> / {props.assetsCount}</span><button onClick={props.onNextImage} disabled={props.imageIndex < 0 || props.imageIndex >= props.assetsCount - 1}><ChevronRight size={16} /></button></div><p><Sparkles size={14} /><span>{props.statusMessage}</span></p></div>; }
+export function PreRefactorStatus(props: PreRefactorChromeProps) {
+  const copy = getCopy(props.language);
+  return <div className="status"><div><button aria-label={copy.previousImage} title={copy.previousImage} onClick={props.onPreviousImage} disabled={props.imageIndex <= 0}><ChevronLeft size={16} /></button><span><b>{props.hasAsset ? props.imageIndex + 1 : 0}</b> / {props.assetsCount}</span><button aria-label={copy.nextImage} title={copy.nextImage} onClick={props.onNextImage} disabled={props.imageIndex < 0 || props.imageIndex >= props.assetsCount - 1}><ChevronRight size={16} /></button></div><p><Sparkles size={14} /><span>{props.statusMessage}</span></p></div>; }
