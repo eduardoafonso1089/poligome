@@ -18,6 +18,15 @@ if (!loadDemoPattern.test(source)) throw new Error(`${sourceName}: loadDemo help
 source = `import { openDemoDataset } from "./demo-audit-helpers.mjs";\n${source}`;
 source = source.replace(loadDemoPattern, `async function loadDemo(page) {\n  await openDemoDataset(page, BASE);\n}\n`);
 
+// Merge was intentionally removed from the UI. The mobile command audit has already
+// retired that scenario. The advanced audit still contains its legacy Merge case, so
+// strip only that case at runtime while preserving every other interaction check.
+if (sourceName === "editor-advanced-interaction-audit.mjs") {
+  const obsoleteMergePattern = /\s*await check\("Merge unions two overlapping selected polygons"[\s\S]*?(?=\s*await check\("Hole creates an interior ring in the selected polygon")/;
+  if (!obsoleteMergePattern.test(source)) throw new Error("Advanced Merge audit changed; update this runner instead of silently weakening the audit.");
+  source = source.replace(obsoleteMergePattern, "\n\n  ");
+}
+
 await fs.writeFile(runtimePath, source);
 try {
   await import(`${pathToFileURL(runtimePath).href}?run=${Date.now()}`);
