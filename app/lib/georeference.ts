@@ -37,9 +37,6 @@ export function geoReference(source: string, width: number, height: number, refe
   };
 }
 
-export function isRasterSidecar(name: string) {
-  return /\.(?:tfw|tifw|jgw|jpgw|jpegw|pgw|pngw|bpw|bmpw|gfw|gifw|wld|prj|aux\.xml)$/i.test(name);
-}
 
 /** Match full filename first, then the exact stem. Never borrow another image's CRS. */
 export async function readRasterSidecars(image: File, files: File[]): Promise<RasterReference> {

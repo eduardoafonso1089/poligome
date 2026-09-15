@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { edgeMidpoints } from "../geometry/annotation-geometry";
 import type { Vertex } from "../models/vertex-model";
@@ -96,7 +97,13 @@ export function VertexHandles({
   onCancel,
   onInsertVertex,
 }: VertexHandlesProps) {
-  const midpoints = edgeMidpoints(vertices, open);
+  const midpoints = useMemo(() => edgeMidpoints(vertices, open), [vertices, open]);
+  // Each cursor is an encoded SVG data URI. Building one per vertex on every
+  // render made a pointermove over a dense polygon rebuild hundreds of strings.
+  const cursors = useMemo(
+    () => vertices.map((_vertex, index) => vertexMoveCursor(vertices, index, open)),
+    [vertices, open],
+  );
 
   return <>
     {midpoints.map((midpoint) => <g key={`${annotationId}:${midpoint.afterVertexId}`}>
@@ -132,7 +139,7 @@ export function VertexHandles({
     </g>)}
     {vertices.map((vertex, index) => {
       const isSelected = selectedVertex?.annotationId === annotationId && selectedVertex.vertexId === vertex.id;
-      const cursor = vertexMoveCursor(vertices, index, open);
+      const cursor = cursors[index];
       return <g key={vertex.id} data-vertex-id={vertex.id}>
         {touchMode && <ellipse
           className="touch-handle-hit"

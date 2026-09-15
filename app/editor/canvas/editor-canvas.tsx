@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, Ref } from "react";
 import type { EditorAnnotation } from "../models/annotation-model";
 import type { Label } from "../../lib/types";
@@ -58,8 +59,8 @@ export type EditorCanvasProps = {
 };
 
 export function EditorCanvas(props: EditorCanvasProps) {
-  const labelById = new Map(props.labels.map((label) => [label.id, label]));
-  const selected = new Set(props.selectedIds);
+  const labelById = useMemo(() => new Map(props.labels.map((label) => [label.id, label])), [props.labels]);
+  const selected = useMemo(() => new Set(props.selectedIds), [props.selectedIds]);
   const width = Math.max(1, props.imageSize.width);
   const height = Math.max(1, props.imageSize.height);
 

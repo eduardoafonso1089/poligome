@@ -14,14 +14,14 @@ function coordinatePoint(coordinate: Coordinate) {
   return { x: coordinate[0], y: coordinate[1] };
 }
 
-export function createVertices(annotationId: string, coordinates: Coordinate[], ring = "outer"): Vertex[] {
+function createVertices(annotationId: string, coordinates: Coordinate[], ring = "outer"): Vertex[] {
   return coordinates.map((coordinate, index) => {
     const point = coordinatePoint(coordinate);
     return { id: `${annotationId}:${ring}:v${index}`, x: point.x, y: point.y };
   });
 }
 
-export function createVerticesFromFlat(annotationId: string, points: number[], ring = "outer"): Vertex[] {
+function createVerticesFromFlat(annotationId: string, points: number[], ring = "outer"): Vertex[] {
   const coordinates: Array<[number, number]> = [];
   for (let index = 0; index + 1 < points.length; index += 2) coordinates.push([points[index], points[index + 1]]);
   return createVertices(annotationId, coordinates, ring);
@@ -51,10 +51,6 @@ export function createPolygonFromFlat(
     vertices: createVerticesFromFlat(base.id, points),
     holes: holes.map((hole, index) => createVerticesFromFlat(base.id, hole, `hole-${index}`)),
   };
-}
-
-export function createPolyline(base: AnnotationBase, coordinates: Coordinate[]): PolylineAnnotation {
-  return { ...base, type: "line", vertices: createVertices(base.id, coordinates) };
 }
 
 export function createPolylineFromFlat(base: AnnotationBase, points: number[]): PolylineAnnotation {

@@ -3,7 +3,7 @@ import type { Asset, Label } from "../../lib/types";
 import { rasterTransform, transformPoint } from "../../lib/georeference";
 import { toWgs84 } from "../../lib/projections";
 import type { EditorAnnotation } from "../models/annotation-model";
-import { annotationToCoco, annotationToGeoJsonGeometry, annotationToYolo } from "./annotation-export";
+import { annotationToCoco, annotationToGeoJsonGeometry, annotationToYolo, buildExportIndexes } from "./annotation-export";
 
 function downloadBlob(name: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
@@ -25,6 +25,7 @@ function safeBaseName(name: string, fallback: string) {
 }
 
 export function buildCocoDocument(assets: Asset[], labels: Label[], annotations: EditorAnnotation[]) {
+  const indexes = buildExportIndexes(assets, labels);
   return {
     info: { description: "Poligome dataset", version: "1.0" },
     images: assets.map((asset, index) => ({
@@ -35,7 +36,7 @@ export function buildCocoDocument(assets: Asset[], labels: Label[], annotations:
       ...(asset.geo ? { georeference: asset.geo } : {}),
     })),
     categories: labels.map((label, index) => ({ id: index + 1, name: label.name, supercategory: "object" })),
-    annotations: annotations.map((annotation, index) => annotationToCoco(annotation, index, assets, labels)),
+    annotations: annotations.map((annotation, index) => annotationToCoco(annotation, index, assets, labels, indexes)),
   };
 }
 
@@ -48,15 +49,22 @@ export function exportEditorCoco(assets: Asset[], labels: Label[], annotations: 
 export async function exportEditorYoloZip(assets: Asset[], labels: Label[], annotations: EditorAnnotation[], readme = "Exported by Poligome") {
   const zip = new JSZip();
   const trainCount = assets.length > 1 ? Math.min(assets.length - 1, Math.max(1, Math.round(assets.length * .8))) : assets.length;
+  // Grouped once instead of filtering the whole annotation list per image.
+  const { categoryIndexById } = buildExportIndexes(assets, labels);
+  const annotationsByAsset = new Map<string, EditorAnnotation[]>();
+  for (const annotation of annotations) {
+    const bucket = annotationsByAsset.get(annotation.asset);
+    if (bucket) bucket.push(annotation);
+    else annotationsByAsset.set(annotation.asset, [annotation]);
+  }
 
   for (const [imageIndex, asset] of assets.entries()) {
     if (!asset.src || asset.missing) throw new Error(`Image unavailable for YOLO export: ${asset.name}`);
     const split = imageIndex < trainCount ? "train" : "val";
     const base = `${String(imageIndex + 1).padStart(4, "0")}-${safeBaseName(asset.name, `image_${imageIndex + 1}`)}`;
     const extension = asset.name.match(/\.[a-zA-Z0-9]+$/)?.[0].toLowerCase() ?? ".png";
-    const rows = annotations
-      .filter((annotation) => annotation.asset === asset.id)
-      .map((annotation) => annotationToYolo(annotation, labels, asset))
+    const rows = (annotationsByAsset.get(asset.id) ?? [])
+      .map((annotation) => annotationToYolo(annotation, labels, asset, categoryIndexById))
       .filter((row): row is string => !!row);
     const response = await fetch(asset.src);
     if (!response.ok) throw new Error(`Could not read image for YOLO export: ${asset.name}`);
@@ -97,6 +105,7 @@ export function buildGeoJson(assets: Asset[], labels: Label[], annotations: Edit
   const assetMap = new Map(assets.map((asset) => [asset.id, asset]));
   const labelMap = new Map(labels.map((label) => [label.id, label]));
   const projections = new Map<string, ReturnType<typeof toWgs84>>();
+  const transforms = new Map<string, ReturnType<typeof rasterTransform>>();
 
   const features = annotations.map((annotation) => {
     const asset = assetMap.get(annotation.asset);
@@ -106,7 +115,11 @@ export function buildGeoJson(assets: Asset[], labels: Label[], annotations: Edit
     if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) throw new Error("rasterInvalidReference");
     const geo = asset.geo;
     if (!projections.has(geo.crs)) projections.set(geo.crs, toWgs84(geo.crs));
-    const transform = rasterTransform(geo);
+    let transform = transforms.get(asset.id);
+    if (!transform) {
+      transform = rasterTransform(geo);
+      transforms.set(asset.id, transform);
+    }
     const project = (x: number, y: number): [number, number] => {
       if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("rasterInvalidCoordinates");
       const native = transformPoint(
