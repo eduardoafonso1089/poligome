@@ -103,3 +103,34 @@ test("the real source tree passes every architecture rule", async () => {
       .map((message) => `${result.filePath}:${message.line} ${message.ruleId}`));
   assert.deepEqual(boundaryViolations, []);
 });
+
+const DIRECT_SOURCE_READ = /\breadFile(Sync)?\(\s*new URL\(\s*['"`]\.\.\/(app|docs)\//;
+
+test("no test asserts on the formatting of a source file", async () => {
+  // The suite used to break whenever a file was reformatted: one test required a
+  // whole arrow function to stay on a single line. Source assertions now go
+  // through tests/helpers/source.mjs, which collapses whitespace first, so a
+  // formatter can never fail CI on its own. Reading files directly would quietly
+  // bring the old failure mode back.
+  const { readdir, readFile } = await import("node:fs/promises");
+  const tests = new URL("./", import.meta.url);
+  const offenders = [];
+
+  for (const entry of await readdir(tests)) {
+    // This file carries the pattern itself, in the self-test below.
+    if (!entry.endsWith(".test.mjs") || entry === "architecture-guards.test.mjs") continue;
+    const source = await readFile(new URL(entry, tests), "utf8");
+    // node:fs is legitimate for fixtures and directory listings; reading a file
+    // under app/ or docs/ for pattern matching is what belongs in the helper.
+    if (DIRECT_SOURCE_READ.test(source)) offenders.push(entry);
+  }
+
+  assert.deepEqual(offenders, [], "these tests read app sources directly instead of using helpers/source.mjs");
+});
+
+test("the formatting guard recognises a direct read when there is one", () => {
+  // A guard that cannot fail is not a guard.
+  assert.ok(DIRECT_SOURCE_READ.test(`readFileSync(new URL("../app/x.ts", import.meta.url), "utf8")`));
+  assert.ok(DIRECT_SOURCE_READ.test(`await readFile(new URL('../docs/X.md', import.meta.url), 'utf8')`));
+  assert.ok(!DIRECT_SOURCE_READ.test(`sourceOf("app/x.ts")`));
+});

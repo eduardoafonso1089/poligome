@@ -12,7 +12,8 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
+import { lineCount, sourceOf } from "./helpers/source.mjs";
 
 const repo = (path) => new URL(`../${path}`, import.meta.url);
 const exists = async (path) => access(repo(path)).then(() => true, () => false);
@@ -50,16 +51,15 @@ test("the polygon union path is still wired, even without a toolbar button", asy
   // a different decision and should fail here first.
   const geometry = await import("../app/editor/geometry/vector-operations.ts");
   assert.equal(typeof geometry.unionPolygonAnnotations, "function");
-  const toolbar = await readFile(repo("app/editor/vector/vector-toolbar.tsx"), "utf8");
+  const toolbar = sourceOf("app/editor/vector/vector-toolbar.tsx");
   assert.match(toolbar, /onMerge/);
 });
 
 test("the canonical route is a composition and nothing else", async () => {
-  const page = await readFile(repo("app/annotate/page.tsx"), "utf8");
-  assert.match(page, /CanonicalEditorWorkbench/);
+  assert.match(sourceOf("app/annotate/page.tsx"), /CanonicalEditorWorkbench/);
   // The lint rules in eslint.config.mjs enforce what it may import; this only
   // guards the size, which no rule expresses well.
-  assert.ok(page.split("\n").length < 30, "the route must not grow into a monolith again");
+  assert.ok(lineCount("app/annotate/page.tsx") < 30, "the route must not grow into a monolith again");
 });
 
 test("every documented export format still has a builder", async () => {
@@ -75,7 +75,7 @@ test("every documented export format still has a builder", async () => {
 test("the GeoJSON property contract is documented", async () => {
   // The export renames Portuguese keys to English; the table is the only place a
   // downstream consumer can look it up, so its absence is a regression.
-  const doc = await readFile(repo("docs/RASTER_WORKFLOW.md"), "utf8");
+  const doc = sourceOf("docs/RASTER_WORKFLOW.md");
   for (const property of ["class", "class_id", "color", "shape", "rotation", "source_image", "source_raster", "crs"]) {
     assert.match(doc, new RegExp(`\`${property}\``), `GeoJSON property ${property} is undocumented`);
   }

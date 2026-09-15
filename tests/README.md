@@ -51,6 +51,27 @@ a test problem — they live in `eslint.config.mjs` now, and
 `architecture-guards.test.mjs` feeds ESLint deliberately broken code to prove
 the rules still fire.
 
+### When the source really is the only witness
+
+A few contracts leave no trace in markup: an effect that only runs in a browser,
+a listener registered with `{ passive: false }`, the order of two statements
+inside a closure, an import that must *not* exist. Those stay source
+assertions — but they go through `helpers/source.mjs`:
+
+```js
+import { region, sourceOf } from "./helpers/source.mjs";
+
+assert.match(sourceOf("app/editor/viewport/use-editor-viewport.ts"), /passive: false/);
+assert.match(region(WORKBENCH, "function duplicatePolygon", "function "), /makeId\("copy"\)/);
+```
+
+`sourceOf` collapses every run of whitespace to a single space, so a regex
+written on one line still matches after the file is wrapped or reformatted.
+`region` scopes an assertion to one function, `cssRule` to one CSS rule, and
+`lineCount` answers the rare question about a file's size.
+`architecture-guards.test.mjs` fails the build if a test reads `app/` or `docs/`
+without the helper.
+
 ## Running the functional tier locally
 
 ```bash
@@ -76,6 +97,9 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chrome npm run test:audit
 npm run test:coverage
 ```
 
-Currently 94% of lines and 84% of branches. The gaps are deliberate:
-`app/lib/sam.ts` is dormant until the SAM branch lands, and
-`tiled-raster-asset.ts` needs a real GeoTIFF to exercise.
+Currently 87% of lines and 84% of branches over the whole `app/` tree — the
+figure fell from 94% when the CSS-module hooks made the management panels
+measurable for the first time, not because anything stopped being tested.
+
+The remaining gap is deliberate: `app/lib/sam.ts` is dormant until the SAM
+branch lands.
