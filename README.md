@@ -71,6 +71,11 @@ tab's memory. The converter also serves the finished COG with Range support, so
 the app reads the result by tiles without downloading it again. The manual route
 is `public/poligome-cog-local.py`.
 
+Both connectors speak the same HTTP contract, described in
+[Local connector API](docs/LOCAL_CONNECTOR_API.md): discovery, blobs, synchronous
+operations, jobs and errors are the same whether the helper runs as a plain process or
+as a container.
+
 Both connectors only accept browser requests from the official Poligome origins
 and local development by default. A trusted self-hosted instance can set
 `POLIGOME_ALLOWED_ORIGIN_REGEX` to an anchored regular expression for its own
@@ -102,6 +107,7 @@ app/editor/           canonical editor architecture and interface
 app/lib/              shared project, raster, SAM and i18n utilities
 public/               local connector installers, favicon and cursors
 docs/PLATFORM.md      hosting platform, bindings, and auth notes
+docs/LOCAL_CONNECTOR_API.md  HTTP contract between the browser and the local helpers
 ```
 
 The stack is React 19 and Next 16 running on
