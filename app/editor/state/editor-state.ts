@@ -42,8 +42,8 @@ export type EditorAction =
   | { type: "begin-gesture" }
   | { type: "commit-gesture" }
   | { type: "cancel-gesture" }
-  | { type: "update-vertex"; annotationId: string; vertexId: string; point: { x: number; y: number } }
-  | { type: "insert-vertex"; annotationId: string; afterVertexId: string; vertexId: string; point: { x: number; y: number } }
+  | { type: "update-vertex"; annotationId: string; vertexId: string; point: { x: number; y: number }; minDistance?: number }
+  | { type: "insert-vertex"; annotationId: string; afterVertexId: string; vertexId: string; point: { x: number; y: number }; minDistance?: number }
   | { type: "delete-vertex"; annotationId: string; vertexId: string }
   | { type: "translate-annotations"; ids: string[]; dx: number; dy: number }
   | { type: "replace-annotation"; annotation: EditorAnnotation }
@@ -255,7 +255,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "update-vertex": {
       const target = state.annotations.find((annotation) => annotation.id === action.annotationId);
       if (!target) return state;
-      const updated = updateAnnotationVertex(target, action.vertexId, action.point);
+      const updated = updateAnnotationVertex(target, action.vertexId, action.point, action.minDistance);
       if (updated === target) return state;
       const annotations = state.annotations.map((annotation) => annotation.id === target.id ? updated : annotation);
       return {
@@ -267,7 +267,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "insert-vertex": {
       const target = state.annotations.find((annotation) => annotation.id === action.annotationId);
       if (!target) return state;
-      const updated = insertAnnotationVertex(target, action.afterVertexId, action.point, action.vertexId);
+      const updated = insertAnnotationVertex(target, action.afterVertexId, action.point, action.vertexId, action.minDistance);
       if (updated === target) return state;
       // A pointer insertion may immediately become a drag gesture. Keep its
       // original geometry as the single undo baseline instead of snapshotting it twice.

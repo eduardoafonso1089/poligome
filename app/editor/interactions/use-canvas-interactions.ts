@@ -6,9 +6,9 @@ import type { Size2D } from "../../lib/editor-viewport";
 import type { EditorAnnotation } from "../models/annotation-model";
 import type { BoxCorner } from "../layers/box-layer";
 import type { EditorAction, EditorState } from "../state/editor-state";
-import { resizeBoxFromCorner } from "../geometry/annotation-geometry";
+import { VERTEX_SCREEN_DISTANCE, resizeBoxFromCorner } from "../geometry/annotation-geometry";
 import { snapPointToAnnotations } from "../geometry/vector-operations";
-import { clientPointToImage } from "../viewport/svg-image-space";
+import { clientPointToImage, screenPixelsToImageUnits } from "../viewport/svg-image-space";
 import { selectRange, selectSingle, selectionFromMarquee, type SelectionMarquee } from "../selection/selection-model";
 
 export type CanvasInteractionOptions = {
@@ -20,6 +20,8 @@ export type CanvasInteractionOptions = {
   activeAssetId?: string | null;
   activeAnnotations?: EditorAnnotation[];
   addToSelection?: boolean;
+  /** Rendered canvas width in screen pixels, used to keep guards zoom-aware. */
+  renderedWidth?: number;
   snap?: { enabled: boolean; tolerance: number; annotations: EditorAnnotation[] };
 };
 
@@ -39,7 +41,7 @@ function eventPoint(svgRef: RefObject<SVGSVGElement | null>, imageSize: Size2D, 
   return svg ? clientPointToImage(svg, event.clientX, event.clientY, imageSize) : null;
 }
 
-export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, makeId, activeAssetId, activeAnnotations, addToSelection = false, snap }: CanvasInteractionOptions) {
+export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, makeId, activeAssetId, activeAnnotations, addToSelection = false, renderedWidth, snap }: CanvasInteractionOptions) {
   const annotationDrag = useRef<DragState | null>(null);
   const vertexDrag = useRef<VertexDragState | null>(null);
   const boxTransform = useRef<BoxTransformState | null>(null);
@@ -52,6 +54,12 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
   const selectionScope = useMemo(
     () => activeAssetId ? activeAnnotations ?? state.annotations.filter((annotation) => annotation.asset === activeAssetId) : state.annotations,
     [activeAssetId, activeAnnotations, state.annotations],
+  );
+  // The fat-finger guard is a screen measure, like snapping. Converting it here
+  // keeps it the same size to the user on a thumbnail and on a gigapixel raster.
+  const vertexMinDistance = useMemo(
+    () => screenPixelsToImageUnits(VERTEX_SCREEN_DISTANCE, imageSize, renderedWidth ?? imageSize.width),
+    [imageSize, renderedWidth],
   );
   const selectedIds = useMemo(
     () => state.selection.multiSelected.length ? state.selection.multiSelected : state.selection.selected ? [state.selection.selected] : [],
@@ -123,9 +131,9 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     const point = snap?.enabled
       ? snapPointToAnnotations(raw, snap.annotations, drag.annotationId, snap.tolerance)
       : raw;
-    dispatch({ type: "update-vertex", annotationId: drag.annotationId, vertexId: drag.vertexId, point });
+    dispatch({ type: "update-vertex", annotationId: drag.annotationId, vertexId: drag.vertexId, point, minDistance: vertexMinDistance });
     return true;
-  }, [dispatch, imageSize, snap, svgRef]);
+  }, [dispatch, imageSize, snap, svgRef, vertexMinDistance]);
 
   const finishVertex = useCallback((event: ReactPointerEvent<SVGElement>) => {
     const drag = vertexDrag.current;
@@ -145,9 +153,9 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     // Insertion and dragging are one gesture. The SVG root retains the pointer
     // even while the edge is redrawn into the newly created vertex.
     dispatch({ type: "begin-gesture" });
-    dispatch({ type: "insert-vertex", annotationId: annotation.id, afterVertexId, vertexId, point });
+    dispatch({ type: "insert-vertex", annotationId: annotation.id, afterVertexId, vertexId, point, minDistance: vertexMinDistance });
     vertexDrag.current = { pointerId: event.pointerId, annotationId: annotation.id, vertexId };
-  }, [addToSelection, dispatch, makeId, snap, toggleOnly]);
+  }, [addToSelection, dispatch, makeId, snap, toggleOnly, vertexMinDistance]);
 
   const resizeStart = useCallback((event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation, corner: BoxCorner) => {
     if (annotation.type !== "box") return;

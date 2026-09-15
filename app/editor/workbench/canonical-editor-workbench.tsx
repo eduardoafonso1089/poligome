@@ -146,6 +146,7 @@ export function CanonicalEditorWorkbench() {
     activeAssetId: current || null,
     activeAnnotations: activeAssetAnnotations,
     addToSelection,
+    renderedWidth: viewport.layout.width,
     snap,
   });
   const drawing = useDrawingInteractions({
