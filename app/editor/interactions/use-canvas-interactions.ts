@@ -49,14 +49,10 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
   const marqueePointerRef = useRef<number | null>(null);
   const [selectionMarquee, setSelectionMarquee] = useState<SelectionMarquee | null>(null);
 
-  // Both feed useCallback dependency lists. Recomputing them inline produced a new
-  // array on every render, so the callbacks below were rebuilt on every render too.
   const selectionScope = useMemo(
     () => activeAssetId ? activeAnnotations ?? state.annotations.filter((annotation) => annotation.asset === activeAssetId) : state.annotations,
     [activeAssetId, activeAnnotations, state.annotations],
   );
-  // The fat-finger guard is a screen measure, like snapping. Converting it here
-  // keeps it the same size to the user on a thumbnail and on a gigapixel raster.
   const vertexMinDistance = useMemo(
     () => screenPixelsToImageUnits(VERTEX_SCREEN_DISTANCE, imageSize, renderedWidth ?? imageSize.width),
     [imageSize, renderedWidth],
@@ -121,7 +117,7 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     dispatch({ type: "select-vertex", vertex: { annotationId: annotation.id, vertexId } });
     dispatch({ type: "begin-gesture" });
     vertexDrag.current = { pointerId: event.pointerId, annotationId: annotation.id, vertexId };
-  }, [addToSelection, dispatch, toggleOnly]);
+  }, [addToSelection, dispatch, svgRef, toggleOnly]);
 
   const moveVertex = useCallback((event: ReactPointerEvent<SVGElement>) => {
     const drag = vertexDrag.current;
@@ -150,18 +146,17 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     const point = snap?.enabled ? snapPointToAnnotations(raw, snap.annotations, annotation.id, snap.tolerance) : raw;
     const vertexId = makeId(`${annotation.id}:v`);
     (svgRef.current ?? event.currentTarget).setPointerCapture?.(event.pointerId);
-    // Insertion and dragging are one gesture. The SVG root retains the pointer
-    // even while the edge is redrawn into the newly created vertex.
     dispatch({ type: "begin-gesture" });
     dispatch({ type: "insert-vertex", annotationId: annotation.id, afterVertexId, vertexId, point, minDistance: vertexMinDistance });
     vertexDrag.current = { pointerId: event.pointerId, annotationId: annotation.id, vertexId };
-  }, [addToSelection, dispatch, makeId, snap, toggleOnly, vertexMinDistance]);
+  }, [addToSelection, dispatch, makeId, snap, svgRef, toggleOnly, vertexMinDistance]);
 
   const resizeStart = useCallback((event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation, corner: BoxCorner) => {
     if (annotation.type !== "box") return;
     if (addToSelection) { toggleOnly(event, annotation.id); return; }
+    event.preventDefault();
     event.stopPropagation();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    (svgRef.current ?? event.currentTarget).setPointerCapture?.(event.pointerId);
     dispatch({ type: "begin-gesture" });
     boxTransform.current = {
       pointerId: event.pointerId,
@@ -170,11 +165,12 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
       corner,
       center: { x: annotation.x + annotation.width / 2, y: annotation.y + annotation.height / 2 },
     };
-  }, [addToSelection, dispatch, toggleOnly]);
+  }, [addToSelection, dispatch, svgRef, toggleOnly]);
 
   const resizeMove = useCallback((event: ReactPointerEvent<SVGElement>) => {
     const transform = boxTransform.current;
     if (!transform || transform.kind !== "resize" || transform.pointerId !== event.pointerId || !transform.corner) return;
+    event.preventDefault();
     const point = eventPoint(svgRef, imageSize, event);
     if (!point) return;
     dispatch({ type: "replace-annotation", annotation: resizeBoxFromCorner(transform.annotation, transform.corner, point) });
@@ -185,8 +181,9 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     if (addToSelection) { toggleOnly(event, annotation.id); return; }
     const point = eventPoint(svgRef, imageSize, event);
     if (!point) return;
+    event.preventDefault();
     event.stopPropagation();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    (svgRef.current ?? event.currentTarget).setPointerCapture?.(event.pointerId);
     const center = { x: annotation.x + annotation.width / 2, y: annotation.y + annotation.height / 2 };
     dispatch({ type: "begin-gesture" });
     boxTransform.current = {
@@ -201,6 +198,7 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
   const transformMove = useCallback((event: ReactPointerEvent<SVGElement>) => {
     const transform = boxTransform.current;
     if (!transform || transform.kind !== "rotate" || transform.pointerId !== event.pointerId) return;
+    event.preventDefault();
     const point = eventPoint(svgRef, imageSize, event);
     if (!point) return;
     const rotation = Math.atan2(point.y - transform.center.y, point.x - transform.center.x) - (transform.startAngle ?? 0);
