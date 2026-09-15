@@ -717,7 +717,7 @@ export function CanonicalEditorWorkbench() {
   // while the window listener itself is registered once. Re-subscribing per render
   // meant add/removeEventListener ran at pointermove rate during a drag.
   const keydownRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
-  keydownRef.current = (event: KeyboardEvent) => {
+  const handleKeydown = (event: KeyboardEvent) => {
     if (isEditableShortcutTarget(event.target)) return;
     const command = commandFromKeyboard(event);
     if (!command) return;
@@ -744,6 +744,8 @@ export function CanonicalEditorWorkbench() {
       if (label) setActiveLabel(label.id);
     }
   };
+
+  useEffect(() => { keydownRef.current = handleKeydown; });
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => keydownRef.current(event);
