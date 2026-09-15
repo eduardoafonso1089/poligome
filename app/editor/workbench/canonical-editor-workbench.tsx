@@ -75,7 +75,7 @@ export function CanonicalEditorWorkbench() {
   const [projectName, setProjectName] = useState(() => getCopy(storedLanguage()).newProject);
   const [language, setLanguage] = useState<Language>("pt");
   const [saveMode, setSaveMode] = useState<ProjectSaveMode>("complete");
-  const [strokePx, setStrokePx] = useState(3);
+  const [strokePx, setStrokePx] = useState(1);
   const [reviewMode, setReviewMode] = useState<"quality" | "review">("quality");
   const [hiddenAnnotationIds, setHiddenAnnotationIds] = useState<Set<string>>(() => new Set());
   const [hiddenLabelIds, setHiddenLabelIds] = useState<Set<string>>(() => new Set());
@@ -422,8 +422,6 @@ export function CanonicalEditorWorkbench() {
 
   function applyCocoImport(result: { labels: Label[]; annotations: EditorAnnotation[]; append?: boolean; message: string }) {
     if (result.append) {
-      // Import batches are background work: keep pointer/keyboard edits ahead of React's
-      // reconciliation for the next batch.
       startTransition(() => {
         setLabels((currentLabels) => labelsMatch(currentLabels, result.labels) ? currentLabels : result.labels);
         if (!result.labels.some((label) => label.id === activeLabel)) setActiveLabel(result.labels[0]?.id ?? EMPTY_LABELS[0].id);
@@ -631,15 +629,10 @@ export function CanonicalEditorWorkbench() {
 
   function simplifySelected() {
     if (!selectedPolygons.length) return;
-    // Use every polygon's source dimensions so batch simplification matches the
-    // result of simplifying that same polygon while its image is active.
     const simplified = selectedPolygons
       .map((polygon) => {
         const source = assetById.get(polygon.asset);
-        const polygonImage = {
-          width: Number(source?.width) || imageSize.width,
-          height: Number(source?.height) || imageSize.height,
-        };
+        const polygonImage = { width: Number(source?.width) || imageSize.width, height: Number(source?.height) || imageSize.height };
         const tolerance = screenPixelsToImageUnits(4, polygonImage, viewport.layout.width);
         return simplifyPolygonAnnotation(polygon, tolerance);
       })
@@ -668,7 +661,6 @@ export function CanonicalEditorWorkbench() {
 
   function duplicateSelected() {
     if (!selectedPolygons.length) return;
-    // Duplicate every selected polygon in one undo step and select the copies.
     const duplicates = selectedPolygons.map(duplicatePolygon);
     editor.dispatch({ type: "replace-annotations-batch", removeIds: [], annotations: duplicates, selectIds: duplicates.map((duplicate) => duplicate.id) });
     setMessage(copy.toastDuplicated);
