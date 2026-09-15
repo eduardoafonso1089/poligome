@@ -7,18 +7,56 @@ export const MIN_VERTEX_DISTANCE = 10;
 export type Bounds = { x: number; y: number; width: number; height: number };
 export type BoxResizeCorner = "nw" | "ne" | "se" | "sw";
 
-export function verticesBounds(vertices: Vertex[]): Bounds {
-  if (!vertices.length) return { x: 0, y: 0, width: 0, height: 0 };
-  const xs = vertices.map((vertex) => vertex.x);
-  const ys = vertices.map((vertex) => vertex.y);
-  const x = Math.min(...xs);
-  const y = Math.min(...ys);
-  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+function rotateAround(point: { x: number; y: number }, center: { x: number; y: number }, angle: number) {
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  const dx = point.x - center.x;
+  const dy = point.y - center.y;
+  return {
+    x: center.x + dx * cosine - dy * sine,
+    y: center.y + dx * sine + dy * cosine,
+  };
 }
 
+function pointsBounds(points: ReadonlyArray<{ x: number; y: number }>): Bounds {
+  if (!points.length) return { x: 0, y: 0, width: 0, height: 0 };
+  let minX = points[0].x, maxX = points[0].x, minY = points[0].y, maxY = points[0].y;
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.y > maxY) maxY = point.y;
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/** The four drawn corners of a box, already rotated around its own centre. */
+export function boxCornerPoints(annotation: BoxAnnotation) {
+  const rotation = annotation.rotation ?? 0;
+  const center = { x: annotation.x + annotation.width / 2, y: annotation.y + annotation.height / 2 };
+  return [
+    { x: annotation.x, y: annotation.y },
+    { x: annotation.x + annotation.width, y: annotation.y },
+    { x: annotation.x + annotation.width, y: annotation.y + annotation.height },
+    { x: annotation.x, y: annotation.y + annotation.height },
+  ].map((corner) => rotateAround(corner, center, rotation));
+}
+
+export function verticesBounds(vertices: Vertex[]): Bounds {
+  return pointsBounds(vertices);
+}
+
+/**
+ * Extent of the shape as it is actually drawn. A rotated box reaches past the
+ * rectangle its x/y/width/height describe, so the corners are rotated first —
+ * otherwise marquee selection misses corners the user can see and click.
+ */
 export function annotationBounds(annotation: EditorAnnotation): Bounds {
   if (annotation.type === "polygon" || annotation.type === "line") return verticesBounds(annotation.vertices);
-  if (annotation.type === "box") return { x: annotation.x, y: annotation.y, width: annotation.width, height: annotation.height };
+  if (annotation.type === "box") {
+    if (!annotation.rotation) return { x: annotation.x, y: annotation.y, width: annotation.width, height: annotation.height };
+    return pointsBounds(boxCornerPoints(annotation));
+  }
   return { x: annotation.x - 4, y: annotation.y - 4, width: 8, height: 8 };
 }
 
@@ -32,17 +70,6 @@ export function translateAnnotation(annotation: EditorAnnotation, dx: number, dy
   }
   if (annotation.type === "line") return { ...annotation, vertices: moveVertices(annotation.vertices, dx, dy) };
   return { ...annotation, x: annotation.x + dx, y: annotation.y + dy };
-}
-
-function rotateAround(point: { x: number; y: number }, center: { x: number; y: number }, angle: number) {
-  const cosine = Math.cos(angle);
-  const sine = Math.sin(angle);
-  const dx = point.x - center.x;
-  const dy = point.y - center.y;
-  return {
-    x: center.x + dx * cosine - dy * sine,
-    y: center.y + dx * sine + dy * cosine,
-  };
 }
 
 /** Resize in source-image pixel space while preserving the opposite visual corner. */

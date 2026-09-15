@@ -1,7 +1,7 @@
 import type { Asset, Label } from "../../lib/types";
 import type { BoxAnnotation, EditorAnnotation } from "../models/annotation-model";
 import type { Vertex } from "../models/vertex-model";
-import { annotationBounds } from "../geometry/annotation-geometry";
+import { annotationBounds, boxCornerPoints } from "../geometry/annotation-geometry";
 
 export function verticesToFlat(vertices: Vertex[]) {
   return vertices.flatMap((vertex) => [vertex.x, vertex.y]);
@@ -19,35 +19,12 @@ export function polygonArea(vertices: Vertex[]) {
 }
 
 export function boxCorners(annotation: BoxAnnotation): Vertex[] {
-  const centerX = annotation.x + annotation.width / 2;
-  const centerY = annotation.y + annotation.height / 2;
-  const cosine = Math.cos(annotation.rotation ?? 0);
-  const sine = Math.sin(annotation.rotation ?? 0);
-  const corners = [
-    [annotation.x, annotation.y],
-    [annotation.x + annotation.width, annotation.y],
-    [annotation.x + annotation.width, annotation.y + annotation.height],
-    [annotation.x, annotation.y + annotation.height],
-  ];
-  return corners.map(([x, y], index) => {
-    const dx = x - centerX;
-    const dy = y - centerY;
-    return {
-      id: `${annotation.id}:corner:${index}`,
-      x: centerX + dx * cosine - dy * sine,
-      y: centerY + dx * sine + dy * cosine,
-    };
-  });
+  return boxCornerPoints(annotation).map((corner, index) => ({ id: `${annotation.id}:corner:${index}`, ...corner }));
 }
 
+/** Kept as the export-side name; annotationBounds already accounts for rotation. */
 export function exportBounds(annotation: EditorAnnotation) {
-  if (annotation.type !== "box" || Math.abs(annotation.rotation ?? 0) < 0.0001) return annotationBounds(annotation);
-  const corners = boxCorners(annotation);
-  const xs = corners.map((vertex) => vertex.x);
-  const ys = corners.map((vertex) => vertex.y);
-  const x = Math.min(...xs);
-  const y = Math.min(...ys);
-  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+  return annotationBounds(annotation);
 }
 
 /**
