@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { launchAuditBrowser } from "./audit-browser.mjs";
 import fs from "node:fs/promises";
 
 const BASE = process.env.AUDIT_BASE_URL ?? "http://127.0.0.1:4174";
@@ -196,7 +196,7 @@ async function mobile(browser) {
   await page.screenshot({path:"interaction-audit/mobile.png"}); result("mobile","No page errors",pageErrors.length===0,pageErrors.join(" | ")); await context.close();
 }
 
-const browser=await chromium.launch({headless:true});
+const browser = await launchAuditBrowser();
 try { await desktop(browser); await mobile(browser); } finally { await browser.close(); }
 await fs.writeFile("interaction-audit/report.json",JSON.stringify(report,null,2));
 console.log(`\n${report.filter(x=>x.ok).length}/${report.length} checks passed`);

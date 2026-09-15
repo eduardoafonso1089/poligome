@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { launchAuditBrowser } from "./audit-browser.mjs";
 import fs from "node:fs/promises";
 
 const BASE = process.env.AUDIT_BASE_URL ?? "http://127.0.0.1:4174";
@@ -88,7 +88,7 @@ async function drawPolygon(page, points) {
   return created;
 }
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchAuditBrowser();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const page = await context.newPage();
 const pageErrors = [];

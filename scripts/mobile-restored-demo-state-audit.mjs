@@ -1,11 +1,11 @@
-import { chromium } from "playwright";
+import { launchAuditBrowser } from "./audit-browser.mjs";
 import fs from "node:fs/promises";
 import { openDemoDataset } from "./demo-audit-helpers.mjs";
 
 const BASE = process.env.AUDIT_BASE_URL ?? "http://127.0.0.1:4174";
 await fs.mkdir("interaction-audit", { recursive: true });
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchAuditBrowser();
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 const page = await context.newPage();
 try {

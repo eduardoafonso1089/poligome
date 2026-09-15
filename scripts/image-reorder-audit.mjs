@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { launchAuditBrowser } from "./audit-browser.mjs";
 import fs from "node:fs/promises";
 import { openDemoDataset } from "./demo-audit-helpers.mjs";
 
@@ -22,7 +22,7 @@ async function imageNames(page) {
   return page.locator('.asset-list > .asset-row .asset-main').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('title') ?? ''));
 }
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchAuditBrowser();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const page = await context.newPage();
 const pageErrors = [];

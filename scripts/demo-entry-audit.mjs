@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { launchAuditBrowser } from "./audit-browser.mjs";
 import fs from "node:fs/promises";
 import { startGuidedDemo } from "./demo-audit-helpers.mjs";
 
@@ -188,7 +188,7 @@ async function run(browser, scope, contextOptions) {
   }
 }
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchAuditBrowser();
 try {
   await run(browser, "desktop", { viewport: { width: 1440, height: 900 } });
   await run(browser, "mobile", { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
