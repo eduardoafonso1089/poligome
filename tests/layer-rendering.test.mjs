@@ -182,6 +182,22 @@ test("a rotated box is drawn rotated around its own centre", () => {
   assert.equal(attributeValues(markup, "y")[0], "50");
 });
 
+test("box touch resize targets stay free of custom cursors", () => {
+  const markup = render(BoxLayer, {
+    ...layerProps(),
+    ...layerHandlers,
+    annotation: box({ rotation: Math.PI / 5 }),
+    selected: true,
+    active: true,
+    selecting: true,
+    touchMode: true,
+  });
+  const touchTargets = [...markup.matchAll(/<ellipse class="touch-handle-hit box-touch-handle-hit"[^>]*>/g)].map((match) => match[0]);
+  assert.equal(touchTargets.length, 5, "rotation plus four resize targets should be available on touch");
+  assert.ok(touchTargets.every((target) => !target.includes("cursor:")), "touch hit targets must not receive mouse cursor decorations");
+  assert.doesNotMatch(markup, /cursor:/, "touch mode must not attach mouse cursor decorations to box handles");
+});
+
 test("layers render no interactive text of their own", () => {
   for (const [Component, annotation] of [[PolygonLayer, polygon()], [PolylineLayer, line()]]) {
     const markup = render(Component, { ...layerProps(), ...layerHandlers, annotation });

@@ -73,6 +73,7 @@ export function BoxLayer({
             {touchMode && <ellipse className="touch-handle-hit box-touch-handle-hit" cx={centerX} cy={rotationHandleY} rx={rotationTouchRadius} ry={rotationTouchRadius * markerAspect} fill="transparent" strokeWidth={0} onPointerDown={(event) => onRotateStart(event, annotation)} onPointerMove={onTransformMove} onPointerUp={onTransformEnd} onPointerCancel={onPointerCancel} />}
             <ellipse className="box-rotation-handle" cx={centerX} cy={rotationHandleY} rx={markerRadius * 1.25} ry={markerRadius * 1.25 * markerAspect} strokeWidth={markerRadius * .42} onPointerDown={(event) => onRotateStart(event, annotation)} onPointerMove={onTransformMove} onPointerUp={onTransformEnd} onPointerCancel={onPointerCancel} />
           </g>
+<<<<<<< HEAD
           {corners.map(([corner, handleX, handleY], index) => {
             const cursorStyle = touchMode ? undefined : { cursor: cornerCursors[index] };
             return <g key={corner}>
@@ -80,6 +81,12 @@ export function BoxLayer({
               <ellipse className={`box-resize-handle ${corner}`} style={cursorStyle} cx={handleX} cy={handleY} rx={markerRadius} ry={markerRadius * markerAspect} strokeWidth={markerRadius * .42} onPointerDown={(event) => onResizeStart(event, annotation, corner)} onPointerMove={onResizeMove} onPointerUp={onResizeEnd} onPointerCancel={onPointerCancel} />
             </g>;
           })}
+=======
+          {corners.map(([corner, handleX, handleY], index) => <g key={corner}>
+            {touchMode && <ellipse className="touch-handle-hit box-touch-handle-hit" cx={handleX} cy={handleY} rx={touchRadius} ry={touchRadius * markerAspect} fill="transparent" strokeWidth={0} onPointerDown={(event) => onResizeStart(event, annotation, corner)} onPointerMove={onResizeMove} onPointerUp={onResizeEnd} onPointerCancel={onPointerCancel} />}
+            <ellipse className={`box-resize-handle ${corner}`} style={touchMode ? undefined : { cursor: cornerCursors[index] }} cx={handleX} cy={handleY} rx={markerRadius} ry={markerRadius * markerAspect} strokeWidth={markerRadius * .42} onPointerDown={(event) => onResizeStart(event, annotation, corner)} onPointerMove={onResizeMove} onPointerUp={onResizeEnd} onPointerCancel={onPointerCancel} />
+          </g>)}
+>>>>>>> 407d337 (fix(editor): preserve box resize on touch)
         </>}
       </g>
     </g>
