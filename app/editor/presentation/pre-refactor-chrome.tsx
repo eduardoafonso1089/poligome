@@ -210,7 +210,7 @@ export function PreRefactorTopbar(props: PreRefactorChromeProps) {
       <header><div><span><Save size={18} /></span><div><h2 id="project-save-title">{copy.saveProjectTitle}</h2><p>{copy.saveProjectDescription}</p></div></div><button onClick={() => setProjectSaveOpen(false)} aria-label={copy.close}><X size={19} /></button></header>
       <div className="project-save-options" role="radiogroup" aria-label={copy.saveProjectTitle}>
         <button className={projectSaveMode === "annotations" ? "active" : ""} role="radio" aria-checked={projectSaveMode === "annotations"} onClick={() => setProjectSaveMode("annotations")}><span><FileText size={20} /></span><div><b>{copy.annotationsOnly}</b><p>{copy.annotationsOnlyHint}</p><small>{props.assetsCount} {copy.imageReferences}</small></div><Check size={16} /></button>
-        <button className={projectSaveMode === "complete" ? "active" : ""} role="radio" aria-checked={projectSaveMode === "complete"} onClick={() => setProjectSaveMode("complete")}><span><Images size={20} /></span><div><b>{copy.imagesAndAnnotations}</b><p>{copy.imagesAndAnnotationsHint}</p><small>{copy.sizeCalculatedOnSave}</small></div><Check size={16} /></button>
+        <button className={projectSaveMode === "complete" ? "active" : ""} role="radio" aria-checked={projectSaveMode === "complete"} onClick={() => setProjectSaveMode("complete")}><span><Images size={20} /></span><div><b>{copy.imagesAndAnnotations}</b><p>{copy.imagesAndAnnotationsHint}</p><small>{props.assetsCount} {copy.imageReferences}</small></div><Check size={16} /></button>
       </div>
       <div className="project-save-privacy"><ShieldCheck size={16} /><div><b>{copy.localOnly}</b><p>{copy.projectSavePrivacy}</p></div></div>
       <footer><button onClick={() => setProjectSaveOpen(false)}>{copy.cancel}</button><button className="connect" disabled={props.loading} onClick={() => { props.onSaveProject(projectSaveMode); setProjectSaveOpen(false); }}><Download size={15} />{copy.generateProjectFile}</button></footer>
@@ -294,16 +294,11 @@ export function PreRefactorToolbar(props: PreRefactorChromeProps) {
 
     {canEdit && <div className="drawing-actions">
       <span className="touch-instructions">{props.tool === "select" ? copy.touchEdit : props.tool === "freehand" || props.vectorTool === "reshape" ? copy.touchTrace : copy.touchDraw}</span>
-      {props.touchMode && <button aria-pressed={props.tool === "pan"} onClick={() => props.onTool(props.tool === "pan" ? "select" : "pan")}><Hand size={16} />{copy.pan}</button>}
       {finishableTool && <>
         <button disabled={!props.canFinishDraft} onClick={props.onFinishDrawing}><Check size={16} />{copy.finishDrawing}</button>
         <button disabled={!props.canRemoveDraftPoint} onClick={props.onRemoveLastPoint}><Undo2 size={16} />{copy.removeLastPointTitle}</button>
       </>}
       {cancellableTool && <button disabled={!props.hasDraft} onClick={props.onCancelDrawing}><X size={16} />{copy.cancel}</button>}
-      {props.tool === "select" && !props.vectorTool && <>
-        {props.touchMode && <button aria-pressed={props.addToSelection} onClick={props.onToggleMultiSelect}><Combine size={16} />{copy.multipleSelection}</button>}
-        {props.touchMode && <button disabled={!props.hasSelection} onClick={props.onDelete}><Trash2 size={16} />{copy.deleteSelectedAnnotations}</button>}
-      </>}
     </div>}
 
     {!props.hasAssets && <div className="pre-refactor-empty-overlay">
