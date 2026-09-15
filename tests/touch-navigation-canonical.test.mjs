@@ -47,8 +47,14 @@ test('pinch-pan combines scale and moving midpoint without annotation rescaling'
 });
 
 test('pinch publishes scroll synchronously so the next touch frame matches controller state',()=>{
-  const pinchBody=viewportHookSource.match(/const pinchPan = useCallback\([\s\S]*?\n  }, \[publish, syncBeforeGesture\]\);/)?.[0] ?? '';
+  const pinchBody=viewportHookSource.match(/const pinchPan = useCallback\([\s\S]*?\n  }, \[publish, syncBeforeGesture[^\]]*\]\);/)?.[0] ?? '';
   assert.match(pinchBody,/applyScrollImmediately\(next\)/);
+});
+
+test('select mode reserves empty-canvas one-finger drag for thresholded pan',()=>{
+  assert.match(touchSource,/tool === "select" && event\.target === event\.currentTarget/);
+  assert.match(touchSource,/PAN_THRESHOLD_PX/);
+  assert.match(touchSource,/cancelEditing\(\)/);
 });
 
 test('second touch cancels editing and drawing before pinch owns the gesture',()=>{
