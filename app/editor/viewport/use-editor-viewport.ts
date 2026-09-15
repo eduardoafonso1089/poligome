@@ -72,6 +72,13 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
     });
   }, []);
 
+  const applyScrollImmediately = useCallback((next: ViewportState) => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    scroller.scrollLeft = next.scrollLeft;
+    scroller.scrollTop = next.scrollTop;
+  }, []);
+
   const publish = useCallback((next: ViewportState) => {
     setState(next);
     applyScroll(next);
@@ -141,13 +148,19 @@ export function useEditorViewport({ image, initialZoom = 92 }: UseEditorViewport
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    publish(controllerRef.current.pinchPan(
+    const next = controllerRef.current.pinchPan(
       zoom,
       { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       previousCenter,
       currentCenter,
-    ));
-  }, [publish, syncBeforeGesture]);
+    );
+    // Pointer moves can arrive faster than requestAnimationFrame. Apply the
+    // scroll now so the next canvas rect describes the same viewport state that
+    // the controller just published; otherwise each pinch step anchors against
+    // stale DOM geometry and drifts toward the top-left corner.
+    applyScrollImmediately(next);
+    publish(next);
+  }, [applyScrollImmediately, publish, syncBeforeGesture]);
 
   const onWheel = useCallback((event: WheelEvent) => {
     event.preventDefault();
