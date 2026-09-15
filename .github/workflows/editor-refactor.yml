@@ -70,7 +70,7 @@ jobs:
         run: npm run build:pages
 
       - name: Tests against the built artifact
-        run: node --import tsx --test tests/*.test.mjs
+        run: npm run test:unit
 
       - name: Check editor i18n parity debt
         run: node scripts/check-editor-i18n-parity.mjs
