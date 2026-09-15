@@ -47,8 +47,8 @@ test('pinch-pan combines scale and moving midpoint without annotation rescaling'
 });
 
 test('pinch publishes scroll synchronously so the next touch frame matches controller state',()=>{
-  const pinchBody=viewportHookSource.match(/const pinchPan = useCallback\([\s\S]*?\n  }, \[publish, syncBeforeGesture[^\]]*\]\);/)?.[0] ?? '';
-  assert.match(pinchBody,/applyScrollImmediately\(next\)/);
+  assert.match(viewportHookSource,/const applyScrollImmediately = useCallback/);
+  assert.match(viewportHookSource,/applyScrollImmediately\(next\);\s*publish\(next\);/);
 });
 
 test('select mode reserves empty-canvas one-finger drag for thresholded pan',()=>{
@@ -74,6 +74,7 @@ test('discrete touch drawing commits on pointerup, not pointerdown',()=>{
 test('canonical workbench exposes localized hand tool through presentation and capture-phase touch navigation',()=>{
   assert.match(chromeSource,/title=\{copy\.pan\}[^>]*onClick=\{\(\) => props\.onTool\("pan"\)\}/);
   assert.match(workbenchSource,/onPointerDownCapture=\{touch\.onPointerDownCapture\}/);
-  assert.match(workbenchSource,/onPointerMoveCapture=\{touch\.onPointerMoveCapture\}/);
+  assert.match(workbenchSource,/onPointerMoveCapture=\{routePointerMoveCapture\}/);
+  assert.match(workbenchSource,/routePointerMoveCapture[\s\S]*touch\.onPointerMoveCapture\(event\)/);
   assert.match(workbenchSource,/touchMode=\{touch\.touchMode\}/);
 });
