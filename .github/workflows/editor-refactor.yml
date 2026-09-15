@@ -33,6 +33,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # The architecture rules are errors; the react-hooks findings inherited from
+      # the pre-refactor editor are warnings under a ratchet. 60 is the count on
+      # main today, so a new warning fails the build and the number only goes down.
       - name: Lint, including the architecture boundaries
         run: npx eslint . --ignore-pattern dist --ignore-pattern .next --max-warnings 60
 

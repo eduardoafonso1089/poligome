@@ -10,6 +10,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { render, handlers, text, countClass, buttons, attribute } from "./helpers/render.mjs";
+import { region, sourceOf } from "./helpers/source.mjs";
 import { assets, labels, polygon, box } from "./helpers/editor-fixtures.mjs";
 import { EditorManagementPanels } from "../app/editor/panels/editor-management-panels.tsx";
 import { getCopy } from "../app/lib/i18n.ts";
@@ -78,26 +79,24 @@ test("the clear-annotations control is disabled while there is nothing to clear"
   if (control) assert.match(control, /\sdisabled\b/);
 });
 
-test("a delete never reaches the parent without a confirmation", async () => {
+test("a delete never reaches the parent without a confirmation", () => {
   // The panels call window.confirm before every destructive callback. Rendering
   // cannot click, so the contract is asserted where it is implemented: the
   // callback fires only on a truthy confirm.
-  const source = await import("node:fs/promises")
-    .then((fs) => fs.readFile(new URL("../app/editor/panels/editor-management-panels.tsx", import.meta.url), "utf8"));
+  const PANELS = "app/editor/panels/editor-management-panels.tsx";
 
   for (const [helper, callback] of [
     ["confirmAnnotationDelete", "onDeleteAnnotations"],
     ["confirmAssetDelete", "onDeleteAsset"],
     ["confirmLabelDelete", "onDeleteLabel"],
   ]) {
-    const start = source.indexOf(`function ${helper}`);
-    assert.ok(start > 0, `${helper} is missing`);
-    const body = source.slice(start, source.indexOf("\n  }", start));
+    assert.ok(sourceOf(PANELS).includes(`function ${helper}`), `${helper} is missing`);
+    const body = region(PANELS, `function ${helper}`, "function ");
     const confirmAt = body.indexOf("window.confirm");
     const callAt = body.indexOf(`props.${callback}`);
     assert.ok(confirmAt > 0, `${helper} must ask for confirmation`);
     assert.ok(callAt > confirmAt, `${helper} must confirm before calling ${callback}`);
-    assert.match(body, /if \(!window\.confirm\([^)]*\)\) return/s, `${helper} must bail out when the user declines`);
+    assert.match(body, /if \(!window\.confirm\([^)]*\)\) return/, `${helper} must bail out when the user declines`);
   }
 });
 

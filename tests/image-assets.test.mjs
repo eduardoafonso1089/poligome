@@ -15,6 +15,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { installFileReader, tiledTiffFile } from "./helpers/raster-fixtures.mjs";
+import { sourceOf } from "./helpers/source.mjs";
 import { loadLocalImageAssets, relinkMissingAssets } from "../app/editor/session/image-assets.ts";
 
 function installBrowserStubs() {
@@ -325,14 +326,13 @@ test("relinking one image of a project leaves the others untouched", async () =>
   });
 });
 
-test("the workbench only offers a relink while an image is actually missing", async () => {
+test("the workbench only offers a relink while an image is actually missing", () => {
   // The guard lives in an event handler of a client component that needs a real
   // browser to mount, so it is asserted where it is written. Everything the
   // handler then does is covered by the tests above.
-  const source = await import("node:fs/promises")
-    .then((fs) => fs.readFile(new URL("../app/editor/workbench/canonical-editor-workbench.tsx", import.meta.url), "utf8"));
+  const workbench = sourceOf("app/editor/workbench/canonical-editor-workbench.tsx");
 
-  assert.match(source, /relinkMissingAssets/, "the workbench must use the shared relink");
-  assert.match(source, /if \(!files\.length \|\| !missingImageCount\) return;/, "relinking must be refused when nothing is missing");
-  assert.match(source, /asset\?\.missing && <button[\s\S]{0,60}relinkInputRef/, "the button must appear only for a missing image");
+  assert.match(workbench, /relinkMissingAssets/, "the workbench must use the shared relink");
+  assert.match(workbench, /if \(!files\.length \|\| !missingImageCount\) return;/, "relinking must be refused when nothing is missing");
+  assert.match(workbench, /asset\?\.missing && <button[\s\S]{0,60}relinkInputRef/, "the button must appear only for a missing image");
 });

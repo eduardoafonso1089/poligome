@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { cssRule, region, sourceOf } from './helpers/source.mjs';
 import { anchoredScrollOffset, canvasLayout } from '../app/lib/editor-viewport.ts';
 
 test('mobile canvas at 92% has an explicit size and centered origin', () => {
@@ -47,35 +47,39 @@ test('large source images remain fit-to-viewport until the user deep-zooms', () 
 });
 
 test('the editor scroll container keeps a stable scrollbar geometry while zooming', () => {
-  const css = readFileSync(new URL('../app/editor/presentation/pre-refactor-canonical.module.css', import.meta.url), 'utf8');
-  const scrollRule = css.match(/\.stageScroll\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
-  assert.match(scrollRule, /overflow: auto !important/);
-  assert.match(scrollRule, /scrollbar-gutter: stable/);
-  assert.doesNotMatch(scrollRule, /both-edges/);
-  assert.match(css, /\.emptyStage\s*\{[\s\S]*?overflow: hidden !important/);
+  const scroll = cssRule('app/editor/presentation/pre-refactor-canonical.module.css', '.stageScroll');
+  assert.match(scroll, /overflow: auto !important/);
+  assert.match(scroll, /scrollbar-gutter: stable/);
+  assert.doesNotMatch(scroll, /both-edges/);
+  assert.match(cssRule('app/editor/presentation/pre-refactor-canonical.module.css', '.emptyStage'), /overflow: hidden !important/);
 });
 
 test('wheel zoom reserves Ctrl and Shift for vertical and horizontal navigation', () => {
-  const hook = readFileSync(new URL('../app/editor/viewport/use-editor-viewport.ts', import.meta.url), 'utf8');
-  const onWheel = hook.match(/const onWheel[\s\S]*?\}, \[panBy, zoomTo\]\);/)?.[0] ?? '';
+  // A wheel listener is installed by an effect, so only a real browser runs it;
+  // scripts/run-editor-interaction-audit.mjs drives it there. What is checked
+  // here is the routing decision, which is pure reading of the event.
+  const hook = 'app/editor/viewport/use-editor-viewport.ts';
+  const onWheel = region(hook, 'const onWheel', '}, [panBy, zoomTo]);');
   assert.match(onWheel, /event\.preventDefault\(\);/);
   assert.match(onWheel, /if \(event\.shiftKey\) \{/);
   assert.match(onWheel, /panBy\(-\(event\.deltaX \|\| event\.deltaY\), 0\)/);
   assert.match(onWheel, /if \(event\.ctrlKey \|\| event\.metaKey\) \{/);
   assert.match(onWheel, /panBy\(0, -event\.deltaY\)/);
   assert.match(onWheel, /controllerRef\.current\.snapshot\(\)\.zoom \* factor/);
-  assert.match(hook, /addEventListener\("wheel", onWheel, \{ passive: false \}\)/);
+  // passive: false is the difference between zooming and scrolling the page.
+  assert.match(sourceOf(hook), /addEventListener\("wheel", onWheel, \{ passive: false \}\)/);
 });
 
 test('wheel zoom scales with the gesture delta and bounds momentum spikes', () => {
-  const hook = readFileSync(new URL('../app/editor/viewport/use-editor-viewport.ts', import.meta.url), 'utf8');
+  const hook = sourceOf('app/editor/viewport/use-editor-viewport.ts');
   assert.match(hook, /Math\.max\(-120, Math\.min\(120, event\.deltaY\)\)/);
   assert.match(hook, /Math\.exp\(-clampedDelta \* 0\.0018\)/);
+  // The old fixed step made a trackpad flick jump several zoom levels at once.
   assert.doesNotMatch(hook, /event\.deltaY < 0 \? 1\.2 : 1 \/ 1\.2/);
 });
 
 test('progressive COCO imports can continue after the tab loses animation frames', () => {
-  const control = readFileSync(new URL('../app/editor/import/coco-import-control.tsx', import.meta.url), 'utf8');
+  const control = sourceOf('app/editor/import/coco-import-control.tsx');
   assert.match(control, /document\.addEventListener\("visibilitychange", resumeWhenVisible\)/);
   assert.match(control, /document\.removeEventListener\("visibilitychange", resumeWhenVisible\)/);
   assert.match(control, /if \(document\.visibilityState === "visible"\) queuePaint\(\)/);
@@ -83,8 +87,9 @@ test('progressive COCO imports can continue after the tab loses animation frames
 });
 
 test('COCO geometry conversion runs in a dedicated worker when available', () => {
-  const control = readFileSync(new URL('../app/editor/import/coco-import-control.tsx', import.meta.url), 'utf8');
-  const worker = readFileSync(new URL('../app/editor/import/coco-import.worker.ts', import.meta.url), 'utf8');
-  assert.match(control, /new Worker\(new URL\("\.\/coco-import\.worker\.ts", import\.meta\.url\)/);
-  assert.match(worker, /importCocoDocument\(/);
+  assert.match(
+    sourceOf('app/editor/import/coco-import-control.tsx'),
+    /new Worker\(new URL\("\.\/coco-import\.worker\.ts", import\.meta\.url\)/,
+  );
+  assert.match(sourceOf('app/editor/import/coco-import.worker.ts'), /importCocoDocument\(/);
 });
