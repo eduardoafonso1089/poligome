@@ -270,6 +270,15 @@ BYOM_MAX_ANNOTATIONS = _bounded_env_int(
 )
 BYOM_MAX_RESPONSE_BYTES = 128 * 1024 * 1024
 
+# O contêiner do BYOM está sempre em 127.0.0.1, mas o urllib lê http_proxy do
+# ambiente e só isenta um host quando no_proxy o nomeia. Numa máquina com proxy
+# corporativo configurado e sem no_proxy, /ping e /invocations sairiam para o
+# proxy: o contêiner apareceria como parado e a imagem do usuário deixaria a
+# máquina — exatamente o contrário do que o Poligome promete. Um opener com
+# ProxyHandler vazio ignora essas variáveis, como o instalador já faz ao
+# consultar /health.
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 @dataclass(frozen=True)
 class ByomRegistration:
@@ -363,7 +372,7 @@ def byom_registrations() -> dict[str, ByomRegistration]:
 def _byom_container_ready(registration: ByomRegistration) -> tuple[bool, str | None]:
     request = urllib.request.Request(f"{registration.endpoint}/ping", method="GET")
     try:
-        with urllib.request.urlopen(request, timeout=BYOM_PING_TIMEOUT_SECONDS) as response:
+        with _LOCAL_OPENER.open(request, timeout=BYOM_PING_TIMEOUT_SECONDS) as response:
             if response.status != 200:
                 return False, f"o contêiner respondeu HTTP {response.status} em /ping"
     except urllib.error.HTTPError as error:
@@ -382,7 +391,7 @@ def _byom_metadata(registration: ByomRegistration) -> dict[str, Any] | None:
     """
     request = urllib.request.Request(f"{registration.endpoint}/metadata", method="GET")
     try:
-        with urllib.request.urlopen(request, timeout=BYOM_PING_TIMEOUT_SECONDS) as response:
+        with _LOCAL_OPENER.open(request, timeout=BYOM_PING_TIMEOUT_SECONDS) as response:
             if response.status != 200:
                 return None
             raw = response.read(1024 * 1024)
@@ -428,7 +437,7 @@ def _byom_invoke(registration: ByomRegistration, payload: dict[str, Any]) -> Any
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=BYOM_INVOCATION_TIMEOUT_SECONDS) as response:
+        with _LOCAL_OPENER.open(request, timeout=BYOM_INVOCATION_TIMEOUT_SECONDS) as response:
             raw = response.read(BYOM_MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", "replace")[:500]
