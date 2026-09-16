@@ -221,11 +221,12 @@ byte, a partir de uma receita de poucos kilobytes.
 
 ### 1. Escreva o servidor de inferência
 
-Baixe o exemplo, que já implementa o contrato inteiro:
+Comece pelo exemplo, que já implementa o contrato inteiro. Ele é versionado em
+`public/byom`, e o painel **Trazer meu modelo** oferece os dois arquivos em
+botões de download. Quem estiver no repositório já os tem:
 
 ```bash
-curl -O https://www.poligome.com/byom/serve.py
-curl -O https://www.poligome.com/byom/Dockerfile
+cp public/byom/serve.py public/byom/Dockerfile .
 ```
 
 O exemplo traz **dois métodos**, escolhidos pela variável `METHOD`, para mostrar

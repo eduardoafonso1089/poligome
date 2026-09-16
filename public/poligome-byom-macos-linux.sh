@@ -387,13 +387,23 @@ cmd_remove() {
   done
   validate_model_id "$model_id"
   local file
+  local purged=0
   file="$(require_registration "$model_id")"
   if ((purge)) && command -v docker >/dev/null 2>&1; then
-    docker rm -f "$(container_name "$model_id")" >/dev/null 2>&1 || true
+    docker rm -f "$(container_name "$model_id")" >/dev/null 2>&1 && purged=1
   fi
   rm -f "$file"
   printf 'Registro de %s removido.\n' "$model_id"
-  ((purge)) && printf 'O contêiner também foi apagado. A imagem continua no Docker.\n' || true
+  # Só afirma ter apagado o contêiner quando o docker rm de fato apagou um:
+  # sem Docker no PATH, ou sem contêiner com esse nome, não há o que apagar e
+  # dizer o contrário manda o usuário procurar um resto que não existe.
+  if ((purge)); then
+    if ((purged)); then
+      printf 'O contêiner também foi apagado. A imagem continua no Docker.\n'
+    else
+      printf 'Não havia contêiner desse modelo para apagar.\n'
+    fi
+  fi
 }
 
 main() {

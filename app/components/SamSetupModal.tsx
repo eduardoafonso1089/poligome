@@ -89,8 +89,8 @@ const BYOM_STEPS = [
   {
     title: "1. Escreva o servidor de inferência",
     body:
-      "O contêiner precisa responder GET /ping com 200 quando estiver pronto e receber POST /invocations na porta 8080. Baixe o exemplo abaixo e substitua a função predict() pelo seu modelo.",
-    command: "curl -O https://www.poligome.com/byom/serve.py",
+      "O contêiner precisa responder GET /ping com 200 quando estiver pronto e receber POST /invocations na porta 8080. Os botões de Arquivos do BYOM, mais abaixo, baixam o serve.py e o Dockerfile de exemplo, que já implementam o contrato inteiro: troque a função predict() pelo seu modelo e mantenha o resto.",
+    command: "docker --version   # confirme que o Docker responde",
   },
   {
     title: "2. Construa a imagem",
@@ -226,6 +226,34 @@ function ByomPanel({
         está pronta e recebe a inferência em <code>POST /invocations</code>. Os pesos ficam em{" "}
         <code>/opt/ml/model</code> e nunca passam pelo Poligome.
       </p>
+    </section>
+
+    <section className="byom-steps">
+      <h4>Antes de começar</h4>
+      <article>
+        <b>Docker instalado e no ar</b>
+        <p>
+          O Poligome não instala nem inicia o Docker por você, e nenhuma página web pode subir um contêiner. A CLI
+          abaixo confere isso antes de tentar qualquer coisa e diz o que falta.
+        </p>
+      </article>
+      <article>
+        <b>Conector do Poligome rodando</b>
+        <p>
+          O editor não fala direto com o contêiner: tudo passa pelo conector em <code>127.0.0.1:7860</code>. Com ele
+          parado, o BYOM nem aparece nesta lista. É o mesmo conector do SAM, instalado pelo painel dos modelos.
+        </p>
+      </article>
+      <article>
+        <b>No Windows, tudo isso vive dentro do WSL2</b>
+        <p>
+          Não há <code>.bat</code> para o BYOM porque não é preciso: o conector já roda no WSL2. A CLI é a mesma,
+          chamada de lá, e o registro fica no home da distribuição, não em <code>C:\Users</code>. O Docker precisa
+          responder de dentro dessa distribuição — pela integração WSL do Docker Desktop ou por um Docker instalado
+          nela.
+        </p>
+        <code>wsl bash poligome-byom-macos-linux.sh examples</code>
+      </article>
     </section>
 
     <section className="byom-contract">

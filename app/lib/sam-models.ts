@@ -378,7 +378,8 @@ const SAM2_PLATFORM_SUPPORT = {
   },
   macos: {
     level: "partial",
-    notes: "CPU é possível, mas o caminho CUDA e os benchmarks oficiais não se aplicam.",
+    notes:
+      "Roda em CPU e Metal, mas só em Apple Silicon com macOS 14+: o PyTorch 2.5.1+ não publica mais wheels para Mac Intel, e o instalador recusa antes de começar. O caminho CUDA e os benchmarks oficiais não se aplicam.",
   },
   browser: {
     level: "backend-required",
