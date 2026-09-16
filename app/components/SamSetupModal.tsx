@@ -3,9 +3,9 @@
 import { useState } from "react";
 import {
   AlertTriangle, Boxes, Check, Cpu, Download, ExternalLink, Gauge, HardDrive,
-  KeyRound, Laptop, Link2, Pencil, Plus, PowerOff, Server, ShieldCheck, Sparkles, Terminal, Trash2, X,
+  KeyRound, Laptop, Link2, Network, Pencil, Plus, PowerOff, Server, ShieldCheck, Sparkles, Terminal, Trash2, X,
 } from "lucide-react";
-import { getCopy } from "../lib/i18n";
+import { getCopy, type Language } from "../lib/i18n";
 import { LocalConnectionExplainer } from "./LocalConnectionExplainer";
 import { SAM_MODELS, getSamModel } from "../lib/sam-models";
 import { BYOM_MODEL_ID_PATTERN, describeByomModel } from "../lib/sam-models";
@@ -14,9 +14,13 @@ import type { ByomModel, SamModelDefinition } from "../lib/sam-models";
 type ConnectionState = "idle" | "checking" | "loading" | "ready" | "error" | "offline";
 
 type Props = {
+  /** O painel é escrito em português; o idioma vale para o que vem do i18n. */
+  language?: Language;
   selectedModelId: string;
   loadedModelId: string | null;
   connectionState: ConnectionState;
+  /** Se o SAM carregado está sendo usado para anotar, e não apenas carregado. */
+  samActive: boolean;
   runtimeLabel: string;
   endpoint: string;
   /** Modelos BYOM anunciados pelo conector; vazio quando não há contêiner registrado. */
@@ -119,6 +123,66 @@ const BYOM_STEPS = [
     command: "bash poligome-byom-macos-linux.sh start --model-id byom-meu-modelo",
   },
 ] as const;
+
+/**
+ * A aba "Como funciona" existe porque a pergunta que ela responde — para onde vai
+ * a minha imagem — vem antes de escolher modelo, e estava repetida em duas telas.
+ * Num lugar só, e primeiro na lista, ela é achável sem atrapalhar quem já sabe.
+ */
+function HowItWorks({ language }: { language: Language }) {
+  return <div className="byom-panel">
+    <section className="sam-model-hero">
+      <div><span className="family byom">Local</span></div>
+      <h3>Como funciona</h3>
+      <p>
+        O Poligome não manda imagem para servidor nenhum. Quem carrega o modelo e roda a inferência é um programa que
+        fica na sua máquina, e a página só conversa com ele. O desenho abaixo é o caminho inteiro.
+      </p>
+    </section>
+
+    <LocalConnectionExplainer copy={getCopy(language)} />
+
+    <section className="byom-steps">
+      <h4>O que o Poligome faz e o que fica com você</h4>
+      <article>
+        <b>A página encontra, nunca liga</b>
+        <p>
+          Ao abrir o editor e a cada volta de foco, a página procura o conector em 127.0.0.1:7860 e adota o que já
+          estiver carregado. Nenhuma página web pode criar processo nem subir contêiner — é regra do navegador. Por
+          isso o terminal do instalador precisa ficar aberto, ou, no Linux, o serviço de usuário faz esse papel.
+        </p>
+      </article>
+      <article>
+        <b>Trocar de modelo não reinstala nada</b>
+        <p>
+          Escolher outro SAM na lista ao lado e confirmar recarrega o conector no ambiente da família pedida. O que
+          não estiver instalado é recusado com o motivo, em vez de falhar no meio. A escolha fica gravada, então o
+          próximo arranque sobe o mesmo modelo.
+        </p>
+      </article>
+      <article>
+        <b>SAM e BYOM convivem</b>
+        <p>
+          Os dois podem ficar ativos ao mesmo tempo, e o botão do topo mostra os dois. São caminhos independentes: o
+          SAM segmenta o que você clica, o BYOM anota a imagem inteira, e as máscaras de um não alteram nem
+          substituem as do outro. Desselecionar todos apenas deixa de usá-los para anotar — nada é desinstalado e o
+          conector segue conectado.
+        </p>
+      </article>
+    </section>
+
+    <section className="sam-privacy">
+      <ShieldCheck size={16} />
+      <div>
+        <b>Inferência local</b>
+        <p>
+          Imagens e prompts ficam no computador. O contêiner do BYOM só é aceito em 127.0.0.1 ou localhost: um
+          endereço remoto tiraria as imagens da sua máquina, que é justamente o que o Poligome evita.
+        </p>
+      </div>
+    </section>
+  </div>;
+}
 
 function ByomEntry({
   model,
@@ -229,10 +293,6 @@ function ByomPanel({
         <code>/opt/ml/model</code> e nunca passam pelo Poligome.
       </p>
     </section>
-
-    {/* Este painel é escrito em português direto, sem i18n; getCopy("pt") mantém o desenho
-        coerente com o resto até a tela receber um idioma de fora. */}
-    <LocalConnectionExplainer copy={getCopy("pt")} />
 
     <section className="byom-steps">
       <h4>Antes de começar</h4>
@@ -392,9 +452,11 @@ function ByomPanel({
 }
 
 export default function SamSetupModal({
+  language = "pt",
   selectedModelId,
   loadedModelId,
   connectionState,
+  samActive,
   runtimeLabel,
   endpoint,
   byomModels,
@@ -413,11 +475,11 @@ export default function SamSetupModal({
 }: Props) {
   // O painel BYOM ocupa a área de detalhe no lugar da ficha do modelo, porque o
   // que interessa ali é a documentação do contrato e não um card comparável.
-  const [byomView, setByomView] = useState<"docs" | "model" | null>(null);
+  const [byomView, setByomView] = useState<"docs" | "model" | "how" | null>(null);
   const selectedByomModel = byomModels.find((candidate) => candidate.model_id === byomModelId) ?? null;
   // Só o tutorial não tem o que confirmar: é texto. Um modelo, BYOM ou SAM,
   // sempre oferece o botão de usar no canto do rodapé.
-  const showFooterAction = byomView !== "docs";
+  const showFooterAction = byomView !== "docs" && byomView !== "how";
   const model = getSamModel(selectedModelId) ?? SAM_MODELS[0];
   const benchmark = benchmarkSummary(model);
   const modelMatches = connectionState === "ready" && loadedModelId === model.id;
@@ -428,6 +490,7 @@ export default function SamSetupModal({
     .map(([capability]) => capabilityLabels[capability as keyof typeof capabilityLabels]);
   const unixCommand = `bash poligome-sam-macos-linux.sh ${model.id}`;
   const windowsCommand = `poligome-sam-windows.bat ${model.id}`;
+  const nativeWindowsCommand = `poligome-sam-windows-native.ps1 ${model.id}`;
   const windowsPlatformLabel = "Windows · WSL2";
   const unixPlatformLabel = model.family === "sam3"
     ? "Linux · NVIDIA CUDA"
@@ -442,6 +505,18 @@ export default function SamSetupModal({
 
       <div className="sam-catalog-body">
         <aside className="sam-model-list" aria-label="Modelos disponíveis">
+          <section>
+            <h3>Comece por aqui</h3>
+            <button
+              className={byomView === "how" ? "active" : ""}
+              aria-pressed={byomView === "how"}
+              onClick={() => setByomView("how")}
+            >
+              <span><b>Como funciona</b><small>O conector local, o SAM e o BYOM num desenho</small></span>
+              <em><Network size={13} /></em>
+            </button>
+          </section>
+
           {(["sam2", "medsam2", "sam3"] as const).map((family) => <section key={family}>
             <h3>{family === "sam2" ? "SAM 2.1 · recomendado" : family === "medsam2" ? "Domínio · imagem médica" : "SAM 3 · conceitos"}</h3>
             {SAM_MODELS.filter((candidate) => candidate.family === family).map((candidate) => <button
@@ -451,7 +526,11 @@ export default function SamSetupModal({
               onClick={() => { setByomView(null); onSelectModel(candidate.id); }}
             >
               <span><b>{candidate.name}</b><small>{candidate.parameters.label} · {candidate.checkpoint.approximateSizeLabel}</small></span>
-              <em>{candidate.recommended ? "Recomendado" : candidate.experimental ? "Experimental" : candidate.version}</em>
+              {/* "Em uso" é o que está carregado agora, e não o que você está olhando:
+                  sem essa distinção não dá para ver que SAM e BYOM estão ativos juntos. */}
+              {candidate.id === loadedModelId && connectionState === "ready" && samActive
+                ? <em className="in-use">em uso</em>
+                : <em>{candidate.recommended ? "Recomendado" : candidate.experimental ? "Experimental" : candidate.version}</em>}
             </button>)}
           </section>)}
 
@@ -464,7 +543,9 @@ export default function SamSetupModal({
               onClick={() => { setByomView("model"); onSelectByomModel(candidate.model_id); }}
             >
               <span><b>{candidate.name}</b><small>{candidate.model_id}</small></span>
-              <em className={candidate.ready ? "byom-up" : "byom-down"}>{candidate.ready ? "no ar" : "parado"}</em>
+              {candidate.model_id === byomModelId && candidate.ready
+                ? <em className="in-use">em uso</em>
+                : <em className={candidate.ready ? "byom-up" : "byom-down"}>{candidate.ready ? "no ar" : "parado"}</em>}
             </button>)}
             <button
               className={byomView === "docs" ? "active" : ""}
@@ -478,7 +559,8 @@ export default function SamSetupModal({
         </aside>
 
         <div className="sam-model-detail">
-          {byomView === "docs" ? <ByomPanel models={byomModels} onRegister={onRegisterByomModel} />
+          {byomView === "how" ? <HowItWorks language={language} />
+          : byomView === "docs" ? <ByomPanel models={byomModels} onRegister={onRegisterByomModel} />
           : byomView === "model" && selectedByomModel ? <ByomEntry
             model={selectedByomModel}
             busy={byomBusy}
@@ -537,6 +619,7 @@ export default function SamSetupModal({
             <div className="sam-install-actions">
               <a className="primary" href="/poligome-sam-macos-linux.sh" download><Download size={15} /><span><strong>{unixPlatformLabel}</strong><small>{unixCommand}</small></span></a>
               <a className={model.family === "sam3" ? "limited" : ""} href="/poligome-sam-windows.bat" download><Download size={15} /><span><strong>{windowsPlatformLabel}</strong><small>{windowsCommand}</small></span></a>
+              <a href="/poligome-sam-windows-native.ps1" download><Download size={15} /><span><strong>Windows nativo · sem WSL2</strong><small>{nativeWindowsCommand}</small></span></a>
             </div>
             <code>{unixCommand}</code>
             <p className="sam-manual-note">O conector é um processo local e precisa estar rodando sempre que você usar IA: fechar o terminal ou reiniciar o computador o derruba, e o editor consegue encontrá-lo sozinho, nunca ligá-lo. No Linux, <code>poligome-sam-service-linux.sh install</code> o sobe no login e dispensa esse passo.</p>

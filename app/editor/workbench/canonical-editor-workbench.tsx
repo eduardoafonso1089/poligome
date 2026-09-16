@@ -25,6 +25,9 @@ import { useTouchNavigation } from "../viewport/use-touch-navigation";
 import { clientPointToImage, screenPixelsToImageUnits } from "../viewport/svg-image-space";
 import { CogTiledLayer } from "../raster/cog-tiled-layer";
 import { demoRouteTarget } from "../session/demo-route";
+import { importCocoDocument, type CocoDocumentInput } from "../import/coco-document-import";
+import { assetAsDataUrl } from "../../lib/sam";
+import { connectorBaseUrl, DEFAULT_SAM_ENDPOINT } from "../../lib/sam-connector";
 import { QualityReviewPanel } from "../review/quality-review-panel";
 import { setAssetReviewScore, setLabelReviewScore } from "../review/quality-review-model";
 import { EditorManagementPanels } from "../panels/editor-management-panels";
@@ -334,6 +337,57 @@ export function CanonicalEditorWorkbench() {
     exitDemoTutorial();
     window.dispatchEvent(new CustomEvent("poligome:open-sam"));
   }
+
+  /**
+   * Roda um contêiner BYOM sobre a imagem aberta e ingere o COCO devolvido.
+   *
+   * O pedido sai daqui, e não do modal, porque é aqui que a imagem existe: o
+   * catálogo só sabe qual modelo você escolheu. O resultado entra somado ao que
+   * já havia, pelo mesmo caminho de um COCO importado à mão.
+   */
+  const runByomModel = useCallback(async (modelId: string) => {
+    if (!asset) { setMessage(copy.imageNotLoaded); return; }
+    const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
+    const base = connectorBaseUrl(stored || DEFAULT_SAM_ENDPOINT);
+    if (!base) { setMessage(copy.errSamUnreachable); return; }
+    setMessage(`${modelId}: anotando…`);
+    try {
+      const { url } = await assetAsDataUrl(asset, copy);
+      const response = await fetch(`${base}/byom/annotate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_id: modelId, image: url, file_name: asset.name }),
+        signal: AbortSignal.timeout(300_000),
+      });
+      if (!response.ok) {
+        // O conector escreve estes detalhes para quem está anotando; passam como estão.
+        const body = await response.json().catch(() => null) as { detail?: unknown } | null;
+        setMessage(typeof body?.detail === "string" ? body.detail : `${modelId}: HTTP ${response.status}`);
+        return;
+      }
+      const body = await response.json() as { coco?: CocoDocumentInput };
+      if (!body.coco) { setMessage(`${modelId}: resposta sem documento COCO.`); return; }
+      const result = importCocoDocument(body.coco, assets, labels, makeId, { unlabeledName: copy.unlabeled });
+      if (!result.annotations.length) { setMessage(`${modelId}: nenhuma anotação devolvida.`); return; }
+      applyCocoImport({
+        labels: result.labels,
+        annotations: result.annotations,
+        append: true,
+        message: `${modelId}: ${result.annotations.length} ${result.annotations.length === 1 ? "anotação" : "anotações"}.`,
+      });
+    } catch {
+      setMessage(copy.errSamUnreachable);
+    }
+  }, [applyCocoImport, asset, assets, copy, labels, makeId]);
+
+  useEffect(() => {
+    const run = (event: Event) => {
+      const modelId = (event as CustomEvent<{ modelId?: string }>).detail?.modelId;
+      if (typeof modelId === "string") void runByomModel(modelId);
+    };
+    window.addEventListener("poligome:run-byom", run);
+    return () => window.removeEventListener("poligome:run-byom", run);
+  }, [runByomModel]);
 
   useEffect(() => {
     if (demoQueryHandled.current || typeof window === "undefined") return;
