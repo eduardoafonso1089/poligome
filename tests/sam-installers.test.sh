@@ -9,6 +9,8 @@ INSTALLER="${PROJECT_ROOT}/public/poligome-sam-macos-linux.sh"
 STARTER="${PROJECT_ROOT}/public/poligome-sam-start-macos-linux.sh"
 WINDOWS_INSTALLER="${PROJECT_ROOT}/public/poligome-sam-windows.bat"
 WINDOWS_STARTER="${PROJECT_ROOT}/public/poligome-sam-start-windows.bat"
+NATIVE_INSTALLER="${PROJECT_ROOT}/public/poligome-sam-windows-native.ps1"
+NATIVE_BYOM="${PROJECT_ROOT}/public/poligome-byom-windows.ps1"
 CONNECTOR_SOURCE="${PROJECT_ROOT}/public/poligome-sam-local.py"
 SERVICE="${PROJECT_ROOT}/public/poligome-sam-service-linux.sh"
 
@@ -1061,5 +1063,77 @@ test_pinned_default_connector
 test_service_covers_every_model
 test_device_is_choosable
 test_sam3_rejects_old_gpu
+
+# O instalador nativo de Windows repete o catálogo em PowerShell, porque é um
+# arquivo que o usuário baixa sozinho e não pode depender do .sh. Repetição é o
+# preço; divergência silenciosa não pode ser. Cada checkpoint tem um tamanho
+# exato que serve de validação do download, então um número errado aqui só
+# apareceria como "download incompleto" na máquina de quem instala.
+test_native_windows_catalog_matches_bash() {
+  local bash_source native_source model checkpoint size url family
+  bash_source="$(<"$INSTALLER")"
+  native_source="$(<"$NATIVE_INSTALLER")"
+
+  for model in "${MODELS[@]}"; do
+    assert_contains "$native_source" "'${model}' = @{" "catálogo nativo declara ${model}"
+
+    checkpoint="$(awk -v m="    ${model})" '$0 == m {found=1} found && /CHECKPOINT_NAME=/ {gsub(/.*CHECKPOINT_NAME="|"/, ""); print; exit}' <<<"$bash_source")"
+    [[ -n "$checkpoint" ]] || fail "não achei CHECKPOINT_NAME de ${model} no instalador bash"
+    assert_contains "$native_source" "CheckpointName = '${checkpoint}'" "nativo usa o mesmo checkpoint de ${model}"
+
+    size="$(awk -v m="    ${model})" '$0 == m {found=1} found && /CHECKPOINT_SIZE=/ {gsub(/.*CHECKPOINT_SIZE=/, ""); print; exit}' <<<"$bash_source")"
+    [[ -n "$size" ]] || fail "não achei CHECKPOINT_SIZE de ${model} no instalador bash"
+    assert_contains "$native_source" "Size = ${size}" "nativo valida ${model} pelo mesmo tamanho"
+
+    family="${MODEL_FAMILY[$model]}"
+    assert_contains "$native_source" "Family = '${family}'" "nativo conhece a família ${family}"
+
+    url="$(awk -v m="    ${model})" '$0 == m {found=1} found && /CHECKPOINT_URL=/ {gsub(/.*CHECKPOINT_URL="|"/, ""); print; exit}' <<<"$bash_source")"
+    if [[ -n "$url" ]]; then
+      assert_contains "$native_source" "Url = '${url}'" "nativo baixa ${model} da mesma origem"
+    fi
+  done
+
+  # As revisões fixadas são o que torna a instalação reproduzível; se o bash
+  # avançar e o PowerShell ficar para trás, duas máquinas instalam código
+  # diferente com o mesmo comando.
+  local revision
+  for revision in SAM2_REVISION SAM3_REVISION; do
+    local value
+    value="$(awk -v k="${revision}=" 'index($0, k) == 1 {gsub(/.*="|"/, ""); print; exit}' <<<"$bash_source")"
+    [[ -n "$value" ]] || fail "não achei ${revision} no instalador bash"
+    assert_contains "$native_source" "$value" "nativo fixa a mesma revisão de ${revision}"
+  done
+
+  assert_contains "$native_source" 'SAM2_BUILD_CUDA' "nativo desliga a extensão CUDA do sam2, que no Windows exigiria MSVC"
+  pass "instalador nativo de Windows cobre os ${#MODELS[@]} modelos com o mesmo catálogo do bash"
+}
+
+# No Windows não há execv de verdade: a libc emula com spawn mais exit, o PID
+# muda e quem lançou o conector o vê morrer no meio de uma troca bem-sucedida.
+# O conector sai com um código combinado e o .ps1 relança. As duas pontas
+# precisam concordar no número, e nada além de um teste as mantém juntas.
+test_native_windows_switch_contract() {
+  local connector_source native_source code
+  connector_source="$(<"$CONNECTOR_SOURCE")"
+  native_source="$(<"$NATIVE_INSTALLER")"
+
+  code="$(awk 'index($0, "SWITCH_EXIT_CODE = ") == 1 {print $NF; exit}' <<<"$connector_source")"
+  [[ "$code" =~ ^[0-9]+$ ]] || fail "não achei SWITCH_EXIT_CODE no conector"
+  assert_contains "$native_source" "\$SwitchExitCode = ${code}" "lançador nativo espera o mesmo código de troca"
+
+  assert_contains "$connector_source" 'if os.name == "nt":' "conector trata o Windows antes do execv"
+  assert_before "$connector_source" 'if os.name == "nt":' 'os.execv(interpreter, argv)' \
+    "o desvio de Windows vem antes do execv, senão nunca seria alcançado"
+  # /load grava a seleção antes de mandar trocar; é dela que o .ps1 relê o
+  # modelo pedido, então a ordem importa.
+  assert_before "$connector_source" '_persist_selection(spec)' '_exec_with_model' \
+    "a seleção é gravada antes de pedir a troca"
+  assert_contains "$native_source" 'Get-Content -LiteralPath $SelectedModelFile' "lançador nativo relê a seleção para retomar"
+  pass "contrato de troca de modelo no Windows nativo está costurado nas duas pontas"
+}
+
+test_native_windows_catalog_matches_bash
+test_native_windows_switch_contract
 
 printf '\nTodos os testes locais dos instaladores SAM passaram.\n'

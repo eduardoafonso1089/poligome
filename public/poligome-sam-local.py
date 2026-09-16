@@ -49,6 +49,9 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 SERVICE_NAME = "Poligome SAM local"
 API_VERSION = 2
+# Código com que o conector sai, no Windows, para pedir ao lançador que o suba de
+# novo no venv da outra família. Ver _exec_with_model: lá o execv não serve.
+SWITCH_EXIT_CODE = 75
 MAX_IMAGE_BYTES = 64 * 1024 * 1024
 MAX_DATA_URL_LENGTH = ((MAX_IMAGE_BYTES + 2) // 3 * 4) + 4096
 MAX_IMAGE_DIMENSION = 32_768
@@ -1368,7 +1371,22 @@ def _exec_with_model(spec: ModelSpec, port: int) -> None:
 
     Usar execv preserva o PID, o terminal e o processo pai, de modo que os
     instaladores que aguardam o conector continuam funcionando.
+
+    No Windows nao ha execv de verdade: a libc emula com spawn mais exit, entao o
+    PID muda e quem lancou o conector ve o processo morrer no meio de uma troca
+    que deu certo. Em vez de fingir, saimos com SWITCH_EXIT_CODE e devolvemos a
+    decisao a quem segura o terminal. O modelo pedido ja foi gravado em
+    selected-model.txt por /load, que e exatamente de onde o lancador le.
     """
+    if os.name == "nt":
+        print(
+            f"Trocando para {spec.model_id}; devolvendo ao lançador para recarregar...",
+            flush=True,
+        )
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(SWITCH_EXIT_CODE)
+
     interpreter = str(_family_python(spec.family))
     argv = [
         interpreter,

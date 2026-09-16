@@ -18,6 +18,10 @@ Dockerfile text eol=lf
 # O .bat é executado pelo cmd.exe do Windows, que espera CRLF.
 *.bat text eol=crlf
 
+# Os .ps1 são os instaladores nativos de Windows: mesmo motivo do .bat, e o
+# PowerShell 5.1 ainda é o que vem na caixa, então CRLF evita surpresa.
+*.ps1 text eol=crlf
+
 *.png binary
 *.jpg binary
 *.jpeg binary
