@@ -14,6 +14,41 @@ que o próprio modelo indicou, prontas para revisão.
 
 ---
 
+## Começo rápido
+
+Antes de empacotar nada, vale ver o BYOM funcionando com os dois modelos de
+exemplo que já vêm no repositório. Você precisa de duas coisas no ar: o conector
+do Poligome, que é assunto do [sam.md](sam.md), e o Docker.
+
+```bash
+# constrói a imagem de exemplo e sobe os dois modelos
+bash poligome-byom-macos-linux.sh examples
+
+# confere o estado sem abrir o editor
+bash poligome-byom-macos-linux.sh list
+```
+
+O `list` deve mostrar os dois no ar:
+
+```
+  MODEL-ID          IMAGEM                  CONTÊINER  /ping   ENDPOINT
+  byom-otsu         poligome-byom-exemplo   no ar      200     http://127.0.0.1:8080
+  byom-watershed    poligome-byom-exemplo   no ar      200     http://127.0.0.1:8081
+```
+
+No editor, abra o botão do modelo de IA: os dois aparecem sob **BYOM · seu
+modelo**. Escolha um, abra uma imagem e clique em **Rodar BYOM**. O resultado
+aparece tracejado sobre a imagem, como proposta, e só vira anotação quando você
+clica em **Salvar**.
+
+Os dois exemplos existem para serem um molde. Quando quiser trocar o miolo pelo
+seu modelo, o **Passo a passo** mais abaixo mostra o caminho inteiro: você
+substitui a função `predict()` e mantém o resto.
+
+No Windows, tudo isso roda dentro do WSL2 — veja a seção logo adiante.
+
+---
+
 ## O que exige ação manual
 
 O BYOM depende de **duas** coisas rodando na sua máquina, e nenhuma delas sobe
