@@ -489,6 +489,11 @@ export default function SamSetupModal({
             <code>{unixCommand}</code>
             <p className="sam-manual-note">O conector é um processo local e precisa estar rodando sempre que você usar IA: fechar o terminal ou reiniciar o computador o derruba, e o editor consegue encontrá-lo sozinho, nunca ligá-lo. No Linux, <code>poligome-sam-service-linux.sh install</code> o sobe no login e dispensa esse passo.</p>
             <div className="sam-launch-actions"><span>Já instalado?</span><a href="/poligome-sam-start-macos-linux.sh" download>Baixar iniciador {unixPlatformLabel}</a><a href="/poligome-sam-start-windows.bat" download>Baixar iniciador {windowsPlatformLabel}</a></div>
+            <p className="sam-manual-note">
+              {model.family === "sam3"
+                ? <>O SAM 3 só roda em GPU NVIDIA: o conector recusa CPU e Metal para esta família.</>
+                : <>Sem GPU, o modelo roda em CPU sozinho. Se a sua GPU for reconhecida mas não aguentar o modelo, force a escolha com <code>POLIGOME_DEVICE=cpu</code> antes do instalador ou do iniciador.</>}
+            </p>
             <p className="sam-platform-note"><b>Linux:</b> {model.platformSupport.linux.notes} <b>Windows:</b> {model.platformSupport.windows.notes} <b>macOS:</b> {model.platformSupport.macos.notes}</p>
           </section>
 

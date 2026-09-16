@@ -17,6 +17,9 @@ CONNECTOR="${APP_DIR}/poligome-sam-local.py"
 INSTALLER_CACHE="${APP_DIR}/bin/poligome-sam-macos-linux.sh"
 PORT="7860"
 STARTUP_TIMEOUT="${POLIGOME_STARTUP_TIMEOUT:-1800}"
+# auto escolhe CUDA, depois MPS, depois CPU. Forçar cpu é a saída de quem tem
+# uma GPU que o PyTorch enxerga mas que não aguenta o modelo.
+DEVICE="${POLIGOME_DEVICE:-auto}"
 SITE_ORIGIN=""
 
 usage() {
@@ -36,6 +39,7 @@ Variáveis opcionais:
   POLIGOME_ASSET_BASE_URL  origem HTTPS pública dos arquivos do instalador
   POLIGOME_INSTALLER_PATH  instalador local explícito para desenvolvimento/offline
   POLIGOME_STARTUP_TIMEOUT segundos máximos para o primeiro carregamento (padrão: 1800)
+  POLIGOME_DEVICE          auto (padrão), cpu, cuda ou mps
 EOF
 }
 
@@ -450,7 +454,7 @@ run_connector_transactionally() {
   if [[ -n "$MODEL_CONFIG" ]]; then
     args+=(--model-config "$MODEL_CONFIG")
   fi
-  args+=(--device auto --port "$PORT")
+  args+=(--device "$DEVICE" --port "$PORT")
   printf 'Iniciando o conector e aguardando %s ficar pronto...\n' "$MODEL_ID"
   POLIGOME_ALLOWED_ORIGINS="${SITE_ORIGIN},http://localhost:5173,http://127.0.0.1:5173" \
     "$PYTHON" "${args[@]}" &
@@ -529,6 +533,11 @@ fi
 
 [[ "$STARTUP_TIMEOUT" =~ ^[1-9][0-9]*$ ]] ||
   fail "POLIGOME_STARTUP_TIMEOUT deve ser um número inteiro positivo de segundos."
+
+case "$DEVICE" in
+  auto|cpu|cuda|mps) ;;
+  *) fail "POLIGOME_DEVICE aceita auto, cpu, cuda ou mps; recebido: ${DEVICE}" ;;
+esac
 
 configure_site_origin
 

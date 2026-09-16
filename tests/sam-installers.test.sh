@@ -10,6 +10,7 @@ STARTER="${PROJECT_ROOT}/public/poligome-sam-start-macos-linux.sh"
 WINDOWS_INSTALLER="${PROJECT_ROOT}/public/poligome-sam-windows.bat"
 WINDOWS_STARTER="${PROJECT_ROOT}/public/poligome-sam-start-windows.bat"
 CONNECTOR_SOURCE="${PROJECT_ROOT}/public/poligome-sam-local.py"
+SERVICE="${PROJECT_ROOT}/public/poligome-sam-service-linux.sh"
 
 MODELS=(
   sam2.1-hiera-tiny
@@ -988,7 +989,40 @@ test_pinned_default_connector() {
   pass "conector padrão vem da base publicada e é conferido por SHA-256"
 }
 
-bash -n "$INSTALLER" "$STARTER"
+# O serviço de usuário resolve o modelo a cada arranque com uma lista própria,
+# que ficou parada nos cinco modelos que existiam quando ela foi escrita. Com um
+# MedSAM2 selecionado o serviço entrava em laço de falha, dizendo apenas
+# "selected-model.txt inválido". Nada na suíte olhava para esse arquivo.
+test_service_covers_every_model() {
+  local service_source model
+  service_source="$(<"$SERVICE")"
+  for model in "${MODELS[@]}"; do
+    assert_contains "$service_source" "  ${model})" "serviço de usuário reconhece ${model}"
+  done
+  assert_contains "$service_source" 'selected-model.txt inválido' "serviço recusa modelo desconhecido"
+  pass "serviço de usuário reconhece os ${#MODELS[@]} modelos do catálogo"
+}
+
+# auto resolve para CUDA sempre que o PyTorch enxerga uma GPU, mesmo quando ela
+# não tem VRAM para o modelo, e não havia como pedir CPU por fora.
+test_device_is_choosable() {
+  local file source
+  for file in "$INSTALLER" "$STARTER" "$SERVICE"; do
+    source="$(<"$file")"
+    assert_contains "$source" 'POLIGOME_DEVICE' "$(basename "$file") aceita POLIGOME_DEVICE"
+    assert_contains "$source" 'auto|cpu|cuda|mps)' "$(basename "$file") valida o dispositivo pedido"
+    [[ "$source" != *'--device auto'* ]] ||
+      fail "$(basename "$file"): ainda fixa --device auto, ignorando a escolha do usuário"
+  done
+  for file in "$WINDOWS_INSTALLER" "$WINDOWS_STARTER"; do
+    source="$(tr -d '\r' <"$file")"
+    assert_contains "$source" 'if defined POLIGOME_DEVICE' \
+      "$(basename "$file") propaga POLIGOME_DEVICE ao WSL"
+  done
+  pass "dispositivo é escolhível pelo usuário nos cinco iniciadores"
+}
+
+bash -n "$INSTALLER" "$STARTER" "$SERVICE"
 pass "sintaxe dos scripts Bash"
 
 for model in "${MODELS[@]}"; do
@@ -1008,5 +1042,7 @@ test_windows_static_matrix
 test_sam3_autocast
 test_cross_artifact_matrix
 test_pinned_default_connector
+test_service_covers_every_model
+test_device_is_choosable
 
 printf '\nTodos os testes locais dos instaladores SAM passaram.\n'

@@ -6,6 +6,9 @@
 #   bash poligome-sam-service-linux.sh install   # cria e inicia o serviço
 #   bash poligome-sam-service-linux.sh status
 #   bash poligome-sam-service-linux.sh uninstall
+#
+# Variáveis opcionais:
+#   POLIGOME_DEVICE  auto (padrão), cpu, cuda ou mps
 set -euo pipefail
 
 APP_DIR="${HOME}/.poligome-sam"
@@ -16,8 +19,16 @@ UNIT="${UNIT_DIR}/poligome-sam.service"
 LAUNCHER="${APP_DIR}/bin/poligome-sam-service-run.sh"
 PORT="7860"
 SITE_URL="${POLIGOME_SITE_URL:-https://www.poligome.com}"
+# auto escolhe CUDA, depois MPS, depois CPU. Forçar cpu é a saída de quem tem
+# uma GPU que o PyTorch enxerga mas que não aguenta o modelo.
+DEVICE="${POLIGOME_DEVICE:-auto}"
 
 fail() { printf '\nErro: %s\n' "$*" >&2; exit 1; }
+
+case "$DEVICE" in
+  auto|cpu|cuda|mps) ;;
+  *) fail "POLIGOME_DEVICE aceita auto, cpu, cuda ou mps; recebido: ${DEVICE}" ;;
+esac
 
 command -v systemctl >/dev/null 2>&1 ||
   fail "systemd não encontrado. Use o iniciador comum: poligome-sam-start-macos-linux.sh"
@@ -56,13 +67,20 @@ case "$MODEL_ID" in
   sam2.1-hiera-small)     FAMILY=sam2; CKPT=sam2.1_hiera_small.pt;     CFG=configs/sam2.1/sam2.1_hiera_s.yaml ;;
   sam2.1-hiera-base-plus) FAMILY=sam2; CKPT=sam2.1_hiera_base_plus.pt; CFG=configs/sam2.1/sam2.1_hiera_b+.yaml ;;
   sam2.1-hiera-large)     FAMILY=sam2; CKPT=sam2.1_hiera_large.pt;     CFG=configs/sam2.1/sam2.1_hiera_l.yaml ;;
+  # Os quatro ajustes finos do MedSAM2 partem do SAM 2.1 Hiera Tiny: mesma
+  # família, mesmo yaml, só o checkpoint muda.
+  medsam2-latest)           FAMILY=sam2; CKPT=MedSAM2_latest.pt;          CFG=configs/sam2.1/sam2.1_hiera_t.yaml ;;
+  medsam2-ct-lesion)        FAMILY=sam2; CKPT=MedSAM2_CTLesion.pt;        CFG=configs/sam2.1/sam2.1_hiera_t.yaml ;;
+  medsam2-mri-liver-lesion) FAMILY=sam2; CKPT=MedSAM2_MRI_LiverLesion.pt; CFG=configs/sam2.1/sam2.1_hiera_t.yaml ;;
+  medsam2-us-heart)         FAMILY=sam2; CKPT=MedSAM2_US_Heart.pt;        CFG=configs/sam2.1/sam2.1_hiera_t.yaml ;;
+  medsam2-2411)             FAMILY=sam2; CKPT=MedSAM2_2411.pt;            CFG=configs/sam2.1/sam2.1_hiera_t.yaml ;;
   sam3-concepts)          FAMILY=sam3; CKPT=sam3.pt;                   CFG="" ;;
   *) printf 'selected-model.txt inválido: %s\n' "$MODEL_ID" >&2; exit 1 ;;
 esac
 args=("${APP_DIR}/poligome-sam-local.py" --model "$MODEL_ID"
       --checkpoint "${APP_DIR}/models/${MODEL_ID}/${CKPT}")
 [[ -n "$CFG" ]] && args+=(--model-config "$CFG")
-args+=(--device auto --port "${POLIGOME_PORT:-7860}" --app-dir "$APP_DIR")
+args+=(--device "${POLIGOME_DEVICE:-auto}" --port "${POLIGOME_PORT:-7860}" --app-dir "$APP_DIR")
 exec "${APP_DIR}/venvs/${FAMILY}/bin/python" "${args[@]}"
 RUNNER
 chmod 700 "$LAUNCHER"
@@ -79,6 +97,7 @@ Type=simple
 ExecStart=${LAUNCHER}
 Environment=POLIGOME_ALLOWED_ORIGINS=${site_origin},http://localhost:5173,http://127.0.0.1:5173
 Environment=POLIGOME_PORT=${PORT}
+Environment=POLIGOME_DEVICE=${DEVICE}
 Restart=on-failure
 RestartSec=5
 

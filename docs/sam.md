@@ -9,6 +9,59 @@ veja [byom.md](byom.md).
 
 ---
 
+## Começo rápido
+
+São três passos, e o primeiro depende do seu sistema. Se você não sabe qual
+modelo escolher, use `sam2.1-hiera-small`: ele é o recomendado, tem 184 MB e
+roda em CPU.
+
+### 1. Rode o instalador
+
+**Linux ou macOS** — baixe `poligome-sam-macos-linux.sh` pelo painel de modelos
+do editor e rode, na pasta onde ele caiu:
+
+```bash
+bash poligome-sam-macos-linux.sh sam2.1-hiera-small
+```
+
+**Windows** — baixe `poligome-sam-windows.bat` e dê um duplo clique, ou:
+
+```
+poligome-sam-windows.bat sam2.1-hiera-small
+```
+
+O `.bat` não instala nada no Windows em si: ele repassa tudo para o WSL2, onde o
+modelo e o ambiente Python ficam. Você precisa do WSL2 instalado antes; se não
+tiver, o próprio `.bat` diz isso e para.
+
+Sem argumento, os dois abrem um menu com os dez modelos.
+
+### 2. Espere terminar
+
+A primeira instalação baixa o PyTorch e o modelo, e demora: de poucos minutos a
+bem mais, conforme a sua internet. O fim se parece com isto:
+
+```
+Modelo sam2.1-hiera-small instalado, carregado e selecionado.
+A seleção foi salva em ~/.poligome-sam/selected-model.txt.
+Mantenha este terminal aberto enquanto usar o SAM.
+```
+
+Se aparecer um erro no meio, ele diz o que falta — por exemplo, no Linux, que o
+pacote `python3-venv` precisa ser instalado.
+
+### 3. Use no editor
+
+Com o terminal aberto, volte ao editor e recarregue a página. Ele procura o
+conector sozinho em `127.0.0.1:7860` e conecta sem você pedir nada. A partir
+daí, clicar na imagem com a ferramenta SAM já segmenta.
+
+> **O terminal precisa ficar aberto.** Fechar o terminal derruba o conector, e
+> nenhuma página web pode ligá-lo de volta. A seção seguinte explica como
+> evitar esse passo diário.
+
+---
+
 ## O que exige ação manual
 
 Vale saber antes de instalar: **o conector precisa estar rodando** sempre que
@@ -68,20 +121,45 @@ runtime: instalá-los custa apenas o download do checkpoint, sem ambiente novo.
 
 ---
 
-## Instalação
+## Instalação, em detalhe
 
-### Linux e macOS
+Tudo fica em `~/.poligome-sam`, e nada é escrito na pasta do projeto:
+
+| Caminho | O que guarda |
+| --- | --- |
+| `venvs/sam2` e `venvs/sam3` | um ambiente Python por família de runtime |
+| `models/<id>/` | só o checkpoint do modelo que você escolheu |
+| `poligome-sam-local.py` | o conector |
+| `selected-model.txt` | qual modelo o iniciador deve subir |
+
+Instalar um segundo modelo da mesma família custa apenas o download do
+checkpoint: o ambiente Python já está pronto e é reaproveitado.
+
+### Linux
 
 ```bash
 bash poligome-sam-macos-linux.sh sam2.1-hiera-small
 ```
 
-Sem argumento, o instalador abre um menu. Ele cria um ambiente Python isolado por
-família em `~/.poligome-sam/venvs`, baixa só o checkpoint escolhido para
-`~/.poligome-sam/models/<id>` e inicia o conector.
+Exige Python 3.10 ou mais novo e, em distribuições Debian e Ubuntu, o pacote
+`python3-venv`. Sem ele o instalador para logo no começo e diz o comando exato
+para instalá-lo.
 
-No macOS, o SAM 2.1 exige Apple Silicon: o PyTorch 2.5.1+ não publica mais wheels
-para Intel. O SAM 3 não é oferecido no macOS.
+### macOS
+
+O mesmo script do Linux:
+
+```bash
+bash poligome-sam-macos-linux.sh sam2.1-hiera-small
+```
+
+Duas condições, conferidas antes de qualquer download:
+
+- **Apple Silicon.** O PyTorch 2.5.1+ não publica mais wheels para Mac Intel,
+  então num Intel o instalador recusa em vez de falhar no meio do `pip`.
+- **macOS 14 ou mais novo**, que é o mínimo do PyTorch atual.
+
+O SAM 3 não é oferecido no macOS, porque exige CUDA.
 
 ### Windows
 
@@ -89,8 +167,18 @@ para Intel. O SAM 3 não é oferecido no macOS.
 poligome-sam-windows.bat sam2.1-hiera-small
 ```
 
-O `.bat` não instala nada no Windows nativo: ele delega ao WSL2, preservando o
-mesmo menu e os mesmos IDs.
+O `.bat` não instala nada no Windows em si: ele delega ao WSL2, com o mesmo menu
+e os mesmos IDs. Antes de começar, ele confere que o WSL2 existe, que a
+distribuição responde e que há `curl` ou `wget` nela; se algo faltar, ele diz o
+quê.
+
+Duas consequências que costumam surpreender:
+
+- **O modelo fica dentro do WSL**, em `~/.poligome-sam` da distribuição, e não
+  em `C:\Users`. É lá que o conector procura.
+- **A seleção do Windows só é confirmada depois** que o WSL confirma que o
+  modelo carregou. Uma instalação interrompida deixa o estado anterior intacto,
+  e o iniciador retoma sozinho da próxima vez.
 
 ### Já instalado
 
@@ -237,7 +325,74 @@ o modal acompanha o `/health` até o `ready`. Modelos não instalados são recus
 com HTTP 409 explicando o que falta.
 
 Medido nesta máquina: trocar entre variantes do SAM 2.1 e MedSAM2 leva cerca de
-três segundos; entrar ou sair do SAM 3, cerca de nove.
+três segundos; entrar ou sair do SAM 3, cerca de nove. Num notebook sem GPU, com
+o modelo em CPU, a mesma troca entre variantes do SAM 2.1 levou de 6 a 24
+segundos — o número acompanha a máquina, não o modelo.
+
+## Escolher CPU ou GPU
+
+Por padrão o conector decide sozinho: usa CUDA se houver, depois Metal no Apple
+Silicon, e CPU se não houver nem uma nem outra. O SAM 2.1 e o MedSAM2 rodam em
+CPU sem nenhuma configuração — é o que acontece em qualquer máquina sem GPU.
+
+O caso em que `auto` erra é a GPU que o PyTorch enxerga mas que não aguenta o
+modelo: ela é escolhida e a inferência falha por falta de memória. Para esses
+casos, `POLIGOME_DEVICE` força a escolha:
+
+```bash
+POLIGOME_DEVICE=cpu bash poligome-sam-start-macos-linux.sh
+POLIGOME_DEVICE=cpu bash poligome-sam-macos-linux.sh sam2.1-hiera-small
+POLIGOME_DEVICE=cpu bash poligome-sam-service-linux.sh install
+```
+
+No Windows, defina a variável antes de chamar o `.bat`; ela é repassada ao WSL2:
+
+```
+set POLIGOME_DEVICE=cpu
+poligome-sam-start-windows.bat
+```
+
+Os valores aceitos são `auto` (padrão), `cpu`, `cuda` e `mps`. Pedir `cuda` numa
+máquina sem CUDA falha na hora, dizendo isso, em vez de carregar o modelo e
+quebrar depois. O serviço do systemd grava a escolha na unidade, então ela
+sobrevive ao reinício.
+
+**O SAM 3 é a exceção:** ele exige CUDA, e `POLIGOME_DEVICE=cpu` não o libera.
+O conector recusa explicitamente CPU e MPS para essa família, porque o modelo
+não foi validado fora da GPU nesta implementação.
+
+---
+
+## Quando algo dá errado
+
+As mensagens abaixo são as que aparecem de verdade, com o que fazer em cada uma.
+
+| A mensagem diz | O que aconteceu | O que fazer |
+| --- | --- | --- |
+| `não foi possível criar o ambiente virtual` | falta o `python3-venv` | `sudo apt install python3.12-venv` e rodar de novo |
+| `Python 3.10+ não foi encontrado` | o Python do sistema é antigo demais | instalar um Python 3.10 ou mais novo |
+| `a porta 7860 já está ocupada` | outro conector, com outro modelo, está no ar | fechar o terminal dele, ou trocar de modelo pelo editor em vez do instalador |
+| `exige um Mac Apple Silicon` | Mac Intel | usar Linux, ou um Mac M1 ou mais novo |
+| `exige macOS 14 ou mais novo` | macOS antigo | atualizar o sistema |
+| `nvidia-smi não foi encontrado` | pediu SAM 3 sem GPU NVIDIA | escolher um SAM 2.1 ou MedSAM2, que rodam em CPU |
+| `CUDA não está disponível` | pediu `POLIGOME_DEVICE=cuda` sem CUDA | usar `auto` ou `cpu` |
+| `não foi possível baixar o checkpoint gated` | SAM 3 sem aprovação da Meta | pedir acesso e esperar a liberação |
+| `o conector terminou antes de ... ficar pronto` | o modelo não coube na memória | forçar `POLIGOME_DEVICE=cpu`, ou escolher um modelo menor |
+| `modelo inválido` | ID digitado errado | rodar sem argumento e escolher no menu |
+
+Uma instalação interrompida não deixa lixo pela metade: o download vai para um
+arquivo `.part`, o checkpoint só é aceito se o tamanho bater com o oficial, e a
+seleção só é gravada depois que o modelo carrega. Rodar o iniciador de novo
+retoma de onde parou.
+
+Para ver o que o conector está fazendo:
+
+```bash
+curl -s http://127.0.0.1:7860/health
+```
+
+A resposta diz o modelo carregado, o dispositivo em uso e o estado
+(`loading`, `ready` ou `error`), com a mensagem do erro quando houver.
 
 ---
 
