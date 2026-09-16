@@ -335,14 +335,20 @@ function Install-Runtime([string] $Family, [string] $VenvDir, [string] $VenvPyth
   $revision = if ($Family -eq 'sam3') { $Sam3Revision } else { $Sam2Revision }
   $marker = Join-Path $VenvDir ".poligome-$Family-$revision.ok"
 
-  if (Test-Path -LiteralPath $marker) {
-    $probe = if ($Family -eq 'sam3') {
-      'import cv2, fastapi, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model'
-    } else {
-      'import cv2, fastapi, torch, uvicorn; from sam2.build_sam import build_sam2; from sam2.sam2_image_predictor import SAM2ImagePredictor'
-    }
+  # A prova de que o runtime está instalado é ele importar, não um arquivo ao lado
+  # dele existir. O marcador é só atalho: perdê-lo não pode custar ao usuário o
+  # download do PyTorch de novo, que foi o que aconteceu aqui.
+  $probe = if ($Family -eq 'sam3') {
+    'import cv2, fastapi, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model'
+  } else {
+    'import cv2, fastapi, torch, uvicorn; from sam2.build_sam import build_sam2; from sam2.sam2_image_predictor import SAM2ImagePredictor'
+  }
+  if (Test-Path -LiteralPath $VenvPython) {
     & $VenvPython -c $probe 2>$null
-    if ($LASTEXITCODE -eq 0) { return }
+    if ($LASTEXITCODE -eq 0) {
+      if (-not (Test-Path -LiteralPath $marker)) { New-Item -ItemType File -Force -Path $marker | Out-Null }
+      return
+    }
   }
 
   Write-Host "Instalando dependencias oficiais da familia $Family. Isso pode demorar..."
