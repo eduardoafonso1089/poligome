@@ -61,6 +61,30 @@ Para conferir o estado sem abrir o editor:
 bash poligome-byom-macos-linux.sh list
 ```
 
+## No Windows
+
+Não há `.bat` para o BYOM, e não falta nenhum: no Windows o conector já roda
+dentro do WSL2 — é para lá que `poligome-sam-windows.bat` delega. O registro
+fica em `~/.poligome-sam/byom` **dentro da distribuição WSL**, não em
+`C:\Users\...`, e é só esse diretório que o conector lê.
+
+A CLI é a mesma, executada de dentro do WSL:
+
+```bash
+wsl bash poligome-byom-macos-linux.sh examples
+```
+
+O que muda é o Docker: ele precisa responder ao comando `docker` **de dentro
+dessa mesma distribuição**. Há dois caminhos:
+
+| Caminho | O que fazer |
+| --- | --- |
+| Docker Desktop | ligar a integração da distribuição em Settings › Resources › WSL integration |
+| Docker Engine no WSL | instalar o Docker dentro da distribuição, como num Linux comum |
+
+Sem isso, a CLI para antes de tentar qualquer coisa e diz que o `docker` não foi
+encontrado no PATH.
+
 ## O contrato
 
 | Requisito | Valor |
@@ -212,10 +236,20 @@ que uma mesma imagem pode servir a vários modelos registrados:
 | `otsu` | limiar de Otsu e contorno externo de cada região. Objetos encostados viram uma região só |
 | `watershed` | watershed sobre a transformada de distância: objetos que se tocam viram instâncias separadas |
 
-Nenhum precisa de GPU. `SEED_FACTOR` ajusta o watershed — medido nesta
-implementação, `0,5` não separa círculos que se tocam, `0,6` (padrão) separa até
-cerca de 15 px de sobreposição e `0,8` até 30 px, ao custo de sementes menores,
-que descartam objetos pequenos.
+Nenhum precisa de GPU. `SEED_FACTOR` ajusta o watershed: ele é a fração do pico
+da transformada de distância que vira semente, então o quanto ele tolera de
+sobreposição acompanha o tamanho do objeto — não há um número de pixels que valha
+para qualquer imagem. Medido nesta implementação com dois círculos, a maior
+sobreposição que ainda sai como duas instâncias é:
+
+| diâmetro | `0,5` | `0,6` (padrão) | `0,8` |
+| --- | --- | --- | --- |
+| 60 px | 5 px | 5 px | 15 px |
+| 90 px | 5 px | 10 px | 30 px |
+| 180 px | 20 px | 30 px | mais de 40 px |
+
+Subir o fator separa mais, ao custo de sementes menores, que descartam objetos
+pequenos.
 
 Os dois existem para ser um molde: troque a função `predict()` pelo seu modelo e
 mantenha o resto.

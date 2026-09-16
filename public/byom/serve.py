@@ -41,9 +41,18 @@ MAX_BODY_BYTES = 96 * 1024 * 1024
 # modelos registrados: basta subir cada um numa porta com METHOD diferente.
 METHOD = os.environ.get("METHOD", "otsu").strip().lower()
 # Fração do máximo da transformada de distância que vira semente do watershed.
-# Medido nesta implementação: 0,5 não separa círculos que se tocam; 0,6 separa
-# até cerca de 15 px de sobreposição e 0,8 até 30 px, ao custo de sementes
-# menores, que descartam objetos pequenos. 0,6 é o meio-termo.
+# O limiar é relativo ao pico da transformada, então o quanto ele tolera de
+# sobreposição acompanha o tamanho do objeto — não há um número de pixels que
+# valha para qualquer imagem. Medido nesta implementação com dois círculos, a
+# maior sobreposição que ainda sai como duas instâncias:
+#
+#   diâmetro    0,5      0,6      0,8
+#     60 px     5 px     5 px    15 px
+#     90 px     5 px    10 px    30 px
+#    180 px    20 px    30 px   >40 px
+#
+# Subir o fator separa mais, ao custo de sementes menores, que descartam
+# objetos pequenos. 0,6 é o meio-termo.
 SEED_FACTOR = float(os.environ.get("SEED_FACTOR", "0.6"))
 
 
