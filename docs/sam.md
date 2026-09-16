@@ -248,9 +248,12 @@ Com uma conta aprovada, o fluxo foi exercitado assim:
 | inferência | ponto 0,980 · caixa 0,984 · texto devolvendo três instâncias para "red circle" e duas para "blue square" |
 | troca de modelo | entra e sai do SAM 3 sem perder SAM 2.1 nem MedSAM2 |
 
-Uma ressalva honesta: na execução do instalador o checkpoint já estava em disco,
-então o ramo de download não foi reexecutado por ele — esse trecho foi conferido
-à parte, com o mesmo comando que o instalador usa.
+Numa segunda passagem, em outra máquina e partindo do zero, o ramo de download
+foi exercitado pelo próprio instalador: com a conta aprovada e sem checkpoint em
+disco, `bash poligome-sam-macos-linux.sh sam3-concepts` criou o ambiente,
+instalou o runtime e baixou os 3.450.062.241 bytes sozinho. Essa máquina não
+chegou a rodar inferência, porque a GPU dela é anterior ao que o PyTorch CUDA
+12.8 suporta — foi o que revelou a checagem de capability descrita adiante.
 
 Isso revelou dois defeitos que o gate escondia, ambos corrigidos:
 
