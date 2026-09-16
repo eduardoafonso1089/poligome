@@ -28,6 +28,10 @@ import { demoRouteTarget } from "../session/demo-route";
 import { importCocoDocument, type CocoDocumentInput } from "../import/coco-document-import";
 import { assetAsDataUrl } from "../../lib/sam";
 import { connectorBaseUrl, DEFAULT_SAM_ENDPOINT } from "../../lib/sam-connector";
+import { Check, ListRestart, LoaderCircle, Minus, Plus, Settings2 } from "lucide-react";
+import { requestSamAnnotation } from "../models/model-output";
+import type { SamPrompt } from "../../lib/types";
+import type { PolygonAnnotation } from "../models/annotation-model";
 import { QualityReviewPanel } from "../review/quality-review-panel";
 import { setAssetReviewScore, setLabelReviewScore } from "../review/quality-review-model";
 import { EditorManagementPanels } from "../panels/editor-management-panels";
@@ -66,6 +70,10 @@ function labelsMatch(current: Label[], next: Label[]) {
 export function CanonicalEditorWorkbench() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [labels, setLabels] = useState<Label[]>([]);
+  const [samPrompts, setSamPrompts] = useState<SamPrompt[]>([]);
+  const [samPreview, setSamPreview] = useState<PolygonAnnotation | null>(null);
+  const [samLoading, setSamLoading] = useState(false);
+  const [samNegative, setSamNegative] = useState(false);
   const [activeLabel, setActiveLabel] = useState("");
   const [tool, setTool] = useState<DrawingTool>("select");
   const [vectorTool, setVectorTool] = useState<VectorTool>(null);
@@ -388,6 +396,55 @@ export function CanonicalEditorWorkbench() {
     window.addEventListener("poligome:run-byom", run);
     return () => window.removeEventListener("poligome:run-byom", run);
   }, [runByomModel]);
+
+  /**
+   * Cada clique com a ferramenta SAM acrescenta um prompt e repete a predição com
+   * todos eles: é assim que um ponto negativo corrige o que o positivo pegou
+   * demais. A máscara fica como proposta até o usuário salvar, do mesmo jeito que
+   * um rascunho de polígono — errar um clique não pode sujar a lista.
+   */
+  const requestSamPreview = useCallback(async (prompts: SamPrompt[]) => {
+    if (!asset || !prompts.length) { setSamPreview(null); return; }
+    const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
+    setSamLoading(true);
+    try {
+      const annotation = await requestSamAnnotation({
+        id: makeId("sam"),
+        asset,
+        label: activeLabel,
+        endpoint: stored || DEFAULT_SAM_ENDPOINT,
+        prompts,
+        copy,
+      });
+      setSamPreview(annotation);
+    } catch (error) {
+      setSamPreview(null);
+      setMessage(error instanceof Error ? error.message : copy.errSamUnreachable);
+    } finally {
+      setSamLoading(false);
+    }
+  }, [activeLabel, asset, copy, makeId]);
+
+  function addSamPrompt(point: { x: number; y: number }, negative: boolean) {
+    const next: SamPrompt[] = [...samPrompts, { x: point.x, y: point.y, label: negative ? 0 : 1 }];
+    setSamPrompts(next);
+    void requestSamPreview(next);
+  }
+
+  function restartSam() {
+    setSamPrompts([]);
+    setSamPreview(null);
+    setMessage(copy.samRestarted);
+  }
+
+  function acceptSamMask() {
+    if (!samPreview) return;
+    editor.appendAnnotations([samPreview], true);
+    setSamPrompts([]);
+    setSamPreview(null);
+    setSessionDirty(true);
+    setMessage(copy.samSavedToolActive);
+  }
 
   useEffect(() => {
     if (demoQueryHandled.current || typeof window === "undefined") return;
@@ -854,6 +911,21 @@ export function CanonicalEditorWorkbench() {
   const canvasCursor = panning ? (touch.navigating || mousePanning ? "grabbing" : "grab") : vectorEditing || !selecting ? "crosshair" : "default";
   const overlay = <>
     <DrawingDraftLayer draft={drawing.draft} color={activeColor} lineThickness={lineThickness} />
+    {/* A máscara aparece tracejada porque ainda é proposta: só o salvar a torna anotação. */}
+    {samPreview && <polygon
+      className="sam-mask-preview"
+      points={samPreview.vertices.map((vertex) => `${vertex.x},${vertex.y}`).join(" ")}
+      fill={`${activeColor}26`}
+      stroke={activeColor}
+      strokeWidth={lineThickness}
+      vectorEffect="non-scaling-stroke"
+      pointerEvents="none"
+    />}
+    {samPrompts.map((prompt, index) => <g key={`sam-prompt-${index}`} className={`sam-prompt ${prompt.label === 1 ? "positive" : "negative"}`}>
+      <circle cx={prompt.x} cy={prompt.y} r={6 * guideUnit} strokeWidth={2 * guideUnit} vectorEffect="non-scaling-stroke" />
+      <line x1={prompt.x - 3 * guideUnit} y1={prompt.y} x2={prompt.x + 3 * guideUnit} y2={prompt.y} strokeWidth={2 * guideUnit} vectorEffect="non-scaling-stroke" />
+      {prompt.label === 1 && <line x1={prompt.x} y1={prompt.y - 3 * guideUnit} x2={prompt.x} y2={prompt.y + 3 * guideUnit} strokeWidth={2 * guideUnit} vectorEffect="non-scaling-stroke" />}
+    </g>)}
     <AdvancedVectorDraftLayer draft={advanced.draft} color={activeColor} lineThickness={lineThickness} />
     <DemoTutorialOverlay step={demoTutorialStep} toolPrompt={demoTutorialToolPrompt} imageSize={imageSize} />
     {coordinatesGuide && cursorPoint && <g className="coordinate-guide" pointerEvents="none">
@@ -887,6 +959,8 @@ export function CanonicalEditorWorkbench() {
       return;
     }
     if (coordinatesGuide) setCursorPoint(imagePoint);
+    // Shift ou botão direito marcam o que deve ficar de fora, sem trocar de modo.
+    if (tool === "sam") { addSamPrompt(imagePoint, samNegative || event.button === 2 || event.shiftKey); return; }
     if (vectorEditing) advanced.onPointerDown(event);
     else if (selecting) interactions.selectAtCanvas(event);
     else drawing.onPointerDown(event);
@@ -1163,6 +1237,20 @@ export function CanonicalEditorWorkbench() {
               </div>
             </div>
           </section>
+          {tool === "sam" && <div className="sam-controls">
+            <div>
+              <button className={samNegative ? "" : "active"} onClick={() => setSamNegative(false)}><Plus size={13} />{copy.samInclude}</button>
+              <button className={samNegative ? "active" : ""} onClick={() => setSamNegative(true)}><Minus size={13} />{copy.samExclude}</button>
+              <span className="sam-prompt-count">
+                {samLoading ? <><LoaderCircle className="spin" size={13} />{copy.samSegmenting}</> : `${samPrompts.length} ${copy.samPoints}`}
+              </span>
+            </div>
+            <div className="sam-actions">
+              <button disabled={!samPrompts.length && !samPreview} onClick={restartSam}><ListRestart size={14} />{copy.samRestart}</button>
+              <button className="accept" disabled={!samPreview || samLoading} onClick={acceptSamMask}><Check size={14} />{copy.samSaveEdit}</button>
+              <button aria-label={copy.samConfigure} title={copy.samConfigure} onClick={() => window.dispatchEvent(new CustomEvent("poligome:open-sam"))}><Settings2 size={15} /></button>
+            </div>
+          </div>}
         </div>
         <PreRefactorStatus {...chromeProps} />
       </section>
