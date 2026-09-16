@@ -26,6 +26,8 @@ DEVICE="${POLIGOME_DEVICE:-auto}"
 
 SAM2_REVISION="2b90b9f5ceec907a1c18123530e92e794ad901a4"
 SAM3_REVISION="8f0b7f4d4e7eda2ed606ebde6702c93359ad01da"
+# As rodas oficiais do PyTorch CUDA 12.8 trazem kernels de sm_70 em diante.
+SAM3_MIN_COMPUTE_MAJOR=7
 
 usage() {
   cat <<'EOF'
@@ -486,6 +488,22 @@ check_platform() {
       fail "SAM 3 exige uma GPU NVIDIA disponível no Linux; nvidia-smi não foi encontrado."
     nvidia-smi -L >/dev/null 2>&1 ||
       fail "SAM 3 exige uma GPU NVIDIA funcional; nvidia-smi não conseguiu acessá-la."
+    # Ter CUDA não basta: as rodas oficiais do PyTorch CUDA 12.8 trazem kernels
+    # de sm_70 para cima, e numa placa mais antiga torch.cuda.is_available()
+    # responde "sim" mas toda execução morre com
+    # "no kernel image is available for execution on the device". Perguntar a
+    # capability aqui custa nada e evita baixar o runtime e o checkpoint —
+    # cerca de 11 GB — para só então descobrir isso.
+    local capability major minor gpu_name
+    capability="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+    if [[ "$capability" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+      major="${BASH_REMATCH[1]}"
+      minor="${BASH_REMATCH[2]}"
+      if (( major < SAM3_MIN_COMPUTE_MAJOR )); then
+        gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1)"
+        fail "SAM 3 exige uma GPU com capability ${SAM3_MIN_COMPUTE_MAJOR}.0 ou maior; ${gpu_name:-esta GPU} tem ${major}.${minor}. O PyTorch CUDA 12.8 não publica kernels para ela, e o modelo não chegaria a carregar. Escolha um SAM 2.1 ou MedSAM2, que rodam nesta máquina."
+      fi
+    fi
   fi
 }
 
@@ -574,9 +592,30 @@ install_runtime() {
 }
 
 verify_runtime_device() {
+  local diagnostico
   if [[ "$FAMILY" == "sam3" ]]; then
     "$PYTHON" -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)' >/dev/null 2>&1 ||
       fail "o PyTorch do SAM 3 não conseguiu usar a GPU NVIDIA. Confirme driver e compatibilidade CUDA 12.6+."
+    # torch.cuda.is_available() responde "sim" mesmo quando a instalação não tem
+    # kernel para a arquitetura da placa. Nesse caso o carregamento morre com
+    # "no kernel image is available for execution on the device", que não diz o
+    # que houve. Comparar a capability com a lista de arquiteturas compiladas
+    # transforma isso numa frase que o usuário entende.
+    diagnostico="$("$PYTHON" - <<'PY' 2>/dev/null
+import torch
+
+major, minor = torch.cuda.get_device_capability(0)
+compiladas = [a for a in torch.cuda.get_arch_list() if a.startswith("sm_")]
+suportadas = {int(a.removeprefix("sm_")) for a in compiladas}
+if suportadas and (major * 10 + minor) not in suportadas:
+    print(
+        f"{torch.cuda.get_device_name(0)} tem capability {major}.{minor}, "
+        f"e este PyTorch traz kernels apenas para {', '.join(compiladas)}"
+    )
+PY
+)" || true
+    [[ -z "$diagnostico" ]] ||
+      fail "a GPU não é compatível com o PyTorch instalado para o SAM 3: ${diagnostico}. O modelo não chegaria a carregar. Escolha um SAM 2.1 ou MedSAM2, que rodam nesta máquina."
   fi
 }
 

@@ -357,9 +357,42 @@ máquina sem CUDA falha na hora, dizendo isso, em vez de carregar o modelo e
 quebrar depois. O serviço do systemd grava a escolha na unidade, então ela
 sobrevive ao reinício.
 
-**O SAM 3 é a exceção:** ele exige CUDA, e `POLIGOME_DEVICE=cpu` não o libera.
-O conector recusa explicitamente CPU e MPS para essa família, porque o modelo
-não foi validado fora da GPU nesta implementação.
+### Por que o SAM 3 não roda em CPU
+
+Essa é a única exceção, e ela não vem do Poligome: vem do código da Meta.
+Pedir CPU ao SAM 3 é recusado pelo conector, e a recusa apenas antecipa o que
+aconteceria adiante. Exercitando o modelo com a guarda desligada e a GPU
+escondida, o carregamento morre aqui:
+
+```
+sam3/model_builder.py, em build_sam3_image_model
+  -> _create_vision_backbone
+  -> _create_position_encoding
+     sam3/model/position_encoding.py, linha 55:
+     tensors = torch.zeros((1, 1) + size, device="cuda")
+RuntimeError: No CUDA GPUs are available
+```
+
+O `device="cuda"` está escrito no próprio upstream e ignora o dispositivo
+pedido. Não há configuração que contorne isso, e é por isso que o conector diz
+não logo na entrada, em vez de deixar o usuário esperar o download de 3,45 GB
+para receber um erro de CUDA no fim.
+
+### A GPU precisa ser nova o bastante
+
+Ter uma GPU NVIDIA também não basta. As rodas oficiais do PyTorch CUDA 12.8
+trazem kernels de `sm_70` em diante, então uma placa anterior a isso é
+reconhecida mas não executa nada:
+
+```
+NVIDIA GeForce GTX 1050 with CUDA capability sm_61 is not compatible
+with the current PyTorch installation.
+```
+
+O instalador confere a capability pelo `nvidia-smi` antes de baixar qualquer
+coisa e recusa em segundos, dizendo qual é a placa e qual é o mínimo. Sem essa
+conferência, o erro só apareceria depois de cerca de 11 GB baixados, na forma
+de `no kernel image is available for execution on the device`.
 
 ---
 

@@ -339,12 +339,14 @@ const SAM3_REQUIREMENTS = {
   cuda: {
     required: true,
     minimum: "12.6",
-    notes: "A instalação oficial exige uma GPU compatível com CUDA 12.6 ou superior.",
+    notes:
+      "A instalação oficial exige CUDA 12.6 ou superior e uma GPU com capability 7.0 ou maior: as rodas do PyTorch CUDA 12.8 trazem kernels de sm_70 em diante, e numa placa anterior o modelo é reconhecido mas não executa. O instalador confere isso pelo nvidia-smi antes de baixar qualquer coisa.",
   },
   compute: {
     cpuSupported: false,
     gpu: "required",
-    notes: "A Meta documenta somente inferência com GPU CUDA para esta versão.",
+    notes:
+      "Só GPU. Não é uma escolha do Poligome: o código da Meta aloca a codificação de posição com device=\"cuda\" fixo, ignorando o dispositivo pedido, então pedir CPU falha com \"No CUDA GPUs are available\".",
   },
   ram: {
     officialMinimumGb: null,

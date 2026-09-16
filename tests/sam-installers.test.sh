@@ -1022,6 +1022,22 @@ test_device_is_choosable() {
   pass "dispositivo é escolhível pelo usuário nos cinco iniciadores"
 }
 
+# torch.cuda.is_available() responde "sim" numa placa antiga demais, e só o
+# carregamento revela que não há kernel para ela. Sem conferir a capability
+# antes, o usuário baixa cerca de 11 GB para receber
+# "no kernel image is available for execution on the device".
+test_sam3_rejects_old_gpu() {
+  local installer_source
+  installer_source="$(<"$INSTALLER")"
+  assert_contains "$installer_source" 'SAM3_MIN_COMPUTE_MAJOR=7' "mínimo de capability declarado"
+  assert_contains "$installer_source" '--query-gpu=compute_cap' "capability consultada pelo nvidia-smi"
+  assert_contains "$installer_source" 'torch.cuda.get_arch_list()' "arquiteturas compiladas conferidas no PyTorch"
+  # a consulta precisa vir antes do download, senão não evita nada
+  assert_before "$installer_source" '--query-gpu=compute_cap' 'ensure_checkpoint' \
+    "capability conferida antes de baixar o checkpoint"
+  pass "SAM 3 recusa GPU antiga antes de baixar runtime e checkpoint"
+}
+
 bash -n "$INSTALLER" "$STARTER" "$SERVICE"
 pass "sintaxe dos scripts Bash"
 
@@ -1044,5 +1060,6 @@ test_cross_artifact_matrix
 test_pinned_default_connector
 test_service_covers_every_model
 test_device_is_choosable
+test_sam3_rejects_old_gpu
 
 printf '\nTodos os testes locais dos instaladores SAM passaram.\n'
