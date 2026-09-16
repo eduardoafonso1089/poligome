@@ -57,6 +57,7 @@ export function LocalConnectionExplainer({ copy }: { copy: Copy }) {
       <li>{copy.samHowSam}</li>
       <li>{copy.samHowByom}</li>
     </ul>
+    <p className="local-connection-manual">{copy.samHowWindows}</p>
     <p className="local-connection-manual">{copy.samHowManual}</p>
   </section>;
 }
