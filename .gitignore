@@ -67,3 +67,10 @@ public/amostras/
 *.pt.part
 *.ckpt.part
 *.safetensors.part
+
+# Worktrees que ferramentas de edição criam dentro do repositório. Elas não são
+# rastreadas, mas sem esta linha um `git add -A` levaria uma cópia inteira da
+# árvore junto, e o eslint percorre os arquivos duplicados como se fossem
+# código-fonte — foram 48 erros fantasma, todos em app/ duplicado, enquanto os
+# mesmos arquivos de verdade ficam no teto de avisos que o CI aceita.
+/.kilo/
