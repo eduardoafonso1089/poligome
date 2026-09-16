@@ -785,7 +785,7 @@ assert_model_list_matches() {
   local index
   for index in "${!MODELS[@]}"; do
     [[ "${actual[$index]}" == "${MODELS[$index]}" ]] ||
-      fail "${context}: posição ${index} contém ${actual[$index]}, esperava ${MODELS[$index]}"
+      fail "${context}: posição ${index} contém '${actual[$index]}', esperava '${MODELS[$index]}'"
   done
 }
 
@@ -935,13 +935,15 @@ test_sam3_autocast() {
 test_cross_artifact_matrix() {
   local app_models=()
   local connector_models=()
+  # O sed abaixo não ancora o fim da linha, então um checkout com CRLF deixava
+  # o \r colado no ID e a comparação falhava exibindo dois valores idênticos.
   mapfile -t app_models < <(
     sed -n '/^export const SAM_MODELS = \[/,/^] as const satisfies/p' "${PROJECT_ROOT}/app/lib/sam-models.ts" |
-      sed -n 's/^[[:space:]]*id: "\([^"]*\)",/\1/p'
+      sed -n 's/^[[:space:]]*id: "\([^"]*\)",/\1/p' | tr -d '\r'
   )
   mapfile -t connector_models < <(
     sed -n '/^MODEL_SPECS = {/,/^}/p' "$CONNECTOR_SOURCE" |
-      sed -n 's/^    "\([^"]*\)": ModelSpec.*/\1/p'
+      sed -n 's/^    "\([^"]*\)": ModelSpec.*/\1/p' | tr -d '\r'
   )
   assert_model_list_matches "catálogo da aplicação" "${app_models[@]}"
   assert_model_list_matches "conector Python" "${connector_models[@]}"
@@ -953,15 +955,24 @@ test_pinned_default_connector() {
   local connector_sha
   installer_source="$(<"$INSTALLER")"
   connector_sha="$(sha256sum "$CONNECTOR_SOURCE" | awk '{print $1}')"
+  # A integridade vem do SHA-256, não do endereço: o hash do arquivo é
+  # conhecido antes de commitar, enquanto o hash de um commit só existe
+  # depois dele — fixar a URL num commit fazia ela nascer apontando para a
+  # revisão anterior, e no caso do renome do produto para um caminho que
+  # nunca existiu. A URL passa a derivar da base de assets, e é o SHA que
+  # garante que o arquivo baixado é este.
   assert_contains "$installer_source" \
-    'DEFAULT_CONNECTOR_URL="https://raw.githubusercontent.com/eduardoafonso1089/epiaka/4603525db08be5e86fb95ea58b43d606d731f99f/public/poligome-sam-local.py"' \
-    "URL imutável do conector padrão"
+    'DEFAULT_CONNECTOR_URL="${DEFAULT_ASSET_BASE_URL}/poligome-sam-local.py"' \
+    "URL do conector derivada da base de assets"
+  assert_contains "$installer_source" \
+    'DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"' \
+    "base de assets no repositório publicado"
   assert_contains "$installer_source" \
     "DEFAULT_CONNECTOR_SHA256=\"${connector_sha}\"" \
     "SHA-256 do conector padrão"
   assert_contains "$installer_source" 'if [[ "$actual_sha256" != "$expected_sha256" ]]' \
     "verificação do conector versionado"
-  pass "conector padrão usa commit imutável e SHA-256 conhecido"
+  pass "conector padrão vem da base publicada e é conferido por SHA-256"
 }
 
 bash -n "$INSTALLER" "$STARTER"
