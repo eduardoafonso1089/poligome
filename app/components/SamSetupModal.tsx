@@ -5,6 +5,8 @@ import {
   AlertTriangle, Boxes, Check, Cpu, Download, ExternalLink, Gauge, HardDrive,
   KeyRound, Laptop, Link2, Pencil, Plus, PowerOff, Server, ShieldCheck, Sparkles, Terminal, Trash2, X,
 } from "lucide-react";
+import { getCopy } from "../lib/i18n";
+import { LocalConnectionExplainer } from "./LocalConnectionExplainer";
 import { SAM_MODELS, getSamModel } from "../lib/sam-models";
 import { BYOM_MODEL_ID_PATTERN, describeByomModel } from "../lib/sam-models";
 import type { ByomModel, SamModelDefinition } from "../lib/sam-models";
@@ -87,34 +89,34 @@ function benchmarkSummary(model: SamModelDefinition) {
 
 const BYOM_STEPS = [
   {
-    title: "1. Escreva o servidor de inferência",
+    title: "1. Baixe o exemplo e troque o predict()",
     body:
-      "O contêiner precisa responder GET /ping com 200 quando estiver pronto e receber POST /invocations na porta 8080. Os botões de Arquivos do BYOM, mais abaixo, baixam o serve.py e o Dockerfile de exemplo, que já implementam o contrato inteiro: troque a função predict() pelo seu modelo e mantenha o resto.",
-    command: "docker --version   # confirme que o Docker responde",
+      "Os três botões de Arquivos do BYOM, logo acima, trazem a CLI, o Dockerfile e o serve.py. O serve.py já implementa o contrato inteiro — /ping, /invocations e a serialização COCO — então o que sobra para você é a função predict(). Rode os comandos seguintes na pasta onde os arquivos caíram.",
+    command: "cd ~/Downloads   # a pasta em que o navegador salvou os três arquivos",
   },
   {
     title: "2. Construa a imagem",
     body:
-      "O Dockerfile de exemplo já declara a porta 8080, cria /opt/ml/model e inicia com serve. Use o seu próprio se preferir, desde que respeite o contrato.",
+      "O Dockerfile de exemplo já declara a porta 8080, cria /opt/ml/model e inicia com serve. Use o seu próprio se preferir, desde que respeite o contrato. O ponto final é o diretório do Dockerfile, e não um nome de arquivo.",
     command: "docker build -t meu-modelo .",
   },
   {
     title: "3. Registre o modelo",
     body:
-      "O registro grava um arquivo em ~/.poligome-sam/byom. O identificador precisa começar com byom- para nunca colidir com um modelo oficial.",
-    command: "bash poligome-byom-macos-linux.sh register --model-id byom-meu-modelo --image meu-modelo",
+      "O registro grava um arquivo em ~/.poligome-sam/byom. O identificador precisa começar com byom- para nunca colidir com um modelo oficial. Repetir o register com outro --model-id, outra --port e outro --env faz a mesma imagem servir a vários modelos: é assim que o exemplo entrega dois.",
+    command: "bash poligome-byom-macos-linux.sh register --model-id byom-meu-modelo --image meu-modelo --name \"Meu modelo\" --port 8080 --env METHOD=otsu",
   },
   {
     title: "4. Suba o contêiner",
     body:
-      "O comando publica a porta apenas em 127.0.0.1 e espera o /ping responder antes de declarar sucesso. Depois disso o modelo aparece na lista ao lado.",
+      "O comando publica a porta apenas em 127.0.0.1 e espera o /ping responder antes de declarar sucesso. Se o contêiner morrer antes disso, as últimas linhas do log aparecem na saída. Depois do /ping o modelo aparece na lista ao lado.",
     command: "bash poligome-byom-macos-linux.sh start --model-id byom-meu-modelo",
   },
   {
     title: "5. Depois de reiniciar, suba de novo",
     body:
-      "Os contêineres são criados sem política de reinício, então reiniciar o computador ou o Docker os deixa parados. O registro sobrevive, o processo não — e o editor descobre o que está no ar, mas não pode ligar nada. Repetir o comando é seguro: ele não sobe um segundo contêiner se o /ping já responde.",
-    command: "bash poligome-byom-macos-linux.sh examples",
+      "Os contêineres são criados sem política de reinício, então reiniciar o computador ou o Docker os deixa parados. O registro sobrevive, o processo não — e o editor descobre o que está no ar, mas não pode ligar nada. Repetir o start é seguro: ele não sobe um segundo contêiner se o /ping já responde. Para que um contêiner volte junto com o Docker, marque-o uma vez com docker update --restart unless-stopped.",
+    command: "bash poligome-byom-macos-linux.sh start --model-id byom-meu-modelo",
   },
 ] as const;
 
@@ -228,6 +230,10 @@ function ByomPanel({
       </p>
     </section>
 
+    {/* Este painel é escrito em português direto, sem i18n; getCopy("pt") mantém o desenho
+        coerente com o resto até a tela receber um idioma de fora. */}
+    <LocalConnectionExplainer copy={getCopy("pt")} />
+
     <section className="byom-steps">
       <h4>Antes de começar</h4>
       <article>
@@ -252,7 +258,7 @@ function ByomPanel({
           responder de dentro dessa distribuição — pela integração WSL do Docker Desktop ou por um Docker instalado
           nela.
         </p>
-        <code>wsl bash poligome-byom-macos-linux.sh examples</code>
+        <code>{"wsl bash poligome-byom-macos-linux.sh list"}</code>
       </article>
     </section>
 
@@ -265,34 +271,79 @@ function ByomPanel({
           <tr><th>Saúde</th><td><code>GET /ping</code> devolve 200 quando o modelo está carregado</td></tr>
           <tr><th>Inferência</th><td><code>POST /invocations</code> recebe a imagem, devolve COCO</td></tr>
           <tr><th>Pesos</th><td><code>/opt/ml/model</code>, igual ao SageMaker</td></tr>
+          <tr><th>Descrição</th><td><code>GET /metadata</code>, opcional: classes, geometria, parâmetros e limitações</td></tr>
         </tbody>
       </table>
       <p className="byom-io">
-        <b>Entrada:</b> <code>{"{ image, file_name, width, height }"}</code>
+        <b>Entrada:</b> <code>{"{ image, file_name, width, height }"}</code> — a imagem inteira, sem prompt nenhum.
         <br />
         <b>Saída:</b> COCO com <code>images</code>, <code>categories</code> e <code>annotations</code>. Cada anotação
         precisa de <code>segmentation</code>, <code>bbox</code> ou <code>keypoints</code>, e o <code>category_id</code>{" "}
-        vira a classe da anotação no editor.
+        vira a classe da anotação no editor. <code>segmentation</code> só é aceita como lista de pontos{" "}
+        <code>[x, y, x, y, …]</code>: RLE, o outro formato do COCO, é recusado. Sem geometria, o conector recusa a
+        resposta inteira e diz qual anotação está incompleta.
+        <br />
+        <b>Erros:</b> responda <code>{"{ \"detail\": \"mensagem\" }"}</code> — o texto aparece na tela como está, então
+        escreva para quem está anotando. Enquanto o modelo carrega, responda <code>/ping</code> com qualquer status
+        diferente de <code>200</code>.
+      </p>
+      <p className="byom-import-hint">
+        O <code>/metadata</code> é o que preenche a ficha do modelo aqui do lado antes da primeira execução: sem ele, a
+        ficha só tem o que a última execução devolveu.
       </p>
     </section>
 
-    <section className="byom-steps">
-      <h4>Passo a passo</h4>
-      {BYOM_STEPS.map((step) => <article key={step.title}>
-        <b>{step.title}</b>
-        <p>{step.body}</p>
-        <code>{step.command}</code>
-      </article>)}
-    </section>
-
+    {/* Os arquivos vêm antes do passo a passo porque o primeiro passo é baixá-los. */}
     <section className="sam-install-panel">
-      <div><b>Arquivos do BYOM</b><p>O exemplo detecta regiões por limiar de Otsu, sem GPU, e devolve COCO com polígono, caixa e ponto central. Serve de molde: troque a função predict().</p></div>
+      <div><b>Arquivos do BYOM</b><p>O serve.py de exemplo devolve COCO com polígono, caixa e ponto central, sem GPU, e traz dois métodos escolhidos pela variável METHOD: otsu, que junta objetos encostados numa região só, e watershed, que os separa. Serve de molde: troque a função predict() e mantenha o resto.</p></div>
       <div className="sam-install-actions">
         <a className="primary" href="/poligome-byom-macos-linux.sh" download><Download size={15} /><span><strong>CLI do BYOM</strong><small>register · start · status · logs</small></span></a>
         <a href="/byom/Dockerfile" download><Download size={15} /><span><strong>Dockerfile de exemplo</strong><small>python:3.12-slim, porta 8080</small></span></a>
         <a href="/byom/serve.py" download><Download size={15} /><span><strong>serve.py de exemplo</strong><small>/ping e /invocations prontos</small></span></a>
       </div>
       <code>bash poligome-byom-macos-linux.sh --help</code>
+    </section>
+
+    <section className="byom-steps">
+      <h4>Ver os dois exemplos funcionando antes de empacotar nada</h4>
+      <article>
+        <b>Com o repositório clonado</b>
+        <p>
+          Um comando constrói a imagem de exemplo e registra dois modelos a partir dela — byom-otsu na porta 8080 e
+          byom-watershed na 8081. Chame-o pelo caminho dentro do repositório, da raiz: sem --path, ele procura o
+          Dockerfile e os registros prontos na pasta byom ao lado do próprio script, que é public/byom. Esses
+          registros não vêm nos botões de download acima. Reexecutar não sobrescreve um registro que você já tenha
+          ajustado.
+        </p>
+        <code>bash public/poligome-byom-macos-linux.sh examples</code>
+      </article>
+      <article>
+        <b>Só com os arquivos baixados</b>
+        <p>
+          Sem o repositório, o comando examples não tem de onde ler os registros e para dizendo isso. O caminho é
+          construir a imagem uma vez e registrar dois modelos com METHOD diferente — que é exatamente o que o examples
+          faz por dentro, e a razão de o register aceitar --env.
+        </p>
+        <code>{"docker build -t poligome-byom-exemplo .\nbash poligome-byom-macos-linux.sh register --model-id byom-otsu --image poligome-byom-exemplo --name \"Exemplo Otsu\" --port 8080 --env METHOD=otsu\nbash poligome-byom-macos-linux.sh register --model-id byom-watershed --image poligome-byom-exemplo --name \"Exemplo Watershed\" --port 8081 --env METHOD=watershed\nbash poligome-byom-macos-linux.sh start --model-id byom-otsu\nbash poligome-byom-macos-linux.sh start --model-id byom-watershed"}</code>
+      </article>
+      <article>
+        <b>Conferir sem sair do terminal</b>
+        <p>
+          O list mostra imagem, contêiner e o código do /ping de cada registro. Aparecer na lista aqui do lado depende
+          só de estar registrado — é o /ping 200 que muda o card de contêiner parado para no ar e libera a anotação.
+          Quando ele não responde, o logs diz o motivo.
+        </p>
+        <code>{"bash poligome-byom-macos-linux.sh list\nbash poligome-byom-macos-linux.sh logs --model-id byom-otsu"}</code>
+      </article>
+    </section>
+
+    <section className="byom-steps">
+      <h4>Passo a passo do seu modelo</h4>
+      {BYOM_STEPS.map((step) => <article key={step.title}>
+        <b>{step.title}</b>
+        <p>{step.body}</p>
+        <code>{step.command}</code>
+      </article>)}
     </section>
 
     <section className="byom-registered">
@@ -326,11 +377,12 @@ function ByomPanel({
     <section className="byom-limits">
       <AlertTriangle size={15} />
       <div>
-        <b>Duas coisas precisam estar no ar</b>
+        <b>Quando não aparece nada</b>
         <p>
-          O conector do Poligome, em <code>127.0.0.1:7860</code>, e o contêiner do modelo. Nenhum dos dois sobe
-          sozinho, e nenhuma página web pode iniciá-los — o editor encontra o que já está rodando, e só. Se o
-          conector estiver parado, o BYOM nem aparece na lista.
+          Lista vazia é quase sempre o conector parado, porque é ele quem enxerga o registro: suba-o pelo painel dos
+          modelos e volte a esta aba. Modelo na lista mas marcado como parado é o contêiner caído — <code>logs</code>{" "}
+          diz o motivo, e o mais comum é a porta já ocupada por outro contêiner. Registro apagado por engano não leva
+          junto nem a imagem nem o contêiner: basta registrar de novo com o mesmo <code>--model-id</code>.
         </p>
       </div>
     </section>
