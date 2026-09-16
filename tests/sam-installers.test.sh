@@ -907,9 +907,22 @@ test_windows_static_matrix() {
   assert_contains "$installer_wsl" "--proto '=https' --proto-redir '=https'" "HTTPS restrito no instalador WSL"
   assert_contains "$starter_wsl" "--proto '=https' --proto-redir '=https'" "HTTPS restrito no iniciador WSL"
   for file in "$WINDOWS_INSTALLER" "$WINDOWS_STARTER"; do
+    # Sem --exec o wsl.exe passa o comando pelo shell padrão da distribuição,
+    # que expande o script uma vez antes do bash: as variáveis atribuídas
+    # dentro dele chegam vazias e a linha morre em erro de sintaxe.
+    [[ "$(grep -c 'wsl\.exe -- bash -lc' "$file")" == 0 ]] ||
+      fail "$(basename "$file"): chamada ao WSL precisa de --exec, senão o script é expandido duas vezes"
+    [[ "$(grep -c 'wsl\.exe --exec bash -lc' "$file")" -gt 0 ]] ||
+      fail "$(basename "$file"): nenhuma chamada wsl.exe --exec encontrada"
+    count=0
     while IFS= read -r block; do
+      count=$((count + 1))
       bash -n -c "$block" || fail "$(basename "$file"): bloco bash -lc do WSL possui sintaxe inválida"
-    done < <(sed -n 's/^wsl\.exe -- bash -lc "\(.*\)"$/\1/p' "$file")
+      # O \r de um checkout Windows é removido acima; se ele chegasse aqui, o
+      # bash -n reprovaria o bloco em vez de deixá-lo passar sem conferência.
+    done < <(tr -d '\r' <"$file" | sed -n 's/^wsl\.exe --exec bash -lc "\(.*\)"$/\1/p')
+    [[ "$count" -gt 0 ]] ||
+      fail "$(basename "$file"): nenhum bloco bash -lc foi extraído para conferência de sintaxe"
   done
   pass "BATs preservam matriz, transação, roteamento WSL2, health e cache"
 }
