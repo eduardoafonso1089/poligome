@@ -4,8 +4,8 @@ set -euo pipefail
 POLIGOME_SAM_INSTALLER_API=2
 
 DEFAULT_SITE_URL="https://www.poligome.com"
-DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/epiaka/main/public"
-DEFAULT_CONNECTOR_URL="https://raw.githubusercontent.com/eduardoafonso1089/epiaka/4603525db08be5e86fb95ea58b43d606d731f99f/public/poligome-sam-local.py"
+DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
+DEFAULT_CONNECTOR_URL="${DEFAULT_ASSET_BASE_URL}/poligome-sam-local.py"
 DEFAULT_CONNECTOR_SHA256="d58d8d6ddf92d2e2378eab50ea39e27217d8a7ddb94106c6e237ae0716165b33"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE_URL="${POLIGOME_SITE_URL:-${DEFAULT_SITE_URL}}"

@@ -5,8 +5,8 @@ title Poligome SAM local - instalar modelo
 set "POLIGOME_SAM_WINDOWS_INSTALLER_API=2"
 
 set "DEFAULT_SITE_URL=https://www.poligome.com"
-set "DEFAULT_ASSET_BASE_URL=https://raw.githubusercontent.com/eduardoafonso1089/epiaka/main/public"
-set "DEFAULT_CONNECTOR_URL=https://raw.githubusercontent.com/eduardoafonso1089/epiaka/4603525db08be5e86fb95ea58b43d606d731f99f/public/poligome-sam-local.py"
+set "DEFAULT_ASSET_BASE_URL=https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
+set "DEFAULT_CONNECTOR_URL=%DEFAULT_ASSET_BASE_URL%/poligome-sam-local.py"
 set "DEFAULT_CONNECTOR_SHA256=d58d8d6ddf92d2e2378eab50ea39e27217d8a7ddb94106c6e237ae0716165b33"
 set "SITE_URL=%POLIGOME_SITE_URL%"
 if not defined SITE_URL set "SITE_URL=%DEFAULT_SITE_URL%"

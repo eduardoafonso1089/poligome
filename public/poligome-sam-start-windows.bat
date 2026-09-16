@@ -5,7 +5,7 @@ title Poligome SAM local - iniciar modelo selecionado
 set "POLIGOME_SAM_WINDOWS_STARTER_API=2"
 
 set "DEFAULT_SITE_URL=https://www.poligome.com"
-set "DEFAULT_ASSET_BASE_URL=https://raw.githubusercontent.com/eduardoafonso1089/epiaka/main/public"
+set "DEFAULT_ASSET_BASE_URL=https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 set "SITE_URL=%POLIGOME_SITE_URL%"
 if not defined SITE_URL set "SITE_URL=%DEFAULT_SITE_URL%"
 if "!SITE_URL:~-1!"=="/" set "SITE_URL=!SITE_URL:~0,-1!"
