@@ -28,7 +28,7 @@ import { demoRouteTarget } from "../session/demo-route";
 import { importCocoDocument, type CocoDocumentInput } from "../import/coco-document-import";
 import { assetAsDataUrl } from "../../lib/sam";
 import { connectorBaseUrl, DEFAULT_SAM_ENDPOINT } from "../../lib/sam-connector";
-import { Check, ListRestart, LoaderCircle, Minus, Plus, Settings2 } from "lucide-react";
+import { Check, ListRestart, LoaderCircle, Minus, Plus, Settings2, X } from "lucide-react";
 import { requestSamAnnotation } from "../models/model-output";
 import type { SamPrompt } from "../../lib/types";
 import type { PolygonAnnotation } from "../models/annotation-model";
@@ -574,6 +574,9 @@ export function CanonicalEditorWorkbench() {
   }
 
   function chooseTool(next: DrawingTool) {
+    // Sair da ferramenta SAM descarta os prompts e a proposta: guardá-los faria a
+    // máscara reaparecer numa ferramenta que não a produziu.
+    if (next !== "sam" && (samPrompts.length || samPreview)) { setSamPrompts([]); setSamPreview(null); }
     if (next !== tool) drawing.cancelDraft();
     advanced.cancel();
     setVectorTool(null);
@@ -1249,6 +1252,8 @@ export function CanonicalEditorWorkbench() {
               <button disabled={!samPrompts.length && !samPreview} onClick={restartSam}><ListRestart size={14} />{copy.samRestart}</button>
               <button className="accept" disabled={!samPreview || samLoading} onClick={acceptSamMask}><Check size={14} />{copy.samSaveEdit}</button>
               <button aria-label={copy.samConfigure} title={copy.samConfigure} onClick={() => window.dispatchEvent(new CustomEvent("poligome:open-sam"))}><Settings2 size={15} /></button>
+              {/* Sem isto a barra não tinha saída: entrar na ferramenta era fácil e sair, não. */}
+              <button aria-label={copy.samDeactivate} title={copy.samDeactivate} onClick={() => chooseTool("select")}><X size={15} /></button>
             </div>
           </div>}
         </div>

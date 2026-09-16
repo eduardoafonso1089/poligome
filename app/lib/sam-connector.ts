@@ -121,15 +121,34 @@ export async function requestModelLoad(base: string, modelId: string): Promise<L
 export async function waitForModel(
   base: string,
   modelId: string,
-  { timeoutMs = 180_000, onTick }: { timeoutMs?: number; onTick?: (health: ConnectorHealth | null) => void } = {},
+  { timeoutMs = 180_000, gaveUpAfterMs = 45_000, onTick }: {
+    timeoutMs?: number;
+    gaveUpAfterMs?: number;
+    onTick?: (health: ConnectorHealth | null) => void;
+  } = {},
 ): Promise<{ ok: true } | { ok: false; detail: string }> {
   const deadline = Date.now() + timeoutMs;
+  let downSince: number | null = null;
   while (Date.now() < deadline) {
     const health = await fetchHealth(base, 3_000);
     onTick?.(health);
-    if (health?.model_id === modelId) {
-      if (health.status === "ready") return { ok: true };
-      if (health.status === "error") return { ok: false, detail: health.error || "o modelo falhou ao carregar." };
+    if (health) {
+      downSince = null;
+      if (health.model_id === modelId) {
+        if (health.status === "ready") return { ok: true };
+        if (health.status === "error") return { ok: false, detail: health.error || "o modelo falhou ao carregar." };
+      }
+    } else {
+      // Sumir por instantes é o caminho feliz: o conector está se recarregando.
+      // Sumir e não voltar é outra coisa, e esperar o prazo inteiro por isso deixa
+      // o usuário olhando um spinner sem saber que ninguém vai atender.
+      downSince ??= Date.now();
+      if (Date.now() - downSince > gaveUpAfterMs) {
+        return {
+          ok: false,
+          detail: "o conector saiu para trocar de modelo e não voltou. Quem o relança é a janela que o iniciou: confira se ela continua aberta.",
+        };
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, 1_200));
   }

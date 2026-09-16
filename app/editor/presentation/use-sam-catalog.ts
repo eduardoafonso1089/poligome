@@ -146,22 +146,28 @@ export function useSamCatalog(active: boolean) {
     };
   }, [refresh]);
 
-  /** Carrega no conector o modelo escolhido, ou apenas o adota se já for o dele. */
-  const connect = useCallback(async () => {
+  /**
+   * Carrega no conector o modelo escolhido, ou apenas o adota se já for o dele.
+   *
+   * Devolve se deu certo para que a tela possa fechar. Sem isso, escolher um
+   * modelo que já estava carregado não mudava nada visível e parecia não ter
+   * feito nada — que é exatamente o que o botão promete ter feito.
+   */
+  const connect = useCallback(async (): Promise<boolean> => {
     const base = connectorBaseUrl(endpoint);
     setConnectionState("checking");
     const health = await fetchHealth(base);
     if (!health) {
       setConnectionState("offline");
       setRuntimeLabel("");
-      return;
+      return false;
     }
     if (health.model_id === selectedModelId && health.status === "ready") {
       setLoadedModelId(health.model_id ?? null);
       setRuntimeLabel(describeRuntime(health));
       setConnectionState("ready");
       setSamActive(true);
-      return;
+      return true;
     }
 
     switching.current = true;
@@ -172,7 +178,7 @@ export function useSamCatalog(active: boolean) {
       switching.current = false;
       setConnectionState("error");
       setRuntimeLabel(outcome.detail);
-      return;
+      return false;
     }
     const settled = await waitForModel(base, selectedModelId, {
       onTick: (tick) => { if (tick) setRuntimeLabel(describeRuntime(tick)); },
@@ -181,12 +187,13 @@ export function useSamCatalog(active: boolean) {
     if (!settled.ok) {
       setConnectionState("error");
       setRuntimeLabel(settled.detail);
-      return;
+      return false;
     }
     setLoadedModelId(selectedModelId);
     setConnectionState("ready");
     setSamActive(true);
     await refresh(false);
+    return true;
   }, [endpoint, refresh, selectedModelId]);
 
   const registerByom = useCallback(async (entry: ByomRegisterEntry) => {
