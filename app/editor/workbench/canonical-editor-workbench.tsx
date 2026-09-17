@@ -89,6 +89,9 @@ export function CanonicalEditorWorkbench() {
   // O que o modelo carregado aceita agora, dito pelo próprio conector: o catálogo
   // descreve o modelo escolhido, e escolhido não é o mesmo que carregado.
   const [samCapabilities, setSamCapabilities] = useState<readonly string[]>([]);
+  // null enquanto a sondagem não voltou: dizer "não encontrado" antes de ter
+  // procurado acusaria o usuário de um problema que talvez não exista.
+  const [samConnectorFound, setSamConnectorFound] = useState<boolean | null>(null);
   const [activeLabel, setActiveLabel] = useState("");
   const [tool, setTool] = useState<DrawingTool>("select");
   const [vectorTool, setVectorTool] = useState<VectorTool>(null);
@@ -443,6 +446,7 @@ export function CanonicalEditorWorkbench() {
     // síncrono aqui dispara uma renderização em cascata por nada.
     void (base ? fetchHealth(base) : Promise.resolve(null)).then((health) => {
       if (cancelled) return;
+      setSamConnectorFound(health !== null);
       setSamCapabilities(Array.isArray(health?.capabilities) ? health.capabilities : []);
     });
     return () => { cancelled = true; };
@@ -1386,7 +1390,16 @@ export function CanonicalEditorWorkbench() {
               </div>
             </div>
           </section>
-          {tool === "sam" && <div className="sam-controls">
+          {/* Sem conector a ferramenta abria normal, e o usuário só descobria o
+              problema depois de clicar e esperar. Avisar antes, com o caminho
+              para resolver, é a diferença entre um erro e uma instrução. */}
+          {tool === "sam" && samConnectorFound === false ? <div className="sam-controls sam-controls-offline">
+            <span className="sam-prompt-count">{copy.errSamUnreachable}</span>
+            <div className="sam-actions">
+              <button className="accept" onClick={() => window.dispatchEvent(new CustomEvent("poligome:open-sam"))}><Settings2 size={14} />{copy.samOpenInstall}</button>
+              <button aria-label={copy.samDeactivate} title={copy.samDeactivate} onClick={() => chooseTool("select")}><X size={15} /></button>
+            </div>
+          </div> : tool === "sam" && <div className="sam-controls">
             <div className="sam-mode">
               {/* Só aparece o que o modelo carregado aceita: oferecer texto num SAM 2.1
                   seria prometer o que o conector recusa na hora do pedido. */}

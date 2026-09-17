@@ -345,6 +345,10 @@ echo.
 echo O comando wsl.exe não foi encontrado.
 echo Instale o WSL2 com uma distribuição Linux e execute este instalador novamente.
 echo Em um PowerShell como administrador, normalmente: wsl --install
+echo.
+echo Nao quer instalar o WSL2? Ha um caminho nativo de Windows, sem WSL nenhum:
+echo baixe o poligome-sam-windows-native.ps1 na mesma tela em que voce baixou
+echo este arquivo e siga o passo a passo "Windows sem WSL2".
 pause
 exit /b 1
 

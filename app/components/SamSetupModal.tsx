@@ -104,8 +104,8 @@ const BYOM_STEPS = [
   {
     title: "1. Baixe o exemplo e troque o predict()",
     body:
-      "Os três botões de Arquivos do BYOM, logo acima, trazem a CLI, o Dockerfile e o serve.py. O serve.py já implementa o contrato inteiro — /ping, /invocations e a serialização COCO — então o que sobra para você é a função predict(). Rode os comandos seguintes na pasta onde os arquivos caíram.",
-    command: "cd ~/Downloads   # a pasta em que o navegador salvou os três arquivos",
+      "Os botões de Arquivos do BYOM, logo acima, trazem o Dockerfile, o serve.py e a CLI do seu sistema — baixe esses três. O serve.py já implementa o contrato inteiro — /ping, /invocations e a serialização COCO — então o que sobra para você é a função predict(). Rode os comandos seguintes na pasta onde os arquivos caíram.",
+    command: "cd ~/Downloads   # a pasta em que o navegador salvou os arquivos",
   },
   {
     title: "2. Construa a imagem",
@@ -117,7 +117,7 @@ const BYOM_STEPS = [
     title: "3. Registre o modelo",
     body:
       "O registro grava um arquivo em ~/.poligome-sam/byom. O identificador precisa começar com byom- para nunca colidir com um modelo oficial. Repetir o register com outro --model-id, outra --port e outro --env faz a mesma imagem servir a vários modelos: é assim que o exemplo entrega dois.",
-    command: "bash poligome-byom-macos-linux.sh register --model-id byom-meu-modelo --image meu-modelo --name \"Meu modelo\" --port 8080 --env METHOD=otsu",
+    command: "bash poligome-byom-macos-linux.sh register --model-id byom-meu-modelo --image meu-modelo --name \"Meu modelo\" --port 8080",
   },
   {
     title: "4. Suba o contêiner",
@@ -173,7 +173,8 @@ function HowItWorks({ language }: { language: Language }) {
         <b>SAM e BYOM convivem</b>
         <p>
           Os dois podem ficar ativos ao mesmo tempo, e o botão do topo mostra os dois. São caminhos independentes: o
-          SAM segmenta o que você clica, o BYOM anota a imagem inteira, e as máscaras de um não alteram nem
+          SAM segmenta o objeto que você aponta — por clique, por caixa, ou por texto no SAM 3 — o BYOM anota a
+          imagem inteira de uma vez, e as máscaras de um não alteram nem
           substituem as do outro. Desselecionar todos apenas deixa de usá-los para anotar — nada é desinstalado e o
           conector segue conectado.
         </p>
@@ -342,7 +343,7 @@ function ByomPanel({
           PowerShell abaixo, e o registro fica em <code>%USERPROFILE%\.poligome-sam\byom</code>. Os dois registros são
           independentes, e o Docker precisa responder do mesmo lado que o conector.
         </p>
-        <code>{"wsl bash poligome-byom-macos-linux.sh list\npowershell -ExecutionPolicy Bypass -File poligome-byom-windows.ps1 list"}</code>
+        <code>{"wsl bash poligome-byom-macos-linux.sh list\npowershell -ExecutionPolicy Bypass -File .\\poligome-byom-windows.ps1 list"}</code>
       </article>
     </section>
 
@@ -388,7 +389,7 @@ function ByomPanel({
         <a href="/byom/Dockerfile" download><Download size={15} /><span><strong>Dockerfile de exemplo</strong><small>python:3.12-slim, porta 8080</small></span></a>
         <a href="/byom/serve.py" download><Download size={15} /><span><strong>serve.py de exemplo</strong><small>/ping e /invocations prontos</small></span></a>
       </div>
-      <code>{"bash poligome-byom-macos-linux.sh --help\npowershell -ExecutionPolicy Bypass -File poligome-byom-windows.ps1 help"}</code>
+      <code>{"bash poligome-byom-macos-linux.sh --help\npowershell -ExecutionPolicy Bypass -File .\\poligome-byom-windows.ps1 help"}</code>
     </section>
 
     <section className="byom-steps">
@@ -433,7 +434,7 @@ function ByomPanel({
         Os comandos estão em bash, para Linux, macOS e WSL2. No Windows nativo os passos são os mesmos, com os mesmos
         nomes de comando e opções escritas ao estilo do PowerShell — troque{" "}
         <code>bash poligome-byom-macos-linux.sh register --model-id X --image Y</code> por{" "}
-        <code>powershell -ExecutionPolicy Bypass -File poligome-byom-windows.ps1 register -ModelId X -Image Y</code>.
+        <code>{String.raw`powershell -ExecutionPolicy Bypass -File .\poligome-byom-windows.ps1 register -ModelId X -Image Y`}</code>.
         A lista completa sai com <code>help</code>.
       </p>
       {BYOM_STEPS.map((step) => <article key={step.title}>
@@ -527,6 +528,9 @@ export default function SamSetupModal({
   // página não roda o instalador, mas pode escrever o comando certo por sistema —
   // que é a única parte difícil para quem não mexe com terminal.
   const [forceCpu, setForceCpu] = useState(false);
+  // Um sistema por vez. Três caminhos lado a lado obrigavam o usuário a descobrir
+  // qual era o dele antes de ler qualquer instrução.
+  const [installOs, setInstallOs] = useState<"unix" | "wsl" | "native">("unix");
 
   /**
    * Esc fecha o catálogo, como em qualquer diálogo.
@@ -559,14 +563,78 @@ export default function SamSetupModal({
   const modelMatches = connectionState === "ready" && loadedModelId === model.id;
   const pythonNotes = "notes" in model.requirements.python ? model.requirements.python.notes : null;
   const cudaTested = "tested" in model.requirements.cuda ? model.requirements.cuda.tested : null;
-  const activeCapabilities = Object.entries(model.capabilities)
-    .filter(([, enabled]) => enabled)
-    .map(([capability]) => capabilityLabels[capability as keyof typeof capabilityLabels]);
+  // O que o editor realmente envia e desenha hoje. Fora desta lista, a capacidade
+  // é do modelo upstream e não tem como ser alcançada por esta interface.
+  const integratedCapabilities = new Set([
+    "imageSegmentation", "pointPrompts", "negativePointPrompts", "boxPrompts",
+    "interactiveRefinement", "textPrompts", "conceptSegmentation",
+  ]);
+  // Instâncias só contam onde há texto: é a busca por texto que devolve um objeto
+  // por instância. Com ponto ou caixa sai sempre uma máscara só.
+  if (model.capabilities.textPrompts) integratedCapabilities.add("instanceSegmentation");
+  const upstreamCapabilities = Object.entries(model.capabilities).filter(([, enabled]) => enabled).map(([key]) => key);
+  const labelOf = (key: string) => capabilityLabels[key as keyof typeof capabilityLabels];
+  const availableCapabilities = upstreamCapabilities.filter((key) => integratedCapabilities.has(key)).map(labelOf);
+  const pendingCapabilities = upstreamCapabilities.filter((key) => !integratedCapabilities.has(key)).map(labelOf);
   // Cada sistema escreve a variável de ambiente à sua maneira, e errar a sintaxe é
   // o tipo de detalhe que faz o usuário desistir achando que o produto não serve.
   const unixCommand = `${forceCpu ? "POLIGOME_DEVICE=cpu " : ""}bash poligome-sam-macos-linux.sh ${model.id}`;
   const windowsCommand = `${forceCpu ? "set POLIGOME_DEVICE=cpu && " : ""}poligome-sam-windows.bat ${model.id}`;
-  const nativeWindowsCommand = `${forceCpu ? "$env:POLIGOME_DEVICE='cpu'; " : ""}poligome-sam-windows-native.ps1 ${model.id}`;
+  // A forma completa, com powershell -File: digitar só o nome do .ps1 é recusado
+  // pela política de execução, e dois cliques abrem o Bloco de Notas. Mostrar o
+  // atalho seria entregar um comando que não roda.
+  const nativeWindowsCommand =
+    `${forceCpu ? "$env:POLIGOME_DEVICE='cpu'; " : ""}powershell -ExecutionPolicy Bypass -File .\\poligome-sam-windows-native.ps1 ${model.id}`;
+
+  /**
+   * O passo a passo por sistema.
+   *
+   * Antes daqui a tela entregava três botões e um comando solto, e nunca dizia o
+   * que fazer com o arquivo baixado: em que pasta ele caiu, como abrir um
+   * terminal ali, nem que a janela precisa ficar aberta. Quem não mexe com
+   * terminal parava no primeiro passo — e o BYOM, que é o caminho mais técnico,
+   * era o único que tinha um passo a passo numerado.
+   */
+  const installPaths = {
+    unix: {
+      label: "Linux ou macOS",
+      file: "poligome-sam-macos-linux.sh",
+      href: "/poligome-sam-macos-linux.sh",
+      steps: [
+        { title: "Baixe o instalador", body: "É um arquivo de texto com os comandos da instalação. O navegador costuma guardá-lo em Downloads.", command: null },
+        { title: "Abra o Terminal na pasta do download", body: "No Ubuntu, Ctrl+Alt+T abre o Terminal. No macOS, procure por “Terminal” no Spotlight. Depois entre na pasta:", command: "cd ~/Downloads" },
+        { title: "Rode o instalador", body: "Ele baixa alguns gigabytes na primeira vez e vai mostrando o progresso. No fim escreve “Modelo … instalado, carregado e selecionado”.", command: unixCommand },
+        { title: "Deixe esta janela do Terminal aberta", body: "É ela que mantém o conector no ar. Fechar a janela, ou reiniciar o computador, desliga a IA — o editor sabe procurá-la, mas não sabe ligá-la.", command: null },
+        { title: "Volte a esta tela e clique em “Verificar e usar”", body: "O estado no rodapé desta janela vira verde quando o editor encontra o conector.", command: null },
+      ],
+    },
+    wsl: {
+      label: "Windows com WSL2",
+      file: "poligome-sam-windows.bat",
+      href: "/poligome-sam-windows.bat",
+      steps: [
+        { title: "Baixe o instalador", body: "O navegador costuma guardá-lo na pasta Downloads.", command: null },
+        { title: "Dê dois cliques no arquivo baixado", body: "Abre uma janela preta com a lista dos modelos, numerada de 1 a 10. Digite o número e pressione Enter. O modelo desta ficha é o que está selecionado à esquerda.", command: null },
+        { title: "Ou, se preferir digitar o comando", body: "Abra o Prompt de Comando, entre na pasta do download e chame o instalador com o identificador do modelo:", command: String.raw`cd %USERPROFILE%\Downloads` + "\n" + windowsCommand },
+        { title: "Deixe a janela aberta", body: "A instalação acontece dentro do WSL2, e é essa janela que mantém o conector no ar. Fechar desliga a IA.", command: null },
+        { title: "Volte a esta tela e clique em “Verificar e usar”", body: "O estado no rodapé desta janela vira verde quando o editor encontra o conector.", command: null },
+      ],
+    },
+    native: {
+      label: "Windows sem WSL2",
+      file: "poligome-sam-windows-native.ps1",
+      href: "/poligome-sam-windows-native.ps1",
+      steps: [
+        { title: "Baixe o instalador", body: "O navegador costuma guardá-lo na pasta Downloads.", command: null },
+        { title: "Abra o PowerShell", body: "No menu Iniciar, digite “PowerShell” e abra. Não dê dois cliques no arquivo baixado: o Windows abre o Bloco de Notas em vez de executá-lo.", command: null },
+        { title: "Entre na pasta do download", body: "É onde o navegador guardou o arquivo.", command: String.raw`cd $env:USERPROFILE\Downloads` },
+        { title: "Rode o instalador", body: "O comando precisa ser este, inteiro: digitar só o nome do arquivo é recusado pela política de execução do Windows. Ele baixa alguns gigabytes na primeira vez.", command: nativeWindowsCommand },
+        { title: "Deixe a janela do PowerShell aberta", body: "É ela que mantém o conector no ar. Fechar a janela, ou reiniciar o computador, desliga a IA.", command: null },
+        { title: "Volte a esta tela e clique em “Verificar e usar”", body: "O estado no rodapé desta janela vira verde quando o editor encontra o conector.", command: null },
+      ],
+    },
+  } as const;
+  const chosenPath = installPaths[installOs];
   const windowsPlatformLabel = "Windows · WSL2";
   const unixPlatformLabel = model.family === "sam3"
     ? "Linux · NVIDIA CUDA"
@@ -667,11 +735,18 @@ export default function SamSetupModal({
             </div>
           </section>
 
+          {/* Dois grupos, e não uma lista só com visto verde em tudo. A lista
+              única mostrava "Vídeo ✓ Tracking ✓" e só depois, em prosa, dizia que
+              nada daquilo funciona aqui — quem lê de relance sai achando que o
+              editor faz vídeo. */}
           <section className="sam-capabilities">
-            <h4>Capacidades do modelo upstream</h4>
-            <div>{activeCapabilities.map((capability) => <span key={capability}><Check size={11} />{capability}</span>)}</div>
-            <p><b>Integrado agora:</b> pontos positivos/negativos e caixas em todos os modelos; texto e múltiplas instâncias no SAM 3. Vídeo, máscara anterior, geração automática e exemplares combinados ainda não fazem parte deste editor.</p>
-            {model.capabilities.videoSegmentation && <p>O modelo suporta vídeo, mas esta versão do editor integra apenas imagens. Timeline e tracking entrarão em uma etapa própria.</p>}
+            <h4>O que dá para fazer com este modelo, aqui</h4>
+            <div>{availableCapabilities.map((capability) => <span key={capability}><Check size={11} />{capability}</span>)}</div>
+            {pendingCapabilities.length > 0 && <>
+              <h4 className="pending">O modelo também faz, mas este editor ainda não usa</h4>
+              <div className="pending">{pendingCapabilities.map((capability) => <span key={capability}>{capability}</span>)}</div>
+            </>}
+            {model.capabilities.videoSegmentation && <p>Vídeo é o maior deles: o modelo rastreia objetos ao longo dos quadros, e esta versão do editor abre apenas imagens.</p>}
           </section>
 
           {model.citation && <section className="sam-citation">
@@ -705,11 +780,27 @@ export default function SamSetupModal({
           <section className="sam-install-panel">
             <div><b>Instalar o modelo selecionado</b><p>O instalador cria um ambiente separado por família e baixa apenas o checkpoint escolhido. O checkpoint é só uma parte: o ambiente de uma família ocupa alguns gigabytes de bibliotecas, baixados uma vez e reaproveitados pelos outros modelos dela.</p></div>
             {needsInstall && <p className="sam-needs-install"><AlertTriangle size={14} /><span><b>{model.name} ainda não está instalado.</b> O conector está no ar, mas sem este checkpoint. Rode o comando do seu sistema, aqui embaixo, e volte a esta tela.</span></p>}
-            <div className="sam-install-actions">
-              <a className="primary" href="/poligome-sam-macos-linux.sh" download><Download size={15} /><span><strong>{unixPlatformLabel}</strong><small>{unixCommand}</small></span></a>
-              <a className={model.family === "sam3" ? "limited" : ""} href="/poligome-sam-windows.bat" download><Download size={15} /><span><strong>{windowsPlatformLabel}</strong><small>{windowsCommand}</small></span></a>
-              <a href="/poligome-sam-windows-native.ps1" download><Download size={15} /><span><strong>Windows nativo · sem WSL2</strong><small>{nativeWindowsCommand}</small></span></a>
+            <div className="sam-os-picker" role="tablist" aria-label="Sistema operacional">
+              {(["unix", "wsl", "native"] as const).map((key) => <button
+                key={key}
+                role="tab"
+                aria-selected={installOs === key}
+                className={installOs === key ? "active" : ""}
+                onClick={() => setInstallOs(key)}
+              >{installPaths[key].label}</button>)}
             </div>
+            {installOs === "unix" && model.family === "sam3" && <p className="sam-manual-note">O SAM 3 não roda no macOS: o pacote oficial exige CUDA, que a Apple não oferece. Neste caminho, só Linux.</p>}
+            {installOs === "native" && model.family === "sam3" && <p className="sam-manual-note">O SAM 3 precisa de GPU NVIDIA com CUDA. Sem WSL2 isso depende do PyTorch CUDA para Windows, que o instalador confere antes de baixar.</p>}
+
+            <ol className="sam-steps">
+              {chosenPath.steps.map((step, index) => <li key={step.title}>
+                <b>{step.title}</b>
+                <p>{step.body}</p>
+                {index === 0
+                  ? <a className="sam-step-download" href={chosenPath.href} download><Download size={14} />Baixar {chosenPath.file}</a>
+                  : step.command ? <code>{step.command}</code> : null}
+              </li>)}
+            </ol>
             {/* Escolher CPU deixou de ser folclore de variável de ambiente: o
                 controle fica aqui e reescreve os três comandos acima com a
                 sintaxe certa de cada sistema. */}
@@ -729,19 +820,39 @@ export default function SamSetupModal({
             {/* O comando de cada caminho já vai embaixo do seu próprio botão. Um
                 único bloco aqui mostrava sempre o de Linux, inclusive para quem
                 tinha acabado de baixar o instalador de Windows. */}
-            <p className="sam-manual-note">O conector é um processo local e precisa estar rodando sempre que você usar IA: fechar o terminal ou reiniciar o computador o derruba, e o editor consegue encontrá-lo sozinho, nunca ligá-lo. No Linux, <code>poligome-sam-service-linux.sh install</code> o sobe no login e dispensa esse passo.</p>
-            <div className="sam-launch-actions"><span>Já instalado?</span><a href="/poligome-sam-start-macos-linux.sh" download>Baixar iniciador {unixPlatformLabel}</a><a href="/poligome-sam-start-windows.bat" download>Baixar iniciador {windowsPlatformLabel}</a></div>
-            {/* O caminho nativo não tem iniciador separado porque não precisa: o
-                próprio instalador detecta o que já está no ambiente e só sobe o
-                conector. Sem esta linha, quem instalou por ele ficava sem saber
-                como voltar depois de reiniciar o computador. */}
-            <p className="sam-manual-note"><b>Windows nativo:</b> não há iniciador à parte. Rode de novo <code>{nativeWindowsCommand}</code>: ele reconhece o que já está instalado e só levanta o conector.</p>
+            {/* Depois de instalado, o caminho de volta é outro e mais curto. Ele
+                muda por sistema como o de instalação, então acompanha a aba. */}
+            <div className="sam-relaunch">
+              <b>Da próxima vez, para religar sem reinstalar</b>
+              {installOs === "unix" && <>
+                <p>Baixe o iniciador uma vez e guarde-o junto do instalador. Ele sobe o conector com o modelo que já estava escolhido, sem baixar nada de novo.</p>
+                <a className="sam-step-download" href="/poligome-sam-start-macos-linux.sh" download><Download size={14} />Baixar poligome-sam-start-macos-linux.sh</a>
+                <code>{String.raw`cd ~/Downloads
+bash poligome-sam-start-macos-linux.sh`}</code>
+                <p>No Linux dá para nunca mais pensar nisso: o serviço de usuário sobe o conector sozinho a cada login, e aí nenhuma janela precisa ficar aberta.</p>
+                <a className="sam-step-download" href="/poligome-sam-service-linux.sh" download><Download size={14} />Baixar poligome-sam-service-linux.sh</a>
+                <code>{"bash poligome-sam-service-linux.sh install"}</code>
+              </>}
+              {installOs === "wsl" && <>
+                <p>Baixe o iniciador uma vez e guarde-o junto do instalador. Dois cliques nele sobem o conector com o modelo que já estava escolhido, sem baixar nada de novo.</p>
+                <a className="sam-step-download" href="/poligome-sam-start-windows.bat" download><Download size={14} />Baixar poligome-sam-start-windows.bat</a>
+              </>}
+              {installOs === "native" && <>
+                <p>Este caminho não tem iniciador à parte, e não precisa: rodar o mesmo comando de novo reconhece o que já está instalado e só levanta o conector, em segundos.</p>
+                <code>{nativeWindowsCommand}</code>
+              </>}
+            </div>
             <p className="sam-manual-note">
               {model.family === "sam3"
                 ? <>O SAM 3 só roda em GPU NVIDIA: o conector recusa CPU e Metal para esta família.</>
                 : <>Se a sua placa for antiga demais para o modelo, o instalador avisa e pergunta antes de baixar qualquer coisa — não é preciso descobrir isso sozinho. A opção acima vale também para o iniciador.</>}
             </p>
-            <p className="sam-platform-note"><b>Linux:</b> {model.platformSupport.linux.notes} <b>Windows:</b> {model.platformSupport.windows.notes} <b>macOS:</b> {model.platformSupport.macos.notes}</p>
+            <details className="sam-uninstall sam-platform-details">
+              <summary>Detalhes de cada sistema</summary>
+              <p><b>Linux:</b> {model.platformSupport.linux.notes}</p>
+              <p><b>Windows:</b> {model.platformSupport.windows.notes}</p>
+              <p><b>macOS:</b> {model.platformSupport.macos.notes}</p>
+            </details>
 
             {/* Onde isso fica e como sair: um instalador que não diz como se
                 desfazer obriga o usuário a caçar gigabytes pelo disco. Tudo mora
