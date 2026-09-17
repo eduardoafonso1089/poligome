@@ -6,7 +6,7 @@ POLIGOME_SAM_INSTALLER_API=2
 DEFAULT_SITE_URL="https://www.poligome.com"
 DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 DEFAULT_CONNECTOR_URL="${DEFAULT_ASSET_BASE_URL}/poligome-sam-local.py"
-DEFAULT_CONNECTOR_SHA256="79bd0246a9b66ec8c68eb94a384abad77dc82af4d1471bb11ef1cb0b4edb1bf1"
+DEFAULT_CONNECTOR_SHA256="587d9e065254b2be581a75a51a4263299c1e434ed3011e6ae27ea9dda5b7c6a2"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE_URL="${POLIGOME_SITE_URL:-${DEFAULT_SITE_URL}}"
 SITE_URL="${SITE_URL%/}"
@@ -28,6 +28,9 @@ SAM2_REVISION="2b90b9f5ceec907a1c18123530e92e794ad901a4"
 SAM3_REVISION="8f0b7f4d4e7eda2ed606ebde6702c93359ad01da"
 # As rodas oficiais do PyTorch CUDA 12.8 trazem kernels de sm_70 em diante.
 SAM3_MIN_COMPUTE_MAJOR=7
+# O mesmo corte vale para o torch das famílias SAM 2.1/MedSAM2: abaixo disso a
+# GPU é enxergada, o modelo carrega, e a primeira inferência morre sem kernel.
+TORCH_MIN_COMPUTE=70
 
 usage() {
   cat <<'EOF'
@@ -337,7 +340,9 @@ except Exception:
 if payload.get("service") != "Poligome SAM local" or payload.get("api_version") != 2:
     print("mismatch")
 elif payload.get("model_id") != expected_model:
-    print("mismatch")
+    # Um conector saudável servindo outro modelo não é obstáculo: o checkpoint
+    # novo fica instalado e a troca se faz pelo editor, sem derrubar nada.
+    print("other-model")
 elif payload.get("status") in {"loading", "ready", "error"}:
     print(payload["status"])
 else:
@@ -538,10 +543,79 @@ prepare_venv() {
     fail "o ambiente ${VENV_DIR} não pôde ser criado com Python 3.${minimum_minor}+."
 }
 
+# Uma GPU antiga demais é o pior dos casos: o PyTorch a enxerga, o modelo carrega,
+# e só a primeira anotação morre com "no kernel image is available for execution on
+# the device" — depois de o usuário ter baixado alguns gigabytes. Perguntar antes
+# custa uma chamada a nvidia-smi, e deixa a decisão com quem vai usar.
+decide_device() {
+  [[ "$DEVICE" == "auto" ]] || return 0
+  [[ "$FAMILY" == "sam2" ]] || return 0
+  command -v nvidia-smi >/dev/null 2>&1 || return 0
+
+  local capability major minor gpu_name resposta minimo
+  capability="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+  [[ "$capability" =~ ^([0-9]+)\.([0-9]+)$ ]] || return 0
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+  (( major * 10 + minor < TORCH_MIN_COMPUTE )) || return 0
+  gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1)"
+  minimo="$((TORCH_MIN_COMPUTE / 10)).$((TORCH_MIN_COMPUTE % 10))"
+
+  cat <<EOF
+
+------------------------------------------------------------
+ A sua placa de vídeo não serve para este modelo
+------------------------------------------------------------
+
+${gpu_name:-A GPU encontrada} tem capability ${major}.${minor}, e o PyTorch publicado
+traz kernels somente de ${minimo} em diante. Nesta placa o modelo até carrega, mas a
+primeira anotação falha com "no kernel image is available for execution on the
+device". Não é defeito da instalação nem do Poligome.
+
+Em CPU funciona: fica mais devagar (alguns segundos por clique, em vez de quase
+instantâneo) e o download fica cerca de 4 GB menor, porque o PyTorch de CPU não
+carrega as bibliotecas da NVIDIA.
+
+EOF
+
+  if [[ ! -t 0 ]]; then
+    printf 'Sem terminal interativo para perguntar: seguindo em CPU.\n'
+    printf 'Para decidir você mesmo, rode de novo com POLIGOME_DEVICE=cpu ou cuda.\n\n'
+    DEVICE="cpu"
+    return 0
+  fi
+
+  read -r -p 'Instalar para rodar em CPU? [S/n] ' resposta
+  case "$(printf '%s' "$resposta" | tr '[:upper:]' '[:lower:]')" in
+    n|nao|no)
+      fail "instalação cancelada. Para insistir na GPU mesmo assim, rode de novo com POLIGOME_DEVICE=cuda."
+      ;;
+    *)
+      DEVICE="cpu"
+      printf '\nSeguindo em CPU.\n\n'
+      ;;
+  esac
+}
+
 install_runtime() {
   local ready_file
+  # A roda de torch que o PyPI entrega para Linux embute os kernels CUDA: são
+  # alguns gigabytes de bibliotecas nvidia-* que nunca vão rodar na máquina de
+  # quem pediu CPU. O índice cpu do próprio PyTorch traz o mesmo torch sem eles.
+  # Só no Linux: no macOS a roda do PyPI já é a certa, e o índice cpu não publica
+  # para lá.
+  local torch_index=()
+  local flavour=""
+  if [[ "$DEVICE" == "cpu" && "$OS_NAME" == "Linux" ]]; then
+    torch_index=(--index-url https://download.pytorch.org/whl/cpu)
+    # O sabor entra no marcador porque trocar de CPU para GPU depois exige outro
+    # torch, e um marcador sem ele daria o ambiente por pronto com a roda errada.
+    # Só o caso de CPU ganha sufixo: mudar o nome do marcador padrão obrigaria
+    # quem já instalou a rebaixar o PyTorch inteiro sem ter pedido nada.
+    flavour="-cpu"
+  fi
   case "$FAMILY" in
-    sam2) ready_file="${VENV_DIR}/.poligome-sam2-${SAM2_REVISION}.ok" ;;
+    sam2) ready_file="${VENV_DIR}/.poligome-sam2-${SAM2_REVISION}${flavour}.ok" ;;
     sam3) ready_file="${VENV_DIR}/.poligome-sam3-${SAM3_REVISION}.ok" ;;
   esac
 
@@ -571,8 +645,11 @@ install_runtime() {
   fi
   case "$FAMILY" in
     sam2)
-      "$PYTHON" -m pip install "torch>=2.5.1" "torchvision>=0.20.1"
-      SAM2_BUILD_CUDA=0 "$PYTHON" -m pip install "https://github.com/facebookresearch/sam2/archive/${SAM2_REVISION}.zip"
+      "$PYTHON" -m pip install "${torch_index[@]}" "torch>=2.5.1" "torchvision>=0.20.1"
+      # --no-build-isolation: o pacote do SAM 2 declara torch como dependência de
+      # build, e sem isto o pip baixa um segundo torch inteiro num ambiente
+      # temporário — o mesmo download de novo, e em CPU seria o de CUDA.
+      SAM2_BUILD_CUDA=0 "$PYTHON" -m pip install --no-build-isolation "https://github.com/facebookresearch/sam2/archive/${SAM2_REVISION}.zip"
       "$PYTHON" -m pip install fastapi uvicorn pillow opencv-python-headless numpy
       ;;
     sam3)
@@ -807,7 +884,7 @@ run_connector_transactionally() {
         trap - EXIT HUP INT TERM
         fail "o modelo ${MODEL_ID} não conseguiu carregar: ${error_message}"
         ;;
-      mismatch|unhealthy)
+      mismatch|other-model|unhealthy)
         cleanup_connector
         trap - EXIT HUP INT TERM
         fail "a porta ${PORT} respondeu com um serviço ou modelo diferente durante a inicialização."
@@ -878,6 +955,7 @@ printf '==========================================\n\n'
 mkdir -p "$APP_DIR" "$VENVS_DIR" "$MODELS_DIR"
 cache_current_installer
 save_pending_selection
+decide_device
 download_connector
 prepare_venv
 install_runtime
@@ -894,8 +972,25 @@ case "$(server_state)" in
     wait_for_existing_model
     exit 0
     ;;
+  other-model)
+    # Instalar um segundo modelo é o caminho normal de quem já usa o Poligome, e
+    # terminar em "erro: porta ocupada" fazia parecer que o download tinha sido
+    # perdido — quando na verdade o modelo já está pronto para ser escolhido.
+    save_selection
+    printf '
+Modelo %s instalado.
+' "$MODEL_ID"
+    printf 'O conector na porta %s continua no ar com outro modelo e não foi reiniciado.
+' "$PORT"
+    printf 'Para usar %s agora, abra o painel de modelos no Poligome e escolha-o: a troca
+' "$MODEL_ID"
+    printf 'acontece sozinha, sem reinstalar nada.
+'
+    open_site
+    exit 0
+    ;;
   error|mismatch|unhealthy)
-    fail "a porta ${PORT} já está ocupada por um conector com erro, outro modelo ou outro serviço. Feche-o e execute novamente."
+    fail "a porta ${PORT} já está ocupada por um conector com erro ou por outro serviço. Feche-o e execute novamente."
     ;;
   offline) ;;
 esac

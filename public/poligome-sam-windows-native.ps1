@@ -44,7 +44,7 @@ $POLIGOME_SAM_INSTALLER_API = 2
 
 $DefaultSiteUrl = 'https://www.poligome.com'
 $DefaultAssetBaseUrl = 'https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public'
-$DefaultConnectorSha256 = '79bd0246a9b66ec8c68eb94a384abad77dc82af4d1471bb11ef1cb0b4edb1bf1'
+$DefaultConnectorSha256 = '587d9e065254b2be581a75a51a4263299c1e434ed3011e6ae27ea9dda5b7c6a2'
 
 $SiteUrl = if ($env:POLIGOME_SITE_URL) { $env:POLIGOME_SITE_URL.TrimEnd('/') } else { $DefaultSiteUrl }
 $AssetBaseUrl = if ($env:POLIGOME_ASSET_BASE_URL) { $env:POLIGOME_ASSET_BASE_URL.TrimEnd('/') } else { $DefaultAssetBaseUrl }
@@ -66,6 +66,9 @@ $Sam2Revision = '2b90b9f5ceec907a1c18123530e92e794ad901a4'
 $Sam3Revision = '8f0b7f4d4e7eda2ed606ebde6702c93359ad01da'
 # As rodas oficiais do PyTorch CUDA 12.8 trazem kernels de sm_70 em diante.
 $Sam3MinComputeMajor = 7
+# O mesmo corte vale para o torch das familias SAM 2.1/MedSAM2: abaixo disso a GPU
+# e enxergada, o modelo carrega, e a primeira inferencia morre sem kernel.
+$TorchMinCompute = 70
 # O conector sai com este codigo quando /load pede outra familia; ver
 # _exec_with_model em poligome-sam-local.py.
 $SwitchExitCode = 75
@@ -254,11 +257,26 @@ function Test-ConnectorCompatible([string] $Path) {
 }
 
 function Install-Connector {
+  # Mesma ordem do irmao bash: caminho explicito, depois o conector distribuido
+  # ao lado do instalador, e so entao a origem publica. Sem o caso do meio, rodar
+  # este script de dentro de um clone (ou de uma pasta com os dois arquivos
+  # baixados juntos) ia buscar na internet um arquivo que ja estava ali do lado.
+  $adjacent = Join-Path $PSScriptRoot 'poligome-sam-local.py'
   if ($env:POLIGOME_CONNECTOR_PATH) {
     if (-not (Test-Path -LiteralPath $env:POLIGOME_CONNECTOR_PATH)) {
       Fail "POLIGOME_CONNECTOR_PATH aponta para um arquivo que nao existe: $env:POLIGOME_CONNECTOR_PATH"
     }
     Copy-Item -LiteralPath $env:POLIGOME_CONNECTOR_PATH -Destination $Connector -Force
+  } elseif ((Test-Path -LiteralPath $adjacent -PathType Leaf) -and ((Get-Item -LiteralPath $adjacent).Length -gt 0)) {
+    Write-Host 'Instalando o conector distribuido junto do instalador...'
+    Copy-Item -LiteralPath $adjacent -Destination $Connector -Force
+    # Conferido igual ao baixado: um arquivo ao lado do instalador so vale se for
+    # o mesmo artefato publicado.
+    $hash = (Get-FileHash -LiteralPath $Connector -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($hash -ne $DefaultConnectorSha256) {
+      Remove-Item -LiteralPath $Connector -Force
+      Fail "o conector ao lado do instalador nao confere com a soma oficial (esperado $DefaultConnectorSha256, obtido $hash)."
+    }
   } else {
     $url = "$AssetBaseUrl/poligome-sam-local.py"
     Write-Host 'Baixando o conector local...'
@@ -396,6 +414,61 @@ function Install-Runtime([string] $Family, [string] $VenvDir, [string] $VenvPyth
   New-Item -ItemType File -Force -Path $marker | Out-Null
 }
 
+# Uma GPU antiga demais e o pior dos casos: o PyTorch a enxerga, o modelo carrega,
+# e so a primeira anotacao morre com "no kernel image is available for execution on
+# the device" - depois de o usuario ter esperado o download inteiro. Uma chamada a
+# nvidia-smi descobre isso antes, e a decisao fica com quem vai usar a maquina.
+function Resolve-DeviceChoice([string] $Family) {
+  if ($Device -ne 'auto') { return $Device }
+  if ($Family -ne 'sam2') { return $Device }
+  if (-not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) { return $Device }
+
+  $linha = @(& nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>$null) |
+    Where-Object { $_ -match '\S' } | Select-Object -First 1
+  if (-not $linha) { return $Device }
+  $partes = $linha -split ','
+  if ($partes.Count -lt 2) { return $Device }
+  $nome = $partes[0].Trim()
+  $cap = $partes[1].Trim()
+  if ($cap -notmatch '^(\d+)\.(\d+)$') { return $Device }
+  $valor = [int]$Matches[1] * 10 + [int]$Matches[2]
+  if ($valor -ge $TorchMinCompute) { return $Device }
+
+  $minimo = "$([math]::Floor($TorchMinCompute / 10)).$($TorchMinCompute % 10)"
+  Write-Host ''
+  Write-Host '------------------------------------------------------------'
+  Write-Host ' A sua placa de video nao serve para este modelo'
+  Write-Host '------------------------------------------------------------'
+  Write-Host ''
+  Write-Host "$nome tem capability $cap, e o PyTorch publicado traz kernels somente de"
+  Write-Host "$minimo em diante. Nesta placa o modelo ate carrega, mas a primeira anotacao"
+  Write-Host 'falha com "no kernel image is available for execution on the device". Nao e'
+  Write-Host 'defeito da instalacao nem do Poligome.'
+  Write-Host ''
+  Write-Host 'Em CPU funciona: fica mais devagar (alguns segundos por clique, em vez de'
+  Write-Host 'quase instantaneo), e e assim que a maioria das maquinas sem GPU recente usa'
+  Write-Host 'o SAM.'
+  Write-Host ''
+
+  # Sem console interativo (execucao por script ou tarefa agendada) nao ha a quem
+  # perguntar, e travar num prompt invisivel seria pior do que escolher.
+  if ([Console]::IsInputRedirected) {
+    Write-Host 'Sem terminal interativo para perguntar: seguindo em CPU.'
+    Write-Host 'Para decidir voce mesmo, rode de novo com $env:POLIGOME_DEVICE = "cpu" ou "cuda".'
+    Write-Host ''
+    return 'cpu'
+  }
+
+  $resposta = (Read-Host 'Instalar para rodar em CPU? [S/n]').Trim().ToLowerInvariant()
+  if ($resposta -in @('n', 'nao', 'no')) {
+    Fail 'instalacao cancelada. Para insistir na GPU mesmo assim, rode de novo com $env:POLIGOME_DEVICE = "cuda".'
+  }
+  Write-Host ''
+  Write-Host 'Seguindo em CPU.'
+  Write-Host ''
+  return 'cpu'
+}
+
 function Assert-RuntimeDevice([string] $Family, [string] $VenvPython) {
   if ($Family -ne 'sam3') { return }
   & $VenvPython -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)' 2>$null
@@ -485,7 +558,9 @@ except Exception:
 if payload.get('service') != 'Poligome SAM local' or payload.get('api_version') != 2:
     print('mismatch')
 elif payload.get('model_id') != '$ExpectedModel':
-    print('mismatch')
+    # Conector saudavel com outro modelo nao bloqueia: o checkpoint novo fica
+    # instalado e a troca se faz pelo editor.
+    print('other-model')
 elif payload.get('status') in {'loading', 'ready', 'error'}:
     print(payload['status'])
 else:
@@ -575,6 +650,7 @@ if ($family -eq 'sam3') { Assert-Sam3Platform }
 
 New-Item -ItemType Directory -Force $AppDir, $VenvsDir, $ModelsDir | Out-Null
 Save-Selection $PendingModelFile $modelId
+$Device = Resolve-DeviceChoice $family
 Install-Connector
 Initialize-Venv $family $venvDir $venvPython
 Install-Runtime $family $venvDir $venvPython
@@ -606,8 +682,22 @@ switch (Get-ServerState $venvPython $modelId) {
   'loading' {
     Write-Host "O conector ja esta carregando $modelId; aguardando o modelo ficar pronto..."
   }
+  'other-model' {
+    # Instalar um segundo modelo e o caminho normal de quem ja usa o Poligome.
+    # Terminar em "erro: porta ocupada" fazia parecer que o download tinha sido
+    # perdido, quando o modelo ja esta pronto para ser escolhido.
+    Save-Selection $SelectedModelFile $modelId
+    Remove-Item -LiteralPath $PendingModelFile -Force -ErrorAction SilentlyContinue
+    Write-Host ''
+    Write-Host "Modelo $modelId instalado."
+    Write-Host "O conector na porta $Port continua no ar com outro modelo e nao foi reiniciado."
+    Write-Host "Para usar $modelId agora, abra o painel de modelos no Poligome e escolha-o:"
+    Write-Host "a troca acontece sozinha, sem reinstalar nada."
+    try { Start-Process $SiteUrl | Out-Null } catch {}
+    exit 0
+  }
   { $_ -in 'error', 'mismatch', 'unhealthy' } {
-    Fail "a porta $Port ja esta ocupada por um conector com erro, outro modelo ou outro servico. Feche-o e execute novamente."
+    Fail "a porta $Port ja esta ocupada por um conector com erro ou por outro servico. Feche-o e execute novamente."
   }
   default {
     if (Test-PortInUse) { Fail "a porta $Port ja esta ocupada por outro processo. Feche-o e execute novamente." }
@@ -651,7 +741,7 @@ while ($true) {
         if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
         Fail "o modelo $modelId nao conseguiu carregar: $message"
       }
-      { $_ -in 'mismatch', 'unhealthy' } {
+      { $_ -in 'mismatch', 'other-model', 'unhealthy' } {
         if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
         Fail "a porta $Port respondeu com um servico ou modelo diferente durante a inicializacao."
       }

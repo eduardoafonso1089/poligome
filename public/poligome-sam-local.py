@@ -25,6 +25,7 @@ import os
 import re
 import sys
 import threading
+import warnings
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -1048,9 +1049,29 @@ def _update_runtime(**values: Any) -> None:
         _runtime.update(values)
 
 
+def _host_label() -> str:
+    """Onde este conector mora, em uma palavra que o usuário reconheça."""
+    if os.name == "nt":
+        return "Windows"
+    if sys.platform == "darwin":
+        return "macOS"
+    try:
+        release = Path("/proc/sys/kernel/osrelease").read_text(encoding="utf-8")
+    except OSError:
+        release = ""
+    return "WSL2" if re.search(r"wsl2|microsoft-standard", release, re.IGNORECASE) else "Linux"
+
+
 def _runtime_snapshot() -> dict[str, Any]:
     with _runtime_lock:
-        return dict(_runtime)
+        snapshot = dict(_runtime)
+    # A porta 7860 é uma só. Com um conector no WSL2 e outro no Windows nativo,
+    # quem pegar a porta primeiro atende o navegador e o outro fica invisível — e
+    # a tela mostrava "nenhum BYOM registrado" sem nenhuma pista de que estava
+    # falando com a instalação errada. Dizer onde este mora resolve isso.
+    snapshot["host"] = _host_label()
+    snapshot["app_dir"] = str(_app_dir)
+    return snapshot
 
 
 def _register_request(client_id: str | None, request_seq: int | None) -> None:
@@ -1080,12 +1101,30 @@ def _request_is_stale(client_id: str | None, request_seq: int | None) -> bool:
 
 
 def _resolve_device(requested: str) -> str:
+    # Pedir CPU não passa por torch.cuda: é essa consulta que faz o PyTorch
+    # imprimir "The NVIDIA driver on your system is too old", um aviso em inglês
+    # que aparece logo antes da linha de sucesso e parece um erro para quem só
+    # quer anotar. Quem escolheu CPU não precisa ver nada sobre a GPU.
+    if requested == "cpu":
+        return "cpu"
+
     import torch
 
     mps_backend = getattr(torch.backends, "mps", None)
     mps_available = bool(mps_backend and mps_backend.is_available())
     if requested == "auto":
-        return "cuda" if torch.cuda.is_available() else "mps" if mps_available else "cpu"
+        # O aviso do torch é capturado e reescrito: o fato que interessa é que a
+        # GPU não vai ser usada e por quê, não o texto interno do PyTorch.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            cuda_available = torch.cuda.is_available()
+        if not cuda_available and any("driver" in str(item.message).lower() for item in caught):
+            print(
+                "GPU NVIDIA encontrada, mas o driver desta máquina é antigo demais "
+                "para o PyTorch instalado. Seguindo em CPU, que funciona.",
+                flush=True,
+            )
+        return "cuda" if cuda_available else "mps" if mps_available else "cpu"
     if requested == "cuda" and not torch.cuda.is_available():
         raise RuntimeError(
             "CUDA não está disponível. Use --device cpu ou instale um PyTorch compatível."
@@ -1183,7 +1222,7 @@ async def allow_local_browser_access(request: Request, call_next):
 
 
 def _family_python(family: str) -> Path:
-    """Interpretador do venv da familia, no layout criado pelos instaladores."""
+    """Interpretador do venv da família, no layout criado pelos instaladores."""
     if os.name == "nt":
         return _app_dir / "venvs" / family / "Scripts" / "python.exe"
     return _app_dir / "venvs" / family / "bin" / "python"
@@ -1208,7 +1247,7 @@ def _model_availability(spec: ModelSpec) -> dict[str, Any]:
         checkpoint_missing = not (checkpoint.is_file() and checkpoint.stat().st_size > 0)
     reasons = []
     if runtime_missing:
-        reasons.append(f"runtime da familia {spec.family} nao instalado")
+        reasons.append(f"runtime da família {spec.family} não instalado")
     if checkpoint_missing:
         reasons.append("checkpoint ausente")
     return {
@@ -1409,7 +1448,7 @@ def _exec_with_model(spec: ModelSpec, port: int) -> None:
         _switch_target = None
         _update_runtime(
             status="error",
-            error=f"nao foi possivel recarregar o conector: {error}",
+            error=f"não foi possível recarregar o conector: {error}",
         )
 
 
@@ -1430,8 +1469,9 @@ def load(payload: LoadRequest):
         raise HTTPException(
             status_code=409,
             detail=(
-                f"{spec.model_id} ainda nao esta instalado: "
-                f"{availability['unavailable_reason']}. Rode o instalador para este modelo."
+                f"{spec.model_id} ainda não está instalado: "
+                f"{availability['unavailable_reason']}. Rode o instalador deste modelo "
+                f"e volte a esta tela; o conector segue no ar com o modelo atual."
             ),
         )
 
