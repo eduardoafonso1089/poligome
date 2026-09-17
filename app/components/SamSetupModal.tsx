@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertTriangle, Boxes, Check, Cpu, Download, ExternalLink, Gauge, HardDrive,
   KeyRound, Laptop, Link2, Network, Pencil, Plus, PowerOff, Server, ShieldCheck, Sparkles, Terminal, Trash2, X,
@@ -13,6 +13,8 @@ import type { ByomModel, SamModelDefinition } from "../lib/sam-models";
 
 type ConnectionState = "idle" | "checking" | "loading" | "ready" | "error" | "offline";
 
+type ByomWriteOutcome = { ok: true } | { ok: false; detail: string };
+
 type Props = {
   /** O painel é escrito em português; o idioma vale para o que vem do i18n. */
   language?: Language;
@@ -22,6 +24,12 @@ type Props = {
   /** Se o SAM carregado está sendo usado para anotar, e não apenas carregado. */
   samActive: boolean;
   runtimeLabel: string;
+  /** O que o conector respondeu ao recusar a última troca de modelo, se recusou. */
+  loadError: string | null;
+  /** O que o conector tem instalado, por modelo, com o motivo de quem falta. */
+  availability: readonly { model_id: string; installed: boolean; unavailable_reason?: string | null }[];
+  /** Onde mora o conector que respondeu, para desfazer confusão de duas instalações na mesma porta. */
+  connectorHost: { host: string; appDir: string } | null;
   endpoint: string;
   /** Modelos BYOM anunciados pelo conector; vazio quando não há contêiner registrado. */
   byomModels: readonly ByomModel[];
@@ -31,7 +39,8 @@ type Props = {
   onSelectModel: (modelId: string) => void;
   onSelectByomModel: (modelId: string | null) => void;
   onRunByomModel: (modelId: string) => void;
-  onRegisterByomModel: (entry: { modelId: string; name: string; port: number; notes?: string }) => void;
+  /** Devolve o desfecho para que o formulário possa manter o que foi digitado e mostrar o motivo. */
+  onRegisterByomModel: (entry: { modelId: string; name: string; port: number; notes?: string }) => Promise<ByomWriteOutcome>;
   onRemoveByomModel: (modelId: string) => void;
   /** Desliga SAM e BYOM de uma vez, para voltar às ferramentas manuais. */
   onUnselectAll: () => void;
@@ -195,12 +204,15 @@ function ByomEntry({
   busy: boolean;
   onRun: (modelId: string) => void;
   onRemove: (modelId: string) => void;
-  onSave: (entry: { modelId: string; name: string; port: number; notes: string }) => void;
+  onSave: (entry: { modelId: string; name: string; port: number; notes: string }) => Promise<ByomWriteOutcome>;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(model.name);
   const [port, setPort] = useState(String(Number(model.endpoint.split(":").at(-1)) || 8080));
   const [notes, setNotes] = useState(model.notes);
+  // Fechar a edição antes de saber se o registro foi gravado descartava a
+  // correção e não dizia o motivo; agora a ficha só fecha quando deu certo.
+  const [saveError, setSaveError] = useState("");
   const portNumber = Number(port);
   const canSave = Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535 && name.trim().length > 0;
 
@@ -242,11 +254,17 @@ function ByomEntry({
         <button
           className="primary"
           disabled={!canSave}
-          onClick={() => { onSave({ modelId: model.model_id, name: name.trim(), port: portNumber, notes: notes.trim() }); setEditing(false); }}
+          onClick={async () => {
+            setSaveError("");
+            const outcome = await onSave({ modelId: model.model_id, name: name.trim(), port: portNumber, notes: notes.trim() });
+            if (outcome.ok) setEditing(false);
+            else setSaveError(outcome.detail);
+          }}
         >
           <Check size={13} />Salvar
         </button>
       </div>
+      {saveError && <p className="byom-reason">Não foi possível salvar: {saveError}</p>}
     </div> : <div className="byom-entry-actions">
       <button className="byom-run" disabled={!model.ready || busy} onClick={() => onRun(model.model_id)}>
         {busy ? <Gauge className="spin" size={14} /> : <Sparkles size={14} />}
@@ -267,11 +285,15 @@ function ByomPanel({
   onRegister,
 }: {
   models: readonly ByomModel[];
-  onRegister: (entry: { modelId: string; name: string; port: number; notes?: string }) => void;
+  onRegister: (entry: { modelId: string; name: string; port: number; notes?: string }) => Promise<ByomWriteOutcome>;
 }) {
   const [draftId, setDraftId] = useState("byom-");
   const [draftName, setDraftName] = useState("");
   const [draftPort, setDraftPort] = useState("8080");
+  // Esta aba não desenha o bloco de estado do conector, então a falha do registro
+  // precisa aparecer aqui: sem isto o botão limpava os campos e não dizia nada.
+  const [importError, setImportError] = useState("");
+  const [importing, setImporting] = useState(false);
   const portNumber = Number(draftPort);
   const canRegister =
     BYOM_MODEL_ID_PATTERN.test(draftId.trim().toLowerCase())
@@ -311,14 +333,16 @@ function ByomPanel({
         </p>
       </article>
       <article>
-        <b>No Windows, tudo isso vive dentro do WSL2</b>
+        <b>No Windows, chame a CLI do mesmo lado em que o conector está</b>
         <p>
-          Não há <code>.bat</code> para o BYOM porque não é preciso: o conector já roda no WSL2. A CLI é a mesma,
-          chamada de lá, e o registro fica no home da distribuição, não em <code>C:\Users</code>. O Docker precisa
-          responder de dentro dessa distribuição — pela integração WSL do Docker Desktop ou por um Docker instalado
-          nela.
+          O registro do BYOM é um arquivo que o conector lê, então ele precisa ser gravado onde o conector procura.
+          Instalou o SAM pelo <code>poligome-sam-windows.bat</code>? O conector mora dentro do WSL2: chame a CLI em
+          bash, de dentro da distribuição, e o registro fica no home dela. Instalou pelo{" "}
+          <code>poligome-sam-windows-native.ps1</code>? O conector é um processo comum do Windows: use a CLI de
+          PowerShell abaixo, e o registro fica em <code>%USERPROFILE%\.poligome-sam\byom</code>. Os dois registros são
+          independentes, e o Docker precisa responder do mesmo lado que o conector.
         </p>
-        <code>{"wsl bash poligome-byom-macos-linux.sh list"}</code>
+        <code>{"wsl bash poligome-byom-macos-linux.sh list\npowershell -ExecutionPolicy Bypass -File poligome-byom-windows.ps1 list"}</code>
       </article>
     </section>
 
@@ -357,11 +381,14 @@ function ByomPanel({
     <section className="sam-install-panel">
       <div><b>Arquivos do BYOM</b><p>O serve.py de exemplo devolve COCO com polígono, caixa e ponto central, sem GPU, e traz dois métodos escolhidos pela variável METHOD: otsu, que junta objetos encostados numa região só, e watershed, que os separa. Serve de molde: troque a função predict() e mantenha o resto.</p></div>
       <div className="sam-install-actions">
-        <a className="primary" href="/poligome-byom-macos-linux.sh" download><Download size={15} /><span><strong>CLI do BYOM</strong><small>register · start · status · logs</small></span></a>
+        <a className="primary" href="/poligome-byom-macos-linux.sh" download><Download size={15} /><span><strong>CLI do BYOM · Linux, macOS e WSL2</strong><small>register · start · status · logs</small></span></a>
+        {/* Sem este botão, quem instalou o SAM pelo caminho nativo de Windows não
+            tinha como obter a CLI que escreve no registro que o conector dele lê. */}
+        <a href="/poligome-byom-windows.ps1" download><Download size={15} /><span><strong>CLI do BYOM · Windows nativo</strong><small>os mesmos comandos, em PowerShell</small></span></a>
         <a href="/byom/Dockerfile" download><Download size={15} /><span><strong>Dockerfile de exemplo</strong><small>python:3.12-slim, porta 8080</small></span></a>
         <a href="/byom/serve.py" download><Download size={15} /><span><strong>serve.py de exemplo</strong><small>/ping e /invocations prontos</small></span></a>
       </div>
-      <code>bash poligome-byom-macos-linux.sh --help</code>
+      <code>{"bash poligome-byom-macos-linux.sh --help\npowershell -ExecutionPolicy Bypass -File poligome-byom-windows.ps1 help"}</code>
     </section>
 
     <section className="byom-steps">
@@ -399,6 +426,16 @@ function ByomPanel({
 
     <section className="byom-steps">
       <h4>Passo a passo do seu modelo</h4>
+      {/* Os comandos abaixo são os de bash. Quem instalou pelo caminho nativo de
+          Windows precisa saber que os mesmos passos existem lá, com o mesmo nome,
+          antes de tentar rodar bash no PowerShell e achar que o BYOM não serve. */}
+      <p className="byom-import-hint">
+        Os comandos estão em bash, para Linux, macOS e WSL2. No Windows nativo os passos são os mesmos, com os mesmos
+        nomes de comando e opções escritas ao estilo do PowerShell — troque{" "}
+        <code>bash poligome-byom-macos-linux.sh register --model-id X --image Y</code> por{" "}
+        <code>powershell -ExecutionPolicy Bypass -File poligome-byom-windows.ps1 register -ModelId X -Image Y</code>.
+        A lista completa sai com <code>help</code>.
+      </p>
       {BYOM_STEPS.map((step) => <article key={step.title}>
         <b>{step.title}</b>
         <p>{step.body}</p>
@@ -418,16 +455,23 @@ function ByomPanel({
         <label>Porta<input type="number" min={1} max={65535} value={draftPort} onChange={(event) => setDraftPort(event.target.value)} /></label>
         <button
           className="byom-add"
-          disabled={!canRegister}
-          onClick={() => {
-            onRegister({ modelId: draftId.trim().toLowerCase(), name: draftName.trim(), port: portNumber });
-            setDraftId("byom-"); setDraftName("");
+          disabled={!canRegister || importing}
+          onClick={async () => {
+            setImportError("");
+            setImporting(true);
+            const outcome = await onRegister({ modelId: draftId.trim().toLowerCase(), name: draftName.trim(), port: portNumber });
+            setImporting(false);
+            // Limpar só no sucesso: quem errou a porta corrige o que digitou em
+            // vez de reescrever tudo.
+            if (outcome.ok) { setDraftId("byom-"); setDraftName(""); }
+            else setImportError(outcome.detail);
           }}
         >
-          <Plus size={14} />Importar
+          {importing ? <Gauge className="spin" size={14} /> : <Plus size={14} />}{importing ? "Importando…" : "Importar"}
         </button>
       </div>
       {!canRegister && draftId.trim() !== "byom-" && <p className="byom-reason">O identificador precisa começar com <code>byom-</code> e usar apenas letras minúsculas, números, ponto, hífen ou sublinhado.</p>}
+      {importError && <p className="byom-reason">Não foi possível importar: {importError}</p>}
 
       {models.length === 0
         ? <p className="byom-import-hint">Nenhum contêiner registrado ainda. Assim que o <code>/ping</code> responder, o modelo aparece na lista à esquerda.</p>
@@ -458,6 +502,9 @@ export default function SamSetupModal({
   connectionState,
   samActive,
   runtimeLabel,
+  loadError,
+  availability,
+  connectorHost,
   endpoint,
   byomModels,
   byomModelId,
@@ -476,11 +523,38 @@ export default function SamSetupModal({
   // O painel BYOM ocupa a área de detalhe no lugar da ficha do modelo, porque o
   // que interessa ali é a documentação do contrato e não um card comparável.
   const [byomView, setByomView] = useState<"docs" | "model" | "how" | null>(null);
+  // Forçar CPU era só uma variável de ambiente citada no meio de um parágrafo. A
+  // página não roda o instalador, mas pode escrever o comando certo por sistema —
+  // que é a única parte difícil para quem não mexe com terminal.
+  const [forceCpu, setForceCpu] = useState(false);
+
+  /**
+   * Esc fecha o catálogo, como em qualquer diálogo.
+   *
+   * Na captura e parando a propagação porque o editor também escuta Esc na
+   * janela: sem isso a tecla fechava o desenho em andamento por baixo do modal —
+   * e, antes desta tela ter a sua, só fazia isso, sem fechar nada.
+   */
+  useEffect(() => {
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", onKeydown, true);
+    return () => window.removeEventListener("keydown", onKeydown, true);
+  }, [onClose]);
+
   const selectedByomModel = byomModels.find((candidate) => candidate.model_id === byomModelId) ?? null;
   // Só o tutorial não tem o que confirmar: é texto. Um modelo, BYOM ou SAM,
   // sempre oferece o botão de usar no canto do rodapé.
   const showFooterAction = byomView !== "docs" && byomView !== "how";
   const model = getSamModel(selectedModelId) ?? SAM_MODELS[0];
+  const installedIds = new Set(availability.filter((entry) => entry.installed).map((entry) => entry.model_id));
+  // Só vale dizer "ainda não instalado" quando o conector respondeu: sem ele a
+  // lista chega vazia e todo modelo pareceria faltando.
+  const selectedAvailability = availability.find((entry) => entry.model_id === model.id) ?? null;
+  const needsInstall = selectedAvailability !== null && !selectedAvailability.installed;
   const benchmark = benchmarkSummary(model);
   const modelMatches = connectionState === "ready" && loadedModelId === model.id;
   const pythonNotes = "notes" in model.requirements.python ? model.requirements.python.notes : null;
@@ -488,15 +562,22 @@ export default function SamSetupModal({
   const activeCapabilities = Object.entries(model.capabilities)
     .filter(([, enabled]) => enabled)
     .map(([capability]) => capabilityLabels[capability as keyof typeof capabilityLabels]);
-  const unixCommand = `bash poligome-sam-macos-linux.sh ${model.id}`;
-  const windowsCommand = `poligome-sam-windows.bat ${model.id}`;
-  const nativeWindowsCommand = `poligome-sam-windows-native.ps1 ${model.id}`;
+  // Cada sistema escreve a variável de ambiente à sua maneira, e errar a sintaxe é
+  // o tipo de detalhe que faz o usuário desistir achando que o produto não serve.
+  const unixCommand = `${forceCpu ? "POLIGOME_DEVICE=cpu " : ""}bash poligome-sam-macos-linux.sh ${model.id}`;
+  const windowsCommand = `${forceCpu ? "set POLIGOME_DEVICE=cpu && " : ""}poligome-sam-windows.bat ${model.id}`;
+  const nativeWindowsCommand = `${forceCpu ? "$env:POLIGOME_DEVICE='cpu'; " : ""}poligome-sam-windows-native.ps1 ${model.id}`;
   const windowsPlatformLabel = "Windows · WSL2";
   const unixPlatformLabel = model.family === "sam3"
     ? "Linux · NVIDIA CUDA"
     : "Linux · macOS (Apple Silicon) · WSL2";
 
-  return <div className="modal-backdrop sam-catalog-backdrop">
+  return <div
+    className="modal-backdrop sam-catalog-backdrop"
+    // Só o clique no fundo fecha; um arrasto que termina fora do painel, ou um
+    // clique dentro dele, não pode derrubar a tela no meio de um formulário.
+    onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+  >
     <section className="sam-catalog-modal" role="dialog" aria-modal="true" aria-labelledby="sam-catalog-title">
       <header>
         <div><span><Sparkles size={21} /></span><div><h2 id="sam-catalog-title">Modelos Segment Anything</h2><p>Escolha o modelo conforme recursos, hardware e licença.</p></div></div>
@@ -527,10 +608,14 @@ export default function SamSetupModal({
             >
               <span><b>{candidate.name}</b><small>{candidate.parameters.label} · {candidate.checkpoint.approximateSizeLabel}</small></span>
               {/* "Em uso" é o que está carregado agora, e não o que você está olhando:
-                  sem essa distinção não dá para ver que SAM e BYOM estão ativos juntos. */}
+                  sem essa distinção não dá para ver que SAM e BYOM estão ativos juntos.
+                  "Instalado" vem do conector e evita escolher um modelo que ainda
+                  precisa ser baixado sem saber disso antes de clicar. */}
               {candidate.id === loadedModelId && connectionState === "ready" && samActive
                 ? <em className="in-use">em uso</em>
-                : <em>{candidate.recommended ? "Recomendado" : candidate.experimental ? "Experimental" : candidate.version}</em>}
+                : installedIds.has(candidate.id)
+                  ? <em className="installed"><Check size={11} />instalado</em>
+                  : <em>{candidate.recommended ? "Recomendado" : candidate.experimental ? "Experimental" : candidate.version}</em>}
             </button>)}
           </section>)}
 
@@ -564,7 +649,10 @@ export default function SamSetupModal({
           : byomView === "model" && selectedByomModel ? <ByomEntry
             model={selectedByomModel}
             busy={byomBusy}
-            onRun={onRunByomModel}
+            // Fechar junto: o resultado do BYOM são as anotações sobre a imagem, e
+            // a mensagem que conta quantas vieram fica na barra de estado — tudo
+            // atrás deste painel. Sem isso o botão parecia não ter feito nada.
+            onRun={(modelId) => { onRunByomModel(modelId); onClose(); }}
             onRemove={(modelId) => { setByomView(null); onRemoveByomModel(modelId); }}
             onSave={onRegisterByomModel}
           /> : <>
@@ -615,26 +703,103 @@ export default function SamSetupModal({
           {model.experimental && <section className="sam-license-warning"><AlertTriangle size={17} /><div><b>Licença e acesso diferentes</b><p>{model.license.notes}</p></div></section>}
 
           <section className="sam-install-panel">
-            <div><b>Instalar o modelo selecionado</b><p>O instalador cria um ambiente separado por família e baixa apenas o checkpoint escolhido.</p></div>
+            <div><b>Instalar o modelo selecionado</b><p>O instalador cria um ambiente separado por família e baixa apenas o checkpoint escolhido. O checkpoint é só uma parte: o ambiente de uma família ocupa alguns gigabytes de bibliotecas, baixados uma vez e reaproveitados pelos outros modelos dela.</p></div>
+            {needsInstall && <p className="sam-needs-install"><AlertTriangle size={14} /><span><b>{model.name} ainda não está instalado.</b> O conector está no ar, mas sem este checkpoint. Rode o comando do seu sistema, aqui embaixo, e volte a esta tela.</span></p>}
             <div className="sam-install-actions">
               <a className="primary" href="/poligome-sam-macos-linux.sh" download><Download size={15} /><span><strong>{unixPlatformLabel}</strong><small>{unixCommand}</small></span></a>
               <a className={model.family === "sam3" ? "limited" : ""} href="/poligome-sam-windows.bat" download><Download size={15} /><span><strong>{windowsPlatformLabel}</strong><small>{windowsCommand}</small></span></a>
               <a href="/poligome-sam-windows-native.ps1" download><Download size={15} /><span><strong>Windows nativo · sem WSL2</strong><small>{nativeWindowsCommand}</small></span></a>
             </div>
-            <code>{unixCommand}</code>
+            {/* Escolher CPU deixou de ser folclore de variável de ambiente: o
+                controle fica aqui e reescreve os três comandos acima com a
+                sintaxe certa de cada sistema. */}
+            {model.family !== "sam3" && <label className="sam-device-choice">
+              <input type="checkbox" checked={forceCpu} onChange={(event) => setForceCpu(event.target.checked)} />
+              <span>
+                <b>Rodar em CPU, mesmo se houver placa de vídeo</b>
+                <small>
+                  Sem GPU o modelo já usa a CPU sozinho — isto é para quem tem placa e prefere não usá-la, ou tem
+                  uma placa antiga demais para o modelo. Fica mais devagar, alguns segundos por clique. No Linux o
+                  download também fica alguns gigabytes menor, porque o PyTorch de CPU não traz as bibliotecas da
+                  NVIDIA. Marcar aqui só muda os comandos acima; o instalador ainda pergunta se encontrar uma placa
+                  que não serve.
+                </small>
+              </span>
+            </label>}
+            {/* O comando de cada caminho já vai embaixo do seu próprio botão. Um
+                único bloco aqui mostrava sempre o de Linux, inclusive para quem
+                tinha acabado de baixar o instalador de Windows. */}
             <p className="sam-manual-note">O conector é um processo local e precisa estar rodando sempre que você usar IA: fechar o terminal ou reiniciar o computador o derruba, e o editor consegue encontrá-lo sozinho, nunca ligá-lo. No Linux, <code>poligome-sam-service-linux.sh install</code> o sobe no login e dispensa esse passo.</p>
             <div className="sam-launch-actions"><span>Já instalado?</span><a href="/poligome-sam-start-macos-linux.sh" download>Baixar iniciador {unixPlatformLabel}</a><a href="/poligome-sam-start-windows.bat" download>Baixar iniciador {windowsPlatformLabel}</a></div>
+            {/* O caminho nativo não tem iniciador separado porque não precisa: o
+                próprio instalador detecta o que já está no ambiente e só sobe o
+                conector. Sem esta linha, quem instalou por ele ficava sem saber
+                como voltar depois de reiniciar o computador. */}
+            <p className="sam-manual-note"><b>Windows nativo:</b> não há iniciador à parte. Rode de novo <code>{nativeWindowsCommand}</code>: ele reconhece o que já está instalado e só levanta o conector.</p>
             <p className="sam-manual-note">
               {model.family === "sam3"
                 ? <>O SAM 3 só roda em GPU NVIDIA: o conector recusa CPU e Metal para esta família.</>
-                : <>Sem GPU, o modelo roda em CPU sozinho. Se a sua GPU for reconhecida mas não aguentar o modelo, force a escolha com <code>POLIGOME_DEVICE=cpu</code> antes do instalador ou do iniciador.</>}
+                : <>Se a sua placa for antiga demais para o modelo, o instalador avisa e pergunta antes de baixar qualquer coisa — não é preciso descobrir isso sozinho. A opção acima vale também para o iniciador.</>}
             </p>
             <p className="sam-platform-note"><b>Linux:</b> {model.platformSupport.linux.notes} <b>Windows:</b> {model.platformSupport.windows.notes} <b>macOS:</b> {model.platformSupport.macos.notes}</p>
+
+            {/* Onde isso fica e como sair: um instalador que não diz como se
+                desfazer obriga o usuário a caçar gigabytes pelo disco. Tudo mora
+                numa pasta só por sistema, então apagar a pasta desinstala. */}
+            <details className="sam-uninstall">
+              <summary>Onde isso fica e como remover</summary>
+              <p>
+                Tudo o que o instalador cria — ambientes Python, checkpoints, o conector e os registros do BYOM —
+                fica dentro de <b>uma pasta só</b>. Apagar essa pasta desinstala: nada é gravado no registro do
+                Windows, em <code>/usr/local</code> ou em qualquer outro lugar do sistema. Pare o conector antes
+                (feche a janela que o iniciou) e apague.
+              </p>
+              <table>
+                <tbody>
+                  <tr>
+                    <th>Linux e macOS</th>
+                    <td><code>~/.poligome-sam</code><br /><code>rm -rf ~/.poligome-sam</code></td>
+                  </tr>
+                  <tr>
+                    <th>Windows nativo</th>
+                    <td><code>{String.raw`%USERPROFILE%\.poligome-sam`}</code><br /><code>{String.raw`rmdir /s /q "%USERPROFILE%\.poligome-sam"`}</code></td>
+                  </tr>
+                  <tr>
+                    <th>Windows por WSL2</th>
+                    <td>
+                      A instalação mora dentro da distribuição: <code>~/.poligome-sam</code>, apagada de lá com{" "}
+                      <code>wsl rm -rf ~/.poligome-sam</code>. No Windows sobra só o atalho do iniciador em{" "}
+                      <code>%LOCALAPPDATA%\PoligomeSAM</code>.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                No Linux, se você tiver instalado o serviço de usuário, desligue-o antes com{" "}
+                <code>poligome-sam-service-linux.sh uninstall</code>. Os contêineres do BYOM são seus e continuam no
+                Docker: <code>docker rm -f</code> e <code>docker rmi</code> cuidam deles.
+              </p>
+            </details>
           </section>
 
-          <section className={`sam-runtime-status ${connectionState} ${connectionState === "ready" && !modelMatches ? "mismatch" : ""}`}>
+          <section className={`sam-runtime-status ${loadError ? "error" : connectionState} ${!loadError && connectionState === "ready" && !modelMatches ? "mismatch" : ""}`}>
             <span />
-            <div><b>{statusLabel(connectionState, modelMatches)}</b>{runtimeLabel && <small>{runtimeLabel}</small>}{connectionState === "error" && <small>Revise o checkpoint, a versão do CUDA e as dependências; depois reinicie o conector.</small>}{connectionState === "ready" && !modelMatches && <small>Clique em “Carregar este modelo” para trocar o conector para <code>{model.id}</code>, sem reiniciar nada à mão.</small>}</div>
+            <div>
+              <b>{loadError ? "A troca de modelo não foi aceita" : statusLabel(connectionState, modelMatches)}</b>
+              {loadError && <small>{loadError}</small>}
+              {runtimeLabel && <small>{loadError ? `O conector segue no ar com ${runtimeLabel}.` : runtimeLabel}</small>}
+              {/* A dica sobre CUDA só serve quando o modelo existe e quebrou ao
+                  carregar. Para um modelo que nem foi baixado ela mandava o
+                  usuário investigar a placa de vídeo sem motivo. */}
+              {!loadError && connectionState === "error" && <small>Revise o checkpoint, a versão do CUDA e as dependências; depois reinicie o conector.</small>}
+              {!loadError && connectionState === "ready" && !modelMatches && <small>Clique em “Carregar este modelo” para trocar o conector para <code>{model.id}</code>, sem reiniciar nada à mão.</small>}
+              {/* Duas instalações disputam a mesma porta 7860 e só uma atende.
+                  Sem esta linha, quem instalou nos dois caminhos via a lista do
+                  outro e concluía que o registro tinha sumido. */}
+              {connectorHost && <small className="sam-connector-origin">
+                Atendendo de <b>{connectorHost.host}</b>{connectorHost.appDir ? <> · <code>{connectorHost.appDir}</code></> : null}
+              </small>}
+            </div>
           </section>
 
           <details className="sam-advanced">
@@ -649,6 +814,18 @@ export default function SamSetupModal({
       </div>
 
       <footer>
+        {/* O bloco de estado detalhado mora no fim da ficha do modelo, fora da
+            tela na primeira abertura, e some nas abas do BYOM. Sem este resumo,
+            apertar o botão principal com o conector parado não mudava nada que o
+            usuário pudesse ver. */}
+        <span className={`sam-footer-status ${loadError ? "error" : connectionState}`} aria-live="polite">
+          <em />
+          <span>
+            <b>{loadError ? "A troca de modelo não foi aceita" : statusLabel(connectionState, modelMatches)}</b>
+            {loadError ? <small>{loadError}</small> : runtimeLabel ? <small>{runtimeLabel}</small> : null}
+            {!loadError && connectionState === "offline" && <small>Instale ou inicie o conector; o painel de instalação está nesta tela, em “Instalar o modelo selecionado”.</small>}
+          </span>
+        </span>
         <button onClick={onClose}>Fechar</button>
         {anyModelSelected && <button
           className="unselect-all"

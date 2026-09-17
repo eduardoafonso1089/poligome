@@ -13,6 +13,7 @@ import {
   waitForModel,
   type ByomRegisterEntry,
   type ConnectorHealth,
+  type ModelAvailability,
 } from "../../lib/sam-connector";
 import { DEFAULT_SAM_MODEL_ID, isByomModelId, isSamModelId } from "../../lib/sam-models";
 import type { ByomModel } from "../../lib/sam-models";
@@ -48,6 +49,12 @@ function describeRuntime(health: ConnectorHealth | null): string {
   return parts.join(" · ");
 }
 
+/** Onde mora o conector que atendeu, para distinguir duas instalações na mesma porta. */
+function describeHost(health: ConnectorHealth | null): { host: string; appDir: string } | null {
+  if (!health?.host) return null;
+  return { host: health.host, appDir: health.app_dir ?? "" };
+}
+
 /**
  * Estado do catálogo de modelos: o que o conector tem instalado, o que está
  * carregado agora e quais contêineres BYOM estão registrados.
@@ -64,6 +71,17 @@ export function useSamCatalog(active: boolean) {
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const [runtimeLabel, setRuntimeLabel] = useState("");
+  // O conector já diz quais checkpoints existem no disco; guardar isso é o que
+  // permite marcar na lista o que está instalado, em vez de o usuário descobrir
+  // só depois de pedir a troca.
+  const [availability, setAvailability] = useState<readonly ModelAvailability[]>([]);
+  // A recusa de uma troca é separada do estado da conexão: o conector continua no
+  // ar com o modelo anterior, e tratá-la como "conexão com erro" apagava da tela
+  // o modelo que seguia funcionando.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Qual instalação respondeu: com um conector no WSL2 e outro nativo, só a porta
+  // não diz com quem a página está falando.
+  const [connectorHost, setConnectorHost] = useState<{ host: string; appDir: string } | null>(null);
   const [byomModels, setByomModels] = useState<readonly ByomModel[]>([]);
   const [byomModelId, setByomModelIdState] = useState<string | null>(null);
   const [byomBusy, setByomBusy] = useState(false);
@@ -105,8 +123,11 @@ export function useSamCatalog(active: boolean) {
       setLoadedModelId(null);
       setRuntimeLabel("");
       setByomModels([]);
+      setAvailability([]);
+      setConnectorHost(null);
       return;
     }
+    setConnectorHost(describeHost(health));
     setLoadedModelId(health.model_id ?? null);
     setRuntimeLabel(describeRuntime(health));
     setConnectionState(health.status === "ready" ? "ready" : health.status === "loading" ? "loading" : "error");
@@ -117,7 +138,8 @@ export function useSamCatalog(active: boolean) {
       setSamActive(true);
     }
 
-    const [, containers] = await Promise.all([fetchModels(base), fetchByomModels(base)]);
+    const [catalog, containers] = await Promise.all([fetchModels(base), fetchByomModels(base)]);
+    setAvailability(catalog?.models ?? []);
     setByomModels(containers);
     if (adopt) {
       setByomModelIdState((current) => {
@@ -155,6 +177,7 @@ export function useSamCatalog(active: boolean) {
    */
   const connect = useCallback(async (): Promise<boolean> => {
     const base = connectorBaseUrl(endpoint);
+    setLoadError(null);
     setConnectionState("checking");
     const health = await fetchHealth(base);
     if (!health) {
@@ -176,8 +199,10 @@ export function useSamCatalog(active: boolean) {
     const outcome = await requestModelLoad(base, selectedModelId);
     if (!outcome.ok) {
       switching.current = false;
-      setConnectionState("error");
-      setRuntimeLabel(outcome.detail);
+      setLoadError(outcome.detail);
+      // A recusa não derruba o conector. Reler a saúde devolve à tela o modelo que
+      // continua carregado, em vez de deixar tudo parecendo desconectado.
+      await refresh(false);
       return false;
     }
     const settled = await waitForModel(base, selectedModelId, {
@@ -185,8 +210,8 @@ export function useSamCatalog(active: boolean) {
     });
     switching.current = false;
     if (!settled.ok) {
-      setConnectionState("error");
-      setRuntimeLabel(settled.detail);
+      setLoadError(settled.detail);
+      await refresh(false);
       return false;
     }
     setLoadedModelId(selectedModelId);
@@ -196,6 +221,11 @@ export function useSamCatalog(active: boolean) {
     return true;
   }, [endpoint, refresh, selectedModelId]);
 
+  /**
+   * Devolve o resultado em vez de engolir a falha: o formulário do BYOM vive numa
+   * aba que não desenha o bloco de estado do conector, então quem registrava com
+   * o conector parado perdia o que tinha digitado e não via erro nenhum.
+   */
   const registerByom = useCallback(async (entry: ByomRegisterEntry) => {
     const base = connectorBaseUrl(endpoint);
     setByomBusy(true);
@@ -204,9 +234,10 @@ export function useSamCatalog(active: boolean) {
     if (!outcome.ok) {
       setConnectionState("error");
       setRuntimeLabel(outcome.detail);
-      return;
+      return outcome;
     }
     await refresh(false);
+    return outcome;
   }, [endpoint, refresh]);
 
   const removeByom = useCallback(async (modelId: string) => {
@@ -217,10 +248,11 @@ export function useSamCatalog(active: boolean) {
     if (!outcome.ok) {
       setConnectionState("error");
       setRuntimeLabel(outcome.detail);
-      return;
+      return outcome;
     }
     if (byomModelId === modelId) setByomModelId(null);
     await refresh(false);
+    return outcome;
   }, [byomModelId, endpoint, refresh, setByomModelId]);
 
   /** Deixa de usar SAM e BYOM para anotar; nada é desinstalado nem desconectado. */
@@ -234,7 +266,7 @@ export function useSamCatalog(active: boolean) {
   return {
     endpoint, setEndpoint,
     selectedModelId, setSelectedModelId,
-    loadedModelId, connectionState, runtimeLabel,
+    loadedModelId, connectionState, runtimeLabel, availability, loadError, connectorHost,
     byomModels, byomModelId, setByomModelId, byomBusy, activeByomModel,
     // Carregado no conector e em uso para anotar sao coisas diferentes: depois de
     // "desselecionar todos" o modelo continua carregado, e so deixa de ser usado.

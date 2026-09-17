@@ -402,8 +402,13 @@ export async function requestSamPredictions({
     });
     if (!response.ok) {
       const errorBody = await response.json().catch(() => null) as { detail?: unknown } | null;
-      const detail = typeof errorBody?.detail === "string" ? `: ${errorBody.detail}` : "";
-      throw new Error(`${fill(copy.errSamHttp, { status: response.status })}${detail}`);
+      // O conector escreve o detalhe para quem está anotando ("o modelo ainda está
+      // carregando"), então ele vem primeiro e o código fica de contexto. Colado
+      // atrás da frase pronta saía "…HTTP 503.: o modelo ainda está carregando".
+      const detail = typeof errorBody?.detail === "string" ? errorBody.detail.trim() : "";
+      throw new Error(detail
+        ? `${detail} (HTTP ${response.status})`
+        : fill(copy.errSamHttp, { status: response.status }));
     }
     return parseResponse(
       await response.json() as SamResponse,

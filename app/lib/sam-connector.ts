@@ -24,6 +24,12 @@ export type ConnectorHealth = {
   family?: string | null;
   device?: string | null;
   error?: string | null;
+  /** Onde o conector mora: Windows, WSL2, Linux ou macOS. */
+  host?: string | null;
+  /** Pasta da instalação que ele atende — a que some se o usuário a apagar. */
+  app_dir?: string | null;
+  /** Prompts que o modelo carregado aceita agora: point, box, text, box_exemplar. */
+  capabilities?: string[];
 };
 
 export type ModelAvailability = {
