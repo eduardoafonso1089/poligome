@@ -54,6 +54,13 @@ async function desktop(browser) {
     return status;
   });
 
+  await check("desktop", "COCO export is visible in the File menu", async () => {
+    await (await button(page, /^Arquivo$|^File$/i)).click();
+    const coco = page.getByRole("menuitem", { name: /COCO ZIP/i });
+    await coco.waitFor({ state: "visible", timeout: 8000 });
+    await page.keyboard.press("Escape");
+  });
+
   await check("desktop", "Box", async () => {
     await (await button(page, /Caixa \(B\)|Box \(B\)/i)).click();
     const before = await count(page); const { box } = await canvas(page);
