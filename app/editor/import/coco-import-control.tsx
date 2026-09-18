@@ -15,7 +15,7 @@ import {
   type CocoDocumentPlan,
 } from "./coco-document-import";
 import type { CocoImportWorkerRequest, CocoImportWorkerResponse } from "./coco-import.worker";
-import { inspectAnnotationFile, type AnnotationPackageInspection } from "./annotation-package-import";
+import { inspectAnnotationFiles, type AnnotationPackageFormat, type AnnotationPackageInspection } from "./annotation-package-import";
 import { summarizeImageIssues } from "./annotation-import-summary";
 
 function afterNextPaint() {
@@ -70,13 +70,20 @@ function runWorker(worker: Worker, request: CocoImportWorkerRequest) {
 }
 
 type PendingCoco = {
-  file: File;
+  files: File[];
   document: CocoDocumentInput;
   plan: CocoDocumentPlan;
   inspection: AnnotationPackageInspection;
 };
 
+const FORMAT_NAMES: Record<AnnotationPackageFormat, string> = { coco: "COCO", yolo: "YOLO", mixed: "COCO + YOLO" };
+
 export type CocoImportHandle = { open: () => void };
+
+/** One file shows its name; a selection shows how many came in. */
+function sourceLabel(files: File[], manyLabel: string) {
+  return files.length === 1 ? files[0].name : `${files.length} ${manyLabel}`;
+}
 
 type CocoImportControlProps = {
   assets: Asset[];
@@ -121,12 +128,13 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
   const canImport = activeImportSelection.geometryTypes.length > 0 && activeImportSelection.selectedIndexes.length > 0;
   const issueSummary = useMemo(() => summarizeImageIssues(pending?.inspection.issues ?? []), [pending]);
 
-  async function inspectFile(file: File) {
+  async function inspectFiles(files: File[]) {
+    if (!files.length) return;
     setBusy(true);
     try {
-      const inspection = await inspectAnnotationFile(file, assets);
+      const inspection = await inspectAnnotationFiles(files, assets);
       const plan = planCocoDocument(inspection.document, assets, { unlabeledName: copy.unlabeled });
-      setPending({ file, document: inspection.document, plan, inspection });
+      setPending({ files, document: inspection.document, plan, inspection });
       updateImportSelection(plan.geometryTypes, plan.candidates.map((candidate) => candidate.index), false);
       setTab("categories");
     } catch (error) {
@@ -282,11 +290,11 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
     <input
       ref={inputRef}
       type="file"
-      accept="application/json,application/zip,.json,.zip"
+      accept="application/json,application/zip,text/plain,.json,.zip,.txt,.names"
+      multiple
       hidden
       onChange={(event) => {
-        const file = event.target.files?.[0];
-        if (file) void inspectFile(file);
+        void inspectFiles(Array.from(event.target.files ?? []));
         event.currentTarget.value = "";
       }}
     />
@@ -297,7 +305,7 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
     {pending && <div className="modal-backdrop" role="presentation" onPointerDown={requestClose}>
       <section className="sam-modal coco-import-modal" role="dialog" aria-modal="true" aria-busy={importing} aria-labelledby="coco-import-title" onPointerDown={(event) => event.stopPropagation()}>
         <header>
-          <div><strong id="coco-import-title">{copy.chooseAnnotations}</strong><div style={{ fontSize: 13, opacity: .72, marginTop: 4 }}>{copy.chooseAnnotationsHint}</div><div style={{ fontSize: 12, opacity: .6, marginTop: 2 }}>{pending.file.name} · {copy.annotationPackageFormat}: {pending.inspection.format.toUpperCase()}</div></div>
+          <div><strong id="coco-import-title">{copy.chooseAnnotations}</strong><div style={{ fontSize: 13, opacity: .72, marginTop: 4 }}>{copy.chooseAnnotationsHint}</div><div style={{ fontSize: 12, opacity: .6, marginTop: 2 }}>{sourceLabel(pending.files, copy.selectedFiles)} · {copy.annotationPackageFormat}: {FORMAT_NAMES[pending.inspection.format]}</div></div>
           <button type="button" onClick={requestClose} aria-label={copy.close}><X size={19} /></button>
         </header>
 

@@ -5,7 +5,7 @@ import { summarizeImageIssues } from "../app/editor/import/annotation-import-sum
 import { CocoImportControl } from "../app/editor/import/coco-import-control.tsx";
 import { getCopy } from "../app/lib/i18n.ts";
 
-test("annotation picker accepts standalone COCO JSON and annotation ZIPs", () => {
+test("annotation picker accepts COCO JSON, annotation ZIPs and loose label files, one or many", () => {
   const markup = render(CocoImportControl, {
     assets: [{ id: "image", name: "image.png", src: "", width: 10, height: 10 }],
     labels: [],
@@ -16,7 +16,8 @@ test("annotation picker accepts standalone COCO JSON and annotation ZIPs", () =>
     onImported: () => undefined,
   });
 
-  assert.match(markup, /accept="application\/json,application\/zip,\.json,\.zip"/);
+  assert.match(markup, /accept="application\/json,application\/zip,text\/plain,\.json,\.zip,\.txt,\.names"/);
+  assert.match(markup, /multiple/);
 });
 
 test("image issue summary separates missing, ambiguous, and invalid references", () => {

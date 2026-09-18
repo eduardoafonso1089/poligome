@@ -17,7 +17,13 @@ export type ParsedYoloPackage = {
   issues: ImageMatchIssue[];
 };
 
+export type YoloLabelFile = { path: string; text: string };
+
 const YAML_NAMES = new Set(["data.yaml", "data.yml", "dataset.yaml", "dataset.yml"]);
+const CLASS_LIST_NAMES = new Set(["classes.txt", "obj.names", "classes.names"]);
+// Split lists and the README the exporter writes sit next to the labels and are
+// not annotations. Reading them as rows would report every line as invalid.
+const NON_LABEL_NAMES = new Set(["train.txt", "val.txt", "valid.txt", "test.txt", "readme.txt", "images.txt"]);
 
 function normalizePath(value: string) {
   return value.trim().replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/\/{2,}/g, "/");
@@ -45,6 +51,11 @@ function classNames(value: unknown) {
   return Object.entries(value).flatMap(([index, name]) => /^\d+$/.test(index) ? [[Number(index), String(name)] as const] : []);
 }
 
+function classListNames(text: string) {
+  return text.split(/\r?\n/).map((line) => line.trim())
+    .flatMap((name, index) => name ? [[index, name] as const] : []);
+}
+
 function stringPaths(value: unknown): string[] {
   if (typeof value === "string" && value.trim()) return [value.trim()];
   if (Array.isArray(value)) return value.flatMap((item) => typeof item === "string" && item.trim() ? [item.trim()] : []);
@@ -60,6 +71,18 @@ function labelPathForImage(root: string, imageReference: string) {
   return `${root}${relative}.txt`;
 }
 
+/** The image a label file belongs to: YOLO pairs them by directory and stem. */
+function imageReferenceForLabel(labelPath: string) {
+  return normalizePath(labelPath).replace(/(^|\/)labels\//i, "$1images/").replace(/\.txt$/i, "");
+}
+
+/** Everything before the `labels/` segment, so a package can carry several roots. */
+function labelRoot(labelPath: string) {
+  const normalized = normalizePath(labelPath);
+  const match = /(^|\/)labels\//i.exec(normalized);
+  return match ? normalized.slice(0, match.index + (match[1] ? 1 : 0)) : dirname(normalized);
+}
+
 function issueKey(issue: ImageMatchIssue) {
   return `${issue.reason}:${normalizePath(issue.reference).toLocaleLowerCase()}`;
 }
@@ -73,36 +96,131 @@ function polygonArea(points: number[]) {
   return Math.abs(area / 2);
 }
 
-export async function parseYoloPackage(zip: JSZip, assets: Asset[]): Promise<ParsedYoloPackage | null> {
+type YoloContext = {
+  images: NonNullable<CocoDocumentInput["images"]>;
+  categories: NonNullable<CocoDocumentInput["categories"]>;
+  annotations: NonNullable<CocoDocumentInput["annotations"]>;
+  categoryByName: Map<string, number>;
+  issues: Map<string, ImageMatchIssue>;
+};
+
+function createContext(): YoloContext {
+  return { images: [], categories: [], annotations: [], categoryByName: new Map(), issues: new Map() };
+}
+
+function categoryFor(context: YoloContext, name: string) {
+  const key = name.toLocaleLowerCase();
+  const existing = context.categoryByName.get(key);
+  if (existing) return existing;
+  const id = context.categories.length + 1;
+  context.categoryByName.set(key, id);
+  context.categories.push({ id, name });
+  return id;
+}
+
+/**
+ * Class names declared by the package, mapped onto merged category ids. A
+ * package that declares none maps `null`, and each class index then becomes a
+ * category named after the index itself: a dataset whose images and labels
+ * arrive without `data.yaml` or `classes.txt` still imports, and the classes can
+ * be renamed in the editor afterwards.
+ */
+function declaredClasses(context: YoloContext, entries: ReadonlyArray<readonly [number, string]>) {
+  const classes = new Map<number, number>();
+  for (const [index, rawName] of entries) classes.set(index, categoryFor(context, rawName.trim() || `#${index}`));
+  return classes;
+}
+
+function noteIssue(context: YoloContext, reference: string, reason: ImageMatchIssue["reason"]) {
+  const issue = { reference, reason };
+  context.issues.set(issueKey(issue), issue);
+}
+
+function addLabelRows(context: YoloContext, options: {
+  text: string;
+  labelPath: string;
+  imageId: number;
+  width: number;
+  height: number;
+  classes: Map<number, number> | null;
+}) {
+  const { text, labelPath, imageId, width, height, classes } = options;
+  const rows = text.split(/\r?\n/);
+  for (let lineIndex = 0; lineIndex < rows.length; lineIndex += 1) {
+    const row = rows[lineIndex].trim();
+    if (!row) continue;
+    const values = row.split(/\s+/).map(Number);
+    const classIndex = values[0];
+    const coordinates = values.slice(1);
+    const categoryId = Number.isInteger(classIndex)
+      ? classes ? classes.get(classIndex) : categoryFor(context, String(classIndex))
+      : undefined;
+    const validCoordinates = coordinates.length > 0 && coordinates.every((value) => Number.isFinite(value) && value >= 0 && value <= 1);
+    if (!categoryId || !validCoordinates) {
+      noteIssue(context, `${labelPath}:${lineIndex + 1}`, "invalid");
+      continue;
+    }
+    if (values.length === 5) {
+      const [centerX, centerY, boxWidth, boxHeight] = coordinates;
+      context.annotations.push({
+        image_id: imageId,
+        category_id: categoryId,
+        bbox: [(centerX - boxWidth / 2) * width, (centerY - boxHeight / 2) * height, boxWidth * width, boxHeight * height],
+      });
+      continue;
+    }
+    if (values.length >= 7 && values.length % 2 === 1) {
+      const points = coordinates.map((value, index) => value * (index % 2 === 0 ? width : height));
+      context.annotations.push({ image_id: imageId, category_id: categoryId, segmentation: [points], area: polygonArea(points) } as NonNullable<CocoDocumentInput["annotations"]>[number]);
+      continue;
+    }
+    noteIssue(context, `${labelPath}:${lineIndex + 1}`, "invalid");
+  }
+}
+
+/** Register the loaded image a reference points at, or record why it cannot. */
+function addImage(context: YoloContext, reference: string, assets: Asset[]) {
+  const match = matchImageReference(reference, assets, { allowStem: true });
+  if ("issue" in match) {
+    context.issues.set(issueKey(match.issue), match.issue);
+    return null;
+  }
+  const width = Number(match.asset.width);
+  const height = Number(match.asset.height);
+  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+    noteIssue(context, reference, "invalid");
+    return null;
+  }
+  const id = context.images.length + 1;
+  // The loaded image's own name, not the package reference: a label file pairs
+  // with an image by stem, and the planner downstream matches by name.
+  context.images.push({ id, file_name: match.asset.name, width, height });
+  return { id, width, height };
+}
+
+function finish(context: YoloContext, roots: string[]): ParsedYoloPackage {
+  return {
+    roots,
+    document: { images: context.images, categories: context.categories, annotations: context.annotations },
+    issues: [...context.issues.values()],
+  };
+}
+
+async function parseYamlRoots(zip: JSZip, assets: Asset[], context: YoloContext, yamlEntries: JSZip.JSZipObject[]) {
   const files = Object.values(zip.files).filter((entry) => !entry.dir);
   const filesByPath = new Map(files.map((entry) => [normalizePath(entry.name).toLocaleLowerCase(), entry]));
-  const yamlEntries = files.filter((entry) => YAML_NAMES.has(pathName(entry.name)));
-  if (!yamlEntries.length) return null;
-
   const roots: string[] = [];
-  const images: NonNullable<CocoDocumentInput["images"]> = [];
-  const categories: NonNullable<CocoDocumentInput["categories"]> = [];
-  const annotations: NonNullable<CocoDocumentInput["annotations"]> = [];
-  const categoryByName = new Map<string, number>();
-  const issues = new Map<string, ImageMatchIssue>();
 
   for (const yamlEntry of yamlEntries) {
     const root = dirname(yamlEntry.name);
     roots.push(root.replace(/\/$/, ""));
     const config = parseYaml(await yamlEntry.async("string")) as YoloYaml;
-    const localClasses = new Map<number, number>();
-    for (const [classIndex, rawName] of classNames(config.names)) {
-      const name = rawName.trim() || `#${classIndex}`;
-      const nameKey = name.toLocaleLowerCase();
-      let categoryId = categoryByName.get(nameKey);
-      if (!categoryId) {
-        categoryId = categories.length + 1;
-        categoryByName.set(nameKey, categoryId);
-        categories.push({ id: categoryId, name });
-      }
-      localClasses.set(classIndex, categoryId);
-    }
-    if (!localClasses.size) throw new Error("yoloMissingClasses");
+    const classList = filesByPath.get(`${root}classes.txt`.toLocaleLowerCase());
+    const declared = classNames(config.names);
+    // `classes.txt` is the conventional companion file; it stands in when the
+    // YAML carries no names of its own.
+    const classes = declaredClasses(context, declared.length || !classList ? declared : classListNames(await classList.async("string")));
+    if (!classes.size) throw new Error("yoloMissingClasses");
 
     const imageReferences: string[] = [];
     for (const split of ["train", "val", "test"] as const) {
@@ -127,56 +245,102 @@ export async function parseYoloPackage(zip: JSZip, assets: Asset[]): Promise<Par
     }
 
     for (const reference of Array.from(new Set(imageReferences.map(normalizePath)))) {
-      const match = matchImageReference(reference, assets, { allowStem: true });
-      if ("issue" in match) {
-        issues.set(issueKey(match.issue), match.issue);
-        continue;
-      }
-      const width = Number(match.asset.width);
-      const height = Number(match.asset.height);
-      if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
-        const issue = { reference, reason: "invalid" as const };
-        issues.set(issueKey(issue), issue);
-        continue;
-      }
-      const imageId = images.length + 1;
-      images.push({ id: imageId, file_name: reference, width, height });
+      const image = addImage(context, reference, assets);
+      if (!image) continue;
       const labelPath = labelPathForImage(root, reference);
       const labelEntry = filesByPath.get(labelPath.toLocaleLowerCase());
       if (!labelEntry) continue;
-      const rows = (await labelEntry.async("string")).split(/\r?\n/);
-      for (let lineIndex = 0; lineIndex < rows.length; lineIndex += 1) {
-        const row = rows[lineIndex].trim();
-        if (!row) continue;
-        const values = row.split(/\s+/).map(Number);
-        const classIndex = values[0];
-        const coordinates = values.slice(1);
-        const categoryId = Number.isInteger(classIndex) ? localClasses.get(classIndex) : undefined;
-        const validCoordinates = coordinates.every((value) => Number.isFinite(value) && value >= 0 && value <= 1);
-        if (!categoryId || !validCoordinates) {
-          const issue = { reference: `${labelPath}:${lineIndex + 1}`, reason: "invalid" as const };
-          issues.set(issueKey(issue), issue);
-          continue;
-        }
-        if (values.length === 5) {
-          const [centerX, centerY, boxWidth, boxHeight] = coordinates;
-          annotations.push({
-            image_id: imageId,
-            category_id: categoryId,
-            bbox: [(centerX - boxWidth / 2) * width, (centerY - boxHeight / 2) * height, boxWidth * width, boxHeight * height],
-          });
-          continue;
-        }
-        if (values.length >= 7 && values.length % 2 === 1) {
-          const points = coordinates.map((value, index) => value * (index % 2 === 0 ? width : height));
-          annotations.push({ image_id: imageId, category_id: categoryId, segmentation: [points], area: polygonArea(points) } as NonNullable<CocoDocumentInput["annotations"]>[number]);
-          continue;
-        }
-        const issue = { reference: `${labelPath}:${lineIndex + 1}`, reason: "invalid" as const };
-        issues.set(issueKey(issue), issue);
-      }
+      addLabelRows(context, {
+        text: await labelEntry.async("string"),
+        labelPath,
+        imageId: image.id,
+        width: image.width,
+        height: image.height,
+        classes,
+      });
     }
   }
+  return finish(context, roots);
+}
 
-  return { roots, document: { images, categories, annotations }, issues: [...issues.values()] };
+/**
+ * A dataset laid out as `images/` and `labels/` with no `data.yaml`. This is how
+ * most YOLO datasets travel, so the label files themselves are the evidence:
+ * one root per `labels/` directory, class names from `classes.txt` when the
+ * package carries one.
+ */
+async function parseConventionalRoots(zip: JSZip, assets: Asset[], context: YoloContext) {
+  const files = Object.values(zip.files).filter((entry) => !entry.dir);
+  const labelEntries = files.filter((entry) => /\.txt$/i.test(entry.name)
+    && !CLASS_LIST_NAMES.has(pathName(entry.name))
+    && !NON_LABEL_NAMES.has(pathName(entry.name)));
+  if (!labelEntries.length) return null;
+
+  const byRoot = new Map<string, JSZip.JSZipObject[]>();
+  for (const entry of labelEntries) {
+    const root = labelRoot(entry.name);
+    byRoot.set(root, [...(byRoot.get(root) ?? []), entry]);
+  }
+
+  const classListEntry = files.find((entry) => CLASS_LIST_NAMES.has(pathName(entry.name)));
+  const classes = classListEntry ? declaredClasses(context, classListNames(await classListEntry.async("string"))) : null;
+  const imagePaths = files.filter((entry) => !/\.txt$/i.test(entry.name)).map((entry) => normalizePath(entry.name));
+
+  for (const [root, entries] of byRoot) {
+    for (const entry of entries) {
+      const labelPath = normalizePath(entry.name);
+      const reference = imageReferenceForLabel(labelPath);
+      // A ZIP that ships its images names them exactly; otherwise the label
+      // path carries the stem, which still matches a loaded image.
+      const bundled = imagePaths.find((path) => path.toLocaleLowerCase().startsWith(`${reference.toLocaleLowerCase()}.`));
+      const image = addImage(context, (bundled ?? reference).slice(root.length), assets);
+      if (!image) continue;
+      addLabelRows(context, {
+        text: await entry.async("string"),
+        labelPath,
+        imageId: image.id,
+        width: image.width,
+        height: image.height,
+        classes,
+      });
+    }
+  }
+  return finish(context, [...byRoot.keys()].map((root) => root.replace(/\/$/, "")));
+}
+
+export async function parseYoloPackage(zip: JSZip, assets: Asset[]): Promise<ParsedYoloPackage | null> {
+  const files = Object.values(zip.files).filter((entry) => !entry.dir);
+  const yamlEntries = files.filter((entry) => YAML_NAMES.has(pathName(entry.name)));
+  const context = createContext();
+  if (yamlEntries.length) return parseYamlRoots(zip, assets, context, yamlEntries);
+  return parseConventionalRoots(zip, assets, context);
+}
+
+/**
+ * Label files chosen directly, without an archive around them: the user selects
+ * the contents of a `labels/` folder, optionally with `classes.txt`. Each label
+ * is paired with the loaded image that shares its stem.
+ */
+export function parseYoloLabelFiles(inputs: YoloLabelFile[], assets: Asset[]): ParsedYoloPackage | null {
+  const labels = inputs.filter((input) => !CLASS_LIST_NAMES.has(pathName(input.path)) && !NON_LABEL_NAMES.has(pathName(input.path)));
+  if (!labels.length) return null;
+
+  const context = createContext();
+  const classList = inputs.find((input) => CLASS_LIST_NAMES.has(pathName(input.path)));
+  const classes = classList ? declaredClasses(context, classListNames(classList.text)) : null;
+
+  for (const label of labels) {
+    const labelPath = normalizePath(label.path);
+    const image = addImage(context, imageReferenceForLabel(labelPath), assets);
+    if (!image) continue;
+    addLabelRows(context, {
+      text: label.text,
+      labelPath,
+      imageId: image.id,
+      width: image.width,
+      height: image.height,
+      classes,
+    });
+  }
+  return finish(context, labels.map((label) => normalizePath(label.path)));
 }

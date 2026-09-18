@@ -44,11 +44,12 @@ test("the workbench owns one hidden input per kind of file the editor accepts", 
     ".plgm,application/vnd.poligome.project+zip",
     "image/png,image/jpeg,image/webp,image/bmp,image/gif",
     "image/*,.tif,.tiff",
-    "application/json,application/zip,.json,.zip",
+    "application/json,application/zip,text/plain,.json,.zip,.txt,.names",
   ]);
   assert.ok(inputs.every((input) => input.includes("hidden")), "file inputs are opened by buttons, never shown");
-  // Images and rasters arrive in batches; a project file and a COCO file do not.
-  assert.deepEqual(inputs.map((input) => input.includes("multiple")), [false, true, true, false]);
+  // Images, rasters and annotations all arrive in batches. A project file does
+  // not: opening one replaces the session, so there is nothing to batch.
+  assert.deepEqual(inputs.map((input) => input.includes("multiple")), [false, true, true, true]);
 });
 
 test("a new project starts empty, with the way in offered on the stage", () => {
