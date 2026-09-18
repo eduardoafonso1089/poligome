@@ -21,19 +21,32 @@ converter run on your computer, not in the cloud.
 |---|---|---|---|
 | **Computer vision** | `/annotate` | Boxes, polygons, masks, polylines, and keypoints, with vector editing, snapping, per-class visibility, quality/review and large-raster navigation | COCO, YOLO, GeoJSON, portable project |
 
-Projects can be saved as a project you can save and reopen later: a single portable file with
-images, labels, and annotations, so work resumes on another machine without a
-server.
+Projects can be saved as a `.plgm` annotation file containing classes,
+geometries, layout metadata, and image references. Image bytes are never
+exported. When reopening the project, select the original images with the same
+names. Older `.plgm` files that already contain bundled images remain readable.
 
 The landing page also offers a one-click computer-vision demo. Its three
 synthetic aerial photographs are bundled with the public frontend and arrive
 with boxes, polygons, a polyline, a keypoint, and localized classes ready to
 edit or export. No example dataset is processed or stored by a backend.
 
-The YOLO export is an annotation archive: it includes labels, an optional
-train/validation/test split, `classes.txt`, and `data.yaml`, but never copies
-images out of the browser. Supply the matching local images separately. The
-export dialog can create bbox or polygon labels, or separate datasets for both.
+COCO and YOLO exports are annotation-only ZIP archives. Their dialog supports
+editable train/validation/test proportions, an optional test split, random
+assignment, or balancing by total instance count.
+
+COCO writes conventional `annotations/instances_<split>.json` documents with
+image filenames, dimensions, categories, boxes, polygons, and keypoints. YOLO
+writes `data.yaml`, split image-reference lists, `classes.txt`, and conventional
+`labels/<split>/<image-stem>.txt` files. Bounding boxes and polygons are separate
+YOLO tasks; choosing both creates independent `bbox/` and `polygon/` datasets.
+
+The annotation importer accepts standalone COCO JSON as well as COCO and YOLO
+ZIPs that follow those conventions. Load the original images first. Poligome
+matches standard image paths and filenames, imports the matched subset, and
+warns about missing or ambiguous images instead of guessing. ZIPs may contain
+images from another tool, but Poligome ignores those bytes during annotation
+import.
 
 ## Geospatial input
 

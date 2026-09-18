@@ -17,6 +17,16 @@ The Sites lifecycle CLI runs the locked dependency install before returning this
 
 This starter does not use `wrangler.jsonc`.
 
+## Annotation data boundary
+
+COCO, YOLO, and newly generated `.plgm` downloads are assembled in the browser
+and contain annotations plus image references only. They do not contain image
+bytes and do not depend on an R2, D1, or application-server upload. Annotation
+ZIP import also runs in the browser and associates records only with images the
+user has already loaded locally; embedded image entries in third-party ZIPs are
+ignored. Legacy `.plgm` readers retain support for old bundled-image projects,
+but no current export path creates them.
+
 `install:ci` is intentionally a single, non-retrying `npm ci`. It refuses a concurrent install for the same project, consumes a matching image-seeded npm cache with `--prefer-offline` while retaining registry fallback for a missing cache object, otherwise downloads and verifies the complete vinext tarball recorded in `package-lock.json`, limits npm to one socket, and terminates a stalled install. `build` applies a short timeout and then validates the Sites artifact. These helpers target Linux and use GNU `timeout`; they are not native macOS scripts.
 
 Scripts that need writable project-scoped home, npm, XDG, and temporary paths use `scripts/sites-env.sh`. The `dev` and `start` scripts honor the caller's runtime environment and keep Wrangler logs inside the checkout. The generated `.sites-runtime/` directory is disposable and ignored by Git.
