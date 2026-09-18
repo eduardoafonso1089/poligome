@@ -86,29 +86,12 @@ function normalizeProjectAnnotation(annotation) {
   });
 }
 
-// Poligome stopped exporting image bytes, and YOLO boxes and polygons became
-// separate dataset roots because segmentation YOLO does not accept them mixed.
-// The rows are what the golden protects, so both sides are reduced to the rows
-// written per image: canonical main's mixed labels/<split>/<index>-<stem>.txt
-// against the branch's bbox/ and polygon/ roots. Recorded in
-// tests/fixtures/export-parity-justifications.json under yolo.package_layout.
-//
-// The branch is asked for one unsplit dataset carrying both geometries: no
-// split means no shuffle, so the golden stays deterministic while still
-// covering every annotation the demo holds.
-const BRANCH_YOLO_OPTIONS = { mode: 'both', train: 80, val: 20, test: 0, includeTest: false, strategy: 'random', splitDataset: false };
-const LABEL_PATH = /(?:^|\/)labels\/(?:[^/]+\/)?(?:\d+-)?(.+)\.txt$/;
-
-function yoloRows(snapshot) {
-  const rows = new Map();
-  for (const [path, content] of Object.entries(snapshot)) {
-    const match = LABEL_PATH.exec(path);
-    if (!match) continue;
-    const stem = match[1];
-    rows.set(stem, [...(rows.get(stem) ?? []), ...content.split('\n').filter(Boolean)].sort());
-  }
-  return Object.fromEntries([...rows].sort(([a], [b]) => a.localeCompare(b)));
-}
+// Both sides are asked for one unsplit dataset carrying both geometries: no
+// split means no shuffle, so the golden compares whole archives byte for byte
+// while still covering every annotation the demo holds. The dataset layout this
+// exercises is recorded in tests/fixtures/export-parity-justifications.json
+// under yolo.package_layout.
+const YOLO_GOLDEN_OPTIONS = { mode: 'both', train: 80, val: 20, test: 0, includeTest: false, strategy: 'random', splitDataset: false };
 
 const imageEntries = (snapshot) => Object.keys(snapshot).filter((path) => /(?:^|\/)images\//.test(path));
 
@@ -156,28 +139,18 @@ globalThis.fetch = async (input) => {
 
 const moduleAt = (base, path) => import(`${pathToFileURL(resolve(base, path)).href}?parity=${Date.now()}-${Math.random()}`);
 
-function yoloArchive(exporters, assets, labels, annotations, readme, canonical) {
-  return canonical
-    ? exporters.exportEditorYoloZip(assets, labels, annotations, readme)
-    : exporters.exportEditorYoloZip(assets, labels, annotations, readme, BRANCH_YOLO_OPTIONS);
-}
-
-async function snapshot(base, { canonical }) {
+async function snapshot(base) {
   const demoModule = await moduleAt(base, 'app/lib/demo.ts');
   const i18n = await moduleAt(base, 'app/lib/i18n.ts');
   const demo = await demoModule.createCanonicalDemoProject('pt');
   const assets = demo.assets.map((asset) => ({ ...asset, geo: geoReferenceFor(asset) }));
   const exporters = await moduleAt(base, 'app/editor/export/export-files.ts');
   const coco = JSON.parse(JSON.stringify(exporters.buildCocoDocument(assets, demo.labels, demo.annotations)));
-  const yolo = await zipSnapshot(await yoloArchive(exporters, assets, demo.labels, demo.annotations, 'golden', canonical));
+  const yolo = await zipSnapshot(await exporters.exportEditorYoloZip(assets, demo.labels, demo.annotations, 'golden', YOLO_GOLDEN_OPTIONS));
   const geojson = JSON.parse(JSON.stringify(exporters.buildGeoJson(assets, demo.labels, demo.annotations)));
   const project = await moduleAt(base, 'app/lib/project.ts');
   lastBlob = null;
-  // Canonical main still takes the save mode the branch retired; every new
-  // .plgm is annotation-only. Recorded under project.annotation_only_save.
-  const copy = i18n.getCopy('pt');
-  if (canonical) await project.savePoligomeProjectV4(demo.name, assets, demo.labels, demo.annotations, 'annotations', copy);
-  else await project.savePoligomeProjectV4(demo.name, assets, demo.labels, demo.annotations, copy);
+  await project.savePoligomeProjectV4(demo.name, assets, demo.labels, demo.annotations, i18n.getCopy('pt'));
   const manifest = await projectManifest(lastBlob);
 
   return {
@@ -193,7 +166,7 @@ async function snapshot(base, { canonical }) {
   };
 }
 
-async function nonUniformYoloSnapshot(base, { canonical }) {
+async function nonUniformYoloSnapshot(base) {
   const width = 4032;
   const height = 3024;
   const asset = { id: 'nonuniform', name: 'nonuniform.jpg', src: '/demo/nonuniform.jpg', local: false, width, height };
@@ -208,25 +181,21 @@ async function nonUniformYoloSnapshot(base, { canonical }) {
     ], holes: [] },
   ];
   const exporters = await moduleAt(base, 'app/editor/export/export-files.ts');
-  return zipSnapshot(await yoloArchive(exporters, [asset], labels, annotations, 'golden-nonuniform', canonical));
+  return zipSnapshot(await exporters.exportEditorYoloZip([asset], labels, annotations, 'golden-nonuniform', YOLO_GOLDEN_OPTIONS));
 }
 
 try {
-  const main = await snapshot(mainRoot, { canonical: true });
-  const branch = await snapshot(root, { canonical: false });
-  const mainNonUniformYolo = await nonUniformYoloSnapshot(mainRoot, { canonical: true });
-  const branchNonUniformYolo = await nonUniformYoloSnapshot(root, { canonical: false });
-
-  const canonicalRows = yoloRows(main.yolo);
-  assert.ok(Object.keys(canonicalRows).length > 0, 'no YOLO label path matched; the row normalization is reading nothing');
+  const main = await snapshot(mainRoot);
+  const branch = await snapshot(root);
+  const mainNonUniformYolo = await nonUniformYoloSnapshot(mainRoot);
+  const branchNonUniformYolo = await nonUniformYoloSnapshot(root);
 
   assert.deepEqual(normalizeCoco(branch.coco), normalizeCoco(main.coco), 'COCO canonical main golden diverged');
-  assert.deepEqual(yoloRows(branch.yolo), canonicalRows, 'YOLO canonical main rows diverged');
-  assert.deepEqual(yoloRows(branchNonUniformYolo), yoloRows(mainNonUniformYolo), 'YOLO non-uniform source-dimension rows diverged');
-  // The packaging change is asserted rather than assumed: the branch ships no
-  // image bytes, and the label carries the image stem YOLO pairs it with.
-  assert.deepEqual(imageEntries(branch.yolo), [], 'the branch YOLO package still carries image bytes');
-  assert.ok(imageEntries(main.yolo).length > 0, 'canonical main no longer bundles images; this normalization is obsolete');
+  assert.deepEqual(round(branch.yolo), round(main.yolo), 'YOLO canonical main golden diverged');
+  assert.deepEqual(round(branchNonUniformYolo), round(mainNonUniformYolo), 'YOLO non-uniform source-dimension golden diverged');
+  // Annotation-only packaging is asserted rather than assumed: no image bytes
+  // ride along, and the label carries the image stem YOLO pairs it with.
+  assert.deepEqual(imageEntries(branch.yolo), [], 'the YOLO package carries image bytes');
   assert.equal(branchNonUniformYolo['bbox/labels/nonuniform.txt'], '0 0.250000 0.250000 0.300000 0.300000');
   assert.equal(branchNonUniformYolo['polygon/labels/nonuniform.txt'], '0 0.100000 0.100000 0.900000 0.100000 0.900000 0.900000 0.100000 0.900000');
   assert.deepEqual(normalizeGeoJson(branch.geojson), normalizeGeoJson(main.geojson), 'GeoJSON canonical main golden diverged');
@@ -239,7 +208,7 @@ try {
   }
   assert.deepEqual(branch.semanticProject, main.semanticProject, 'semantic .plgm canonical main content diverged');
 
-  console.log('Canonical-main goldens passed: COCO/YOLO rows/GeoJSON/.plgm plus non-uniform YOLO source-dimension parity.');
+  console.log('Canonical-main goldens passed: COCO/YOLO/GeoJSON/.plgm plus non-uniform YOLO source-dimension parity.');
 } finally {
   URL.createObjectURL = originalCreate;
   URL.revokeObjectURL = originalRevoke;
