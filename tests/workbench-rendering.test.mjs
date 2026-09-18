@@ -44,7 +44,7 @@ test("the workbench owns one hidden input per kind of file the editor accepts", 
     ".plgm,application/vnd.poligome.project+zip",
     "image/png,image/jpeg,image/webp,image/bmp,image/gif",
     "image/*,.tif,.tiff",
-    "application/json,.json",
+    "application/json,application/zip,.json,.zip",
   ]);
   assert.ok(inputs.every((input) => input.includes("hidden")), "file inputs are opened by buttons, never shown");
   // Images and rasters arrive in batches; a project file and a COCO file do not.
