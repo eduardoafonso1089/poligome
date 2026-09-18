@@ -5,7 +5,6 @@ import type { Asset, Label } from "./types";
 import type { EditorAnnotation } from "../editor/models/annotation-model";
 
 type PortableAsset = Omit<Asset, "src" | "local" | "runtimeRasterSource"> & { bundled_path?: string; source?: string };
-export type ProjectSaveMode = "annotations" | "complete";
 export type ProjectLayout = { leftPanelWidth: number; rightPanelWidth: number };
 
 type ProjectManifestV4 = {
@@ -47,11 +46,6 @@ function downloadBlob(name: string, blob: Blob) {
 function safeBaseName(name: string) {
   const normalized = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   return normalized.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "poligome-project";
-}
-
-function safeFileName(name: string, fallback: string) {
-  const clean = name.replace(/[\\/:*?"<>|]+/g, "-").replace(/^\.+/, "").trim();
-  return clean || fallback;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -122,23 +116,14 @@ function parseManifestV4(value: unknown, copy: Copy): ProjectManifestV4 {
   };
 }
 
-async function portableAssets(zip: JSZip, assets: Asset[], mode: ProjectSaveMode, copy: Copy) {
-  return Promise.all(assets.map(async (asset, index): Promise<PortableAsset> => {
+function portableAssets(assets: Asset[]): PortableAsset[] {
+  return assets.map((asset) => {
     const { src, local, runtimeRasterSource, ...metadata } = asset;
-    if (mode === "annotations" || asset.missing) return { ...metadata, missing: true };
-    const shouldBundle = Boolean(asset.local || src.startsWith("blob:") || src.startsWith("data:"));
+    void src;
     void local;
-    if (!shouldBundle) return { ...metadata, source: src };
-
-    const sourceBlob = runtimeRasterSource ?? await (async () => {
-      const response = await fetch(src);
-      if (!response.ok) throw new Error(fill(copy.errProjectReadImage, { name: asset.name }));
-      return response.blob();
-    })();
-    const imagePath = `images/${String(index + 1).padStart(4, "0")}-${safeFileName(asset.name, `image-${index + 1}`)}`;
-    zip.file(imagePath, sourceBlob);
-    return { ...metadata, bundled_path: imagePath };
-  }));
+    void runtimeRasterSource;
+    return { ...metadata, missing: true };
+  });
 }
 
 async function hydrateAssets(zip: JSZip, manifest: ProjectManifestV4, copy: Copy) {
@@ -181,7 +166,6 @@ export async function savePoligomeProjectV4(
   assets: Asset[],
   labels: Label[],
   annotations: EditorAnnotation[],
-  mode: ProjectSaveMode,
   copy: Copy,
   layout?: ProjectLayout,
 ) {
@@ -192,7 +176,7 @@ export async function savePoligomeProjectV4(
     coordinate_space: "image-pixels",
     project_name: projectName.trim() || copy.defaultProjectName,
     saved_at: new Date().toISOString(),
-    assets: await portableAssets(zip, assets, mode, copy),
+    assets: portableAssets(assets),
     labels,
     annotations,
     layout: layout ? {

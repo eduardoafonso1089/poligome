@@ -27,7 +27,7 @@ function installDownloadCapture() {
 
 test('project V4 persists source-image pixel annotations with stable ids', async () => {
   const capture=installDownloadCapture();
-  const assets=[{id:'a',name:'image.png',src:'',missing:true,width:4032,height:3024}];
+  const assets=[{id:'a',name:'image.png',src:'data:image/png;base64,iVBORw0KGgo=',local:true,width:4032,height:3024}];
   const labels=[{id:'weed',name:'Weed',color:'#00ff00',key:'1'}];
   const annotations=[{
     id:'p',asset:'a',label:'weed',type:'polygon',holes:[],
@@ -38,16 +38,21 @@ test('project V4 persists source-image pixel annotations with stable ids', async
     ],
   }];
   try {
-    await savePoligomeProjectV4('V4',assets,labels,annotations,'annotations',getCopy('en'));
+    await savePoligomeProjectV4('V4',assets,labels,annotations,getCopy('en'));
     const zip=await JSZip.loadAsync(await capture.saved().arrayBuffer());
+    assert.deepEqual(Object.keys(zip.files),['project.json']);
     const manifest=JSON.parse(await zip.file('project.json').async('string'));
     assert.equal(manifest.version,4);
     assert.equal(manifest.coordinate_space,'image-pixels');
     assert.equal('pts' in manifest.annotations[0],false);
     assert.deepEqual(manifest.annotations[0].vertices,annotations[0].vertices);
+    assert.equal(manifest.assets[0].missing,true);
+    assert.equal('bundled_path' in manifest.assets[0],false);
+    assert.equal('source' in manifest.assets[0],false);
 
     const loaded=await openPoligomeProjectV4(await capture.saved().arrayBuffer(),getCopy('en'));
     assert.deepEqual(loaded.annotations[0].vertices,annotations[0].vertices);
+    assert.equal(loaded.missingImages,1);
   } finally { capture.restore(); }
 });
 
