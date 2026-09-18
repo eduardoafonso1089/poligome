@@ -17,5 +17,5 @@ test('new canonical controls translate thrown domain codes before showing UI tex
 });
 
 test('YOLO archive README uses the active locale copy', () => {
-  assert.match(controls, /exportEditorYoloZip\(assets, labels, annotations, copy\.yoloReadme\)/);
+  assert.match(controls, /exportEditorYoloZip\(assets, labels, annotations, copy\.yoloReadme,/);
 });
