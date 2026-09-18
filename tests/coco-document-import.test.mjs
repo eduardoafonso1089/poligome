@@ -47,3 +47,18 @@ test('COCO keypoint labels reuse an existing class and unmatched images are coun
   assert.equal(result.unmatched,1);
   assert.equal(result.annotations[0].label,'existing-nasion');
 });
+
+test('COCO import refuses an ambiguous image basename instead of guessing',()=>{
+  const duplicateAssets=[
+    {id:'img-a',name:'folder-a/repeated.png',src:'',width:100,height:100},
+    {id:'img-b',name:'folder-b/repeated.png',src:'',width:100,height:100},
+  ];
+  const result=importCocoDocument({
+    images:[{id:1,file_name:'repeated.png',width:100,height:100}],
+    categories:[{id:1,name:'Object'}],
+    annotations:[{image_id:1,category_id:1,bbox:[0,0,10,10]}],
+  },duplicateAssets,[],ids());
+
+  assert.equal(result.imported,0);
+  assert.equal(result.unmatched,1);
+});

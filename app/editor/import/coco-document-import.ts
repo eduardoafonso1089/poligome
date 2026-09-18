@@ -7,6 +7,7 @@ import {
   type CocoCategoryInput,
   type CocoGeometry,
 } from "./coco-import";
+import { matchImageReference } from "./image-reference-match";
 
 export type CocoImageInput = { id?: number; file_name?: string; width?: number; height?: number };
 export type CocoDocumentInput = {
@@ -38,10 +39,6 @@ export type CocoDocumentImportResult = { labels: Label[]; annotations: EditorAnn
 const IMPORT_COLORS = ["#6c8cff", "#d987ff", "#26c6b6", "#ff8a65", "#ffd166", "#7ee081", "#59b0f6", "#f26d9d"];
 const ALL_GEOMETRIES: CocoGeometry[] = ["box", "point", "polygon"];
 
-function baseName(name: string) {
-  return name.split(/[\\/]/).pop()?.trim().toLocaleLowerCase() ?? "";
-}
-
 function names(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item.trim()).map((item) => item.trim()) : [];
 }
@@ -55,11 +52,10 @@ function documentParts(document: CocoDocumentInput) {
 }
 
 function matchedImages(images: CocoImageInput[], assets: Asset[]) {
-  const assetsByName = new Map(assets.map((asset) => [baseName(asset.name), asset]));
   return new Map(images.flatMap((image) => {
     if (typeof image.id !== "number" || typeof image.file_name !== "string") return [];
-    const asset = assetsByName.get(baseName(image.file_name));
-    return asset ? [[image.id, { image, asset }] as const] : [];
+    const match = matchImageReference(image.file_name, assets);
+    return "asset" in match ? [[image.id, { image, asset: match.asset }] as const] : [];
   }));
 }
 
