@@ -23,5 +23,15 @@
     "main": "classe, classe_id, cor, forma, rotacao, recorte, origem",
     "refactor": "class, class_id, color, shape, rotation, source_image, source_raster",
     "reason": "Deliberate breaking rename of the GeoJSON feature properties to English. Geometry, CRS and every value are unchanged; the golden maps the old names onto the new ones and separately asserts that the old names are gone. QGIS styles or filters keyed on the Portuguese names must be updated; documented in docs/RASTER_WORKFLOW.md."
+  },
+  "yolo.package_layout": {
+    "main": "images/<split>/<index>-<name>.jpg paired with labels/<split>/<index>-<name>.txt, boxes and polygons mixed in one file",
+    "refactor": "no image bytes; labels/<stem>.txt under the split the dataset declares, with bbox/ and polygon/ dataset roots when both geometries are exported",
+    "reason": "Deliberate move to annotation-only packages that follow the public YOLO conventions: images stay on the user's device, the label stem matches the image stem YOLO pairs it with, and segmentation rows no longer share a file with detection rows. The rows themselves are unchanged, so the golden compares the rows written per image on both sides and separately asserts that no image entry rides along."
+  },
+  "project.annotation_only_save": {
+    "main": "savePoligomeProjectV4(..., mode, copy), where mode 'complete' bundled the local image bytes",
+    "refactor": "savePoligomeProjectV4(..., copy); every new .plgm is annotation-only",
+    "reason": "The save-mode dialog is gone and no export path bundles images any more; old .plgm files with bundled images stay readable. The golden calls each side with the signature it has and keeps comparing the semantic project content."
   }
 }

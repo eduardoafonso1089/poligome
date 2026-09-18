@@ -14,6 +14,24 @@ for (const file of mainFiles) {
   for (const key of keysFrom(source)) mainKeys.add(key);
 }
 
+/**
+ * Surfaces this branch removed on purpose, with the change that retired them.
+ *
+ * The gate catches a key that silently stops being consumed. A deliberate
+ * removal is recorded here so it stays reviewable, instead of relaxing the
+ * comparison for every key.
+ */
+const retiredKeys = {
+  // Every new .plgm is annotation-only, so the save dialog that let the user
+  // choose between a lightweight file and a bundled-image project is gone.
+  "annotation-only project save": [
+    "annotationsOnly", "annotationsOnlyHint", "generateProjectFile", "imageReferences",
+    "imagesAndAnnotations", "imagesAndAnnotationsHint", "projectSavePrivacy",
+    "saveProjectDescription", "saveProjectTitle", "sizeCalculatedOnSave",
+  ],
+};
+const retired = new Set(Object.values(retiredKeys).flat());
+
 const currentKeys = new Set();
 function walk(path) {
   for (const name of readdirSync(path)) {
@@ -27,11 +45,18 @@ function walk(path) {
 }
 for (const root of roots) walk(root);
 
-const missing = [...mainKeys].filter((key) => !currentKeys.has(key)).sort();
+const missing = [...mainKeys].filter((key) => !currentKeys.has(key) && !retired.has(key)).sort();
 if (missing.length) {
   console.error('Editor i18n regression gate failed.');
   console.error('Keys consumed by canonical main but missing from this branch:', missing.join(', '));
   process.exit(1);
 }
 
-console.log(`Editor i18n regression gate passed: ${currentKeys.size} key(s) consumed; canonical main baseline ${mainKeys.size}.`);
+const revived = [...retired].filter((key) => currentKeys.has(key)).sort();
+if (revived.length) {
+  console.error('Editor i18n regression gate failed.');
+  console.error('Keys listed as retired but consumed again; drop them from retiredKeys:', revived.join(', '));
+  process.exit(1);
+}
+
+console.log(`Editor i18n regression gate passed: ${currentKeys.size} key(s) consumed; canonical main baseline ${mainKeys.size}; ${retired.size} retired.`);
