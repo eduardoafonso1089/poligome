@@ -53,6 +53,12 @@ export async function buildCocoArchive(
   random: () => number = Math.random,
 ) {
   const zip = new JSZip();
+  if (options.splitDataset === false) {
+    zip.file("annotations/instances.json", JSON.stringify(buildCocoDocument(assets, labels, annotations), null, 2));
+    zip.file("poligome-manifest.json", JSON.stringify(buildAnnotationPackageManifest(assets, null, "coco", "mixed"), null, 2));
+    zip.file("README.txt", "COCO annotation package exported by Poligome. Images are intentionally not included; use the file_name fields to pair them separately.\n");
+    return zip;
+  }
   const assignment = assignDatasetSplits(assets, annotations, options, random);
   const splits = splitAssets(assignment, assets);
   const splitNames = options.includeTest ? ["train", "val", "test"] as const : ["train", "val"] as const;
@@ -109,31 +115,37 @@ function writeYoloDataset(
   mode: "bbox" | "polygon",
   readme: string,
 ) {
-  const splits = splitAssets(assignment, assets);
   const { categoryIndexById } = buildExportIndexes(assets, labels);
+  const splitDataset = options.splitDataset !== false;
+  const splits = splitAssets(assignment, assets);
   const splitNames = options.includeTest ? ["train", "val", "test"] as const : ["train", "val"] as const;
-  for (const split of splitNames) {
-    const splitItems = splits[split] ?? [];
+  const groups = splitDataset
+    ? splitNames.map((split) => ({ items: splits[split] ?? [], labelDirectory: `${split}/`, listPath: `${split}.txt`, imageDirectory: `${split}/` }))
+    : [{ items: assets, labelDirectory: "", listPath: "images.txt", imageDirectory: "" }];
+  for (const group of groups) {
     const labelPaths = new Set<string>();
     const imageReferences: string[] = [];
-    for (const asset of splitItems) {
+    for (const asset of group.items) {
       const imageIndex = assets.indexOf(asset);
       const fileName = imageFileName(asset.name, `image-${imageIndex + 1}`);
       const stem = imageStem(fileName, `image-${imageIndex + 1}`);
-      const labelPath = `${root}labels/${split}/${stem}.txt`;
+      const labelPath = `${root}labels/${group.labelDirectory}${stem}.txt`;
       const collisionKey = labelPath.toLocaleLowerCase();
       if (labelPaths.has(collisionKey)) throw new Error("yoloDuplicateLabelPath");
       labelPaths.add(collisionKey);
-      imageReferences.push(`images/${split}/${fileName}`);
+      imageReferences.push(`images/${group.imageDirectory}${fileName}`);
       const rows = annotations.filter((annotation) => annotation.asset === asset.id && (mode === "bbox" ? annotation.type === "box" : annotation.type === "polygon"))
         .map((annotation) => annotationToYolo(annotation, labels, asset, categoryIndexById)).filter((row): row is string => !!row);
       if (rows.length) zip.file(labelPath, rows.join("\n"));
     }
-    zip.file(`${root}${split}.txt`, imageReferences.length ? `${imageReferences.join("\n")}\n` : "");
+    zip.file(`${root}${group.listPath}`, imageReferences.length ? `${imageReferences.join("\n")}\n` : "");
   }
   zip.file(`${root}classes.txt`, labels.map((label) => label.name).join("\n"));
-  zip.file(`${root}data.yaml`, `path: .\ntrain: train.txt\nval: val.txt\n${options.includeTest ? "test: test.txt\n" : ""}nc: ${labels.length}\nnames:\n${labels.map((label, index) => `  ${index}: ${JSON.stringify(label.name)}`).join("\n")}\n`);
-  zip.file(`${root}poligome-manifest.json`, JSON.stringify(buildAnnotationPackageManifest(assets, assignment, "yolo", mode), null, 2));
+  const splitConfig = splitDataset
+    ? `train: train.txt\nval: val.txt\n${options.includeTest ? "test: test.txt\n" : ""}`
+    : "train: images.txt\n";
+  zip.file(`${root}data.yaml`, `path: .\n${splitConfig}nc: ${labels.length}\nnames:\n${labels.map((label, index) => `  ${index}: ${JSON.stringify(label.name)}`).join("\n")}\n`);
+  zip.file(`${root}poligome-manifest.json`, JSON.stringify(buildAnnotationPackageManifest(assets, splitDataset ? assignment : null, "yolo", mode), null, 2));
   zip.file(`${root}README.txt`, yoloReadme(readme, mode));
 }
 

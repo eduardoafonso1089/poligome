@@ -4,6 +4,7 @@ import type { EditorAnnotation } from "../models/annotation-model";
 export type DatasetSplit = "train" | "val" | "test";
 
 export type ExportSplitOptions = {
+  splitDataset?: boolean;
   train: number;
   val: number;
   test: number;
@@ -26,7 +27,7 @@ function normalizedWeights(options: ExportSplitOptions, splits: DatasetSplit[]) 
 function targetCounts(total: number, weights: number[]) {
   const raw = weights.map((weight) => weight * total);
   const counts = raw.map(Math.floor);
-  let remaining = total - counts.reduce((sum, count) => sum + count, 0);
+  const remaining = total - counts.reduce((sum, count) => sum + count, 0);
   const remainderOrder = raw.map((value, index) => ({ index, remainder: value - counts[index] }))
     .sort((left, right) => right.remainder - left.remainder || left.index - right.index);
   for (let index = 0; index < remaining; index += 1) counts[remainderOrder[index].index] += 1;

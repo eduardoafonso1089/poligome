@@ -6,6 +6,26 @@ import { defaultYoloExportOptions } from "../app/editor/export/export-files.ts";
 import * as exportControls from "../app/editor/export/export-controls.tsx";
 
 const Dialog = exportControls.ExportOptionsDialog ?? (() => null);
+const ChoiceDialog = exportControls.ExportChoiceDialog ?? (() => null);
+
+test("export starts with dataset structure and YOLO annotation choices", () => {
+  const markup = render(ChoiceDialog, {
+    format: "yolo",
+    options: defaultYoloExportOptions,
+    copy: getCopy("pt"),
+    busy: false,
+    onChange() {},
+    onClose() {},
+    onSingle() {},
+    onSplit() {},
+  });
+  assert.equal(countClass(markup, "modal-backdrop"), 1);
+  assert.match(markup, /role="dialog"/);
+  assert.match(text(markup), /Conjunto único/);
+  assert.match(text(markup), /Dividir dataset/);
+  assert.match(text(markup), /Somente caixas/);
+  assert.doesNotMatch(text(markup), /Treino|Validação|Balanceada/);
+});
 
 test("export configuration is a localized modal instead of inline menu content", () => {
   const markup = render(Dialog, {
@@ -20,6 +40,8 @@ test("export configuration is a localized modal instead of inline menu content",
   assert.equal(countClass(markup, "modal-backdrop"), 1);
   assert.match(markup, /role="dialog"/);
   assert.match(text(markup), /Configurar exportação YOLO/);
+  assert.match(text(markup), /Treino|Validação|Balanceada/);
+  assert.doesNotMatch(text(markup), /Somente caixas|Caixas e polígonos/);
   assert.doesNotMatch(text(markup), /Annotations|Include test split|Distribution/);
 });
 
@@ -52,5 +74,7 @@ test("all platform languages provide export dialog copy", () => {
     assert.equal(typeof copy.exportSettingsTitle, "string", `${language} title`);
     assert.equal(typeof copy.exportImagesExcluded, "string", `${language} privacy copy`);
     assert.equal(typeof copy.exportInvalidRatios, "string", `${language} ratio validation`);
+    assert.equal(typeof copy.exportSingleDataset, "string", `${language} single dataset copy`);
+    assert.equal(typeof copy.exportSplitDataset, "string", `${language} split dataset copy`);
   }
 });

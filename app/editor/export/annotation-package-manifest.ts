@@ -11,13 +11,13 @@ export type AnnotationPackageManifest = {
     file_name: string;
     width: number;
     height: number;
-    split: DatasetSplit;
+    split?: DatasetSplit;
   }>;
 };
 
 export function buildAnnotationPackageManifest(
   assets: Asset[],
-  assignment: DatasetSplitAssignment,
+  assignment: DatasetSplitAssignment | null,
   annotationFormat: AnnotationPackageManifest["annotation_format"],
   geometryMode: AnnotationPackageManifest["geometry_mode"],
 ): AnnotationPackageManifest {
@@ -26,15 +26,15 @@ export function buildAnnotationPackageManifest(
     version: 1,
     annotation_format: annotationFormat,
     geometry_mode: geometryMode,
-    images: assets.flatMap((asset) => {
-      const split = assignment.get(asset.id);
-      return split ? [{
+    images: assets.map((asset) => {
+      const split = assignment?.get(asset.id);
+      return {
         asset_id: asset.id,
         file_name: asset.name,
         width: Number(asset.width) || 0,
         height: Number(asset.height) || 0,
-        split,
-      }] : [];
+        ...(split ? { split } : {}),
+      };
     }),
   };
 }

@@ -93,3 +93,26 @@ test("YOLO package references every split image but omits empty label files", as
   assert.equal(entries.some((entry) => /(^|\/)images\//.test(entry)), false);
   assert.doesNotMatch(manifest, /data:image|blob:secret|secret/);
 });
+
+test("YOLO package can keep labels in one dataset without split directories", async () => {
+  const assets = [{ id: "image", name: "field sample.JPG", src: "", width: 100, height: 50 }];
+  const annotations = [{
+    id: "box",
+    asset: "image",
+    label: "object",
+    type: "box",
+    x: 10,
+    y: 5,
+    width: 20,
+    height: 10,
+  }];
+
+  const zip = await buildYoloArchive(assets, labels, annotations, { ...randomOptions, splitDataset: false });
+  const entries = Object.keys(zip.files);
+
+  assert.ok(zip.file("labels/field sample.txt"));
+  assert.equal(await zip.file("images.txt").async("string"), "images/field sample.JPG\n");
+  assert.match(await zip.file("data.yaml").async("string"), /train: images\.txt/);
+  assert.equal(entries.some((entry) => /(^|\/)(train|val|test)(\.txt|\/)/.test(entry)), false);
+  assert.equal(entries.some((entry) => /(^|\/)images\//.test(entry)), false);
+});
