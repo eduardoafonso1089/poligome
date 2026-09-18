@@ -45,14 +45,29 @@ export function exportEditorCoco(assets: Asset[], labels: Label[], annotations: 
   return document;
 }
 
-export async function exportEditorCocoZip(assets: Asset[], labels: Label[], annotations: EditorAnnotation[], options: ExportSplitOptions) {
+export async function buildCocoArchive(
+  assets: Asset[],
+  labels: Label[],
+  annotations: EditorAnnotation[],
+  options: ExportSplitOptions,
+  random: () => number = Math.random,
+) {
   const zip = new JSZip();
-  const splits = splitExportAssets(assets, annotations, options);
-  for (const [split, splitAssets] of Object.entries(splits)) {
-    const ids = new Set(splitAssets.map((asset) => asset.id));
-    zip.file(`annotations/instances_${split}.json`, JSON.stringify(buildCocoDocument(splitAssets, labels, annotations.filter((annotation) => ids.has(annotation.asset))), null, 2));
+  const assignment = assignDatasetSplits(assets, annotations, options, random);
+  const splits = splitAssets(assignment, assets);
+  const splitNames = options.includeTest ? ["train", "val", "test"] as const : ["train", "val"] as const;
+  for (const split of splitNames) {
+    const splitItems = splits[split] ?? [];
+    const ids = new Set(splitItems.map((asset) => asset.id));
+    zip.file(`annotations/instances_${split}.json`, JSON.stringify(buildCocoDocument(splitItems, labels, annotations.filter((annotation) => ids.has(annotation.asset))), null, 2));
   }
+  zip.file("poligome-manifest.json", JSON.stringify(buildAnnotationPackageManifest(assets, assignment, "coco", "mixed"), null, 2));
   zip.file("README.txt", "COCO annotation package exported by Poligome. Images are intentionally not included; use the file_name fields to pair them separately.\n");
+  return zip;
+}
+
+export async function exportEditorCocoZip(assets: Asset[], labels: Label[], annotations: EditorAnnotation[], options: ExportSplitOptions) {
+  const zip = await buildCocoArchive(assets, labels, annotations, options);
   const archive = await zip.generateAsync({ type: "blob" });
   downloadBlob("poligome-coco.zip", archive);
   return archive;
