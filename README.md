@@ -30,9 +30,10 @@ synthetic aerial photographs are bundled with the public frontend and arrive
 with boxes, polygons, a polyline, a keypoint, and localized classes ready to
 edit or export. No example dataset is processed or stored by a backend.
 
-The YOLO export is a complete dataset archive: it includes paired images and
-labels, a deterministic training/validation split, `classes.txt`, and
-`data.yaml`. With a single image, the training image is also used as validation.
+The YOLO export is an annotation archive: it includes labels, an optional
+train/validation/test split, `classes.txt`, and `data.yaml`, but never copies
+images out of the browser. Supply the matching local images separately. The
+export dialog can create bbox or polygon labels, or separate datasets for both.
 
 ## Geospatial input
 

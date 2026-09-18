@@ -4,6 +4,10 @@ import { rasterTransform, transformPoint } from "../../lib/georeference";
 import { toWgs84 } from "../../lib/projections";
 import type { EditorAnnotation } from "../models/annotation-model";
 import { annotationToCoco, annotationToGeoJsonGeometry, annotationToYolo, buildExportIndexes } from "./annotation-export";
+import { buildAnnotationPackageManifest } from "./annotation-package-manifest";
+import { assignDatasetSplits, splitAssets, type DatasetSplitAssignment, type ExportSplitOptions } from "./dataset-split";
+
+export type { ExportSplitOptions } from "./dataset-split";
 
 function downloadBlob(name: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
@@ -17,11 +21,6 @@ function downloadBlob(name: string, blob: Blob) {
     link.remove();
     URL.revokeObjectURL(url);
   }, 1500);
-}
-
-function safeBaseName(name: string, fallback: string) {
-  const clean = name.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9_-]+/g, "_");
-  return clean || fallback;
 }
 
 export function buildCocoDocument(assets: Asset[], labels: Label[], annotations: EditorAnnotation[]) {
@@ -46,39 +45,105 @@ export function exportEditorCoco(assets: Asset[], labels: Label[], annotations: 
   return document;
 }
 
-export async function exportEditorYoloZip(assets: Asset[], labels: Label[], annotations: EditorAnnotation[], readme = "Exported by Poligome") {
+export async function exportEditorCocoZip(assets: Asset[], labels: Label[], annotations: EditorAnnotation[], options: ExportSplitOptions) {
   const zip = new JSZip();
-  const trainCount = assets.length > 1 ? Math.min(assets.length - 1, Math.max(1, Math.round(assets.length * .8))) : assets.length;
-  // Grouped once instead of filtering the whole annotation list per image.
+  const splits = splitExportAssets(assets, annotations, options);
+  for (const [split, splitAssets] of Object.entries(splits)) {
+    const ids = new Set(splitAssets.map((asset) => asset.id));
+    zip.file(`annotations/instances_${split}.json`, JSON.stringify(buildCocoDocument(splitAssets, labels, annotations.filter((annotation) => ids.has(annotation.asset))), null, 2));
+  }
+  zip.file("README.txt", "COCO annotation package exported by Poligome. Images are intentionally not included; use the file_name fields to pair them separately.\n");
+  const archive = await zip.generateAsync({ type: "blob" });
+  downloadBlob("poligome-coco.zip", archive);
+  return archive;
+}
+
+export type YoloExportOptions = ExportSplitOptions & { mode: "bbox" | "polygon" | "both" };
+
+export const defaultYoloExportOptions: YoloExportOptions = {
+  mode: "bbox", train: 80, val: 20, test: 0, includeTest: false, strategy: "random",
+};
+
+export function splitExportAssets(assets: Asset[], annotations: EditorAnnotation[], options: ExportSplitOptions) {
+  return splitAssets(assignDatasetSplits(assets, annotations, options), assets);
+}
+
+function yoloReadme(readme: string, mode: "bbox" | "polygon") {
+  return `${readme}\nThis archive intentionally contains annotations only; Poligome does not export images.\nYOLO mode: ${mode}. Supply the matching images separately.\n`;
+}
+
+function imageFileName(name: string, fallback: string) {
+  const fileName = name.split(/[\\/]/).pop()?.trim().replace(/[\u0000-\u001f]/g, "");
+  return fileName && fileName !== "." && fileName !== ".." ? fileName : fallback;
+}
+
+function imageStem(name: string, fallback: string) {
+  const fileName = imageFileName(name, fallback);
+  const dot = fileName.lastIndexOf(".");
+  return dot > 0 ? fileName.slice(0, dot) : fileName;
+}
+
+function writeYoloDataset(
+  zip: JSZip,
+  root: string,
+  assets: Asset[],
+  labels: Label[],
+  annotations: EditorAnnotation[],
+  assignment: DatasetSplitAssignment,
+  options: ExportSplitOptions,
+  mode: "bbox" | "polygon",
+  readme: string,
+) {
+  const splits = splitAssets(assignment, assets);
   const { categoryIndexById } = buildExportIndexes(assets, labels);
-  const annotationsByAsset = new Map<string, EditorAnnotation[]>();
-  for (const annotation of annotations) {
-    const bucket = annotationsByAsset.get(annotation.asset);
-    if (bucket) bucket.push(annotation);
-    else annotationsByAsset.set(annotation.asset, [annotation]);
+  const splitNames = options.includeTest ? ["train", "val", "test"] as const : ["train", "val"] as const;
+  for (const split of splitNames) {
+    const splitItems = splits[split] ?? [];
+    const labelPaths = new Set<string>();
+    const imageReferences: string[] = [];
+    for (const asset of splitItems) {
+      const imageIndex = assets.indexOf(asset);
+      const fileName = imageFileName(asset.name, `image-${imageIndex + 1}`);
+      const stem = imageStem(fileName, `image-${imageIndex + 1}`);
+      const labelPath = `${root}labels/${split}/${stem}.txt`;
+      const collisionKey = labelPath.toLocaleLowerCase();
+      if (labelPaths.has(collisionKey)) throw new Error("yoloDuplicateLabelPath");
+      labelPaths.add(collisionKey);
+      imageReferences.push(`images/${split}/${fileName}`);
+      const rows = annotations.filter((annotation) => annotation.asset === asset.id && (mode === "bbox" ? annotation.type === "box" : annotation.type === "polygon"))
+        .map((annotation) => annotationToYolo(annotation, labels, asset, categoryIndexById)).filter((row): row is string => !!row);
+      if (rows.length) zip.file(labelPath, rows.join("\n"));
+    }
+    zip.file(`${root}${split}.txt`, imageReferences.length ? `${imageReferences.join("\n")}\n` : "");
   }
+  zip.file(`${root}classes.txt`, labels.map((label) => label.name).join("\n"));
+  zip.file(`${root}data.yaml`, `path: .\ntrain: train.txt\nval: val.txt\n${options.includeTest ? "test: test.txt\n" : ""}nc: ${labels.length}\nnames:\n${labels.map((label, index) => `  ${index}: ${JSON.stringify(label.name)}`).join("\n")}\n`);
+  zip.file(`${root}poligome-manifest.json`, JSON.stringify(buildAnnotationPackageManifest(assets, assignment, "yolo", mode), null, 2));
+  zip.file(`${root}README.txt`, yoloReadme(readme, mode));
+}
 
-  for (const [imageIndex, asset] of assets.entries()) {
-    if (!asset.src || asset.missing) throw new Error(`Image unavailable for YOLO export: ${asset.name}`);
-    const split = imageIndex < trainCount ? "train" : "val";
-    const base = `${String(imageIndex + 1).padStart(4, "0")}-${safeBaseName(asset.name, `image_${imageIndex + 1}`)}`;
-    const extension = asset.name.match(/\.[a-zA-Z0-9]+$/)?.[0].toLowerCase() ?? ".png";
-    const rows = (annotationsByAsset.get(asset.id) ?? [])
-      .map((annotation) => annotationToYolo(annotation, labels, asset, categoryIndexById))
-      .filter((row): row is string => !!row);
-    const response = await fetch(asset.src);
-    if (!response.ok) throw new Error(`Could not read image for YOLO export: ${asset.name}`);
-    zip.file(`images/${split}/${base}${extension}`, await response.arrayBuffer());
-    zip.file(`labels/${split}/${base}.txt`, rows.join("\n"));
-  }
+export async function buildYoloArchive(
+  assets: Asset[],
+  labels: Label[],
+  annotations: EditorAnnotation[],
+  options: YoloExportOptions = defaultYoloExportOptions,
+  random: () => number = Math.random,
+) {
+  const zip = new JSZip();
+  const assignment = assignDatasetSplits(assets, annotations, options, random);
+  if (options.mode === "both") {
+    writeYoloDataset(zip, "bbox/", assets, labels, annotations, assignment, options, "bbox", "Exported by Poligome");
+    writeYoloDataset(zip, "polygon/", assets, labels, annotations, assignment, options, "polygon", "Exported by Poligome");
+  } else writeYoloDataset(zip, "", assets, labels, annotations, assignment, options, options.mode, "Exported by Poligome");
+  return zip;
+}
 
-  if (assets.some((asset) => asset.geo)) {
-    zip.file("georeferences.json", JSON.stringify(assets.filter((asset) => asset.geo).map((asset) => ({ image: asset.name, georeference: asset.geo })), null, 2));
+export async function exportEditorYoloZip(assets: Asset[], labels: Label[], annotations: EditorAnnotation[], readme = "Exported by Poligome", options: YoloExportOptions = defaultYoloExportOptions) {
+  const zip = await buildYoloArchive(assets, labels, annotations, options);
+  for (const path of Object.keys(zip.files).filter((path) => path.endsWith("README.txt"))) {
+    const mode = path.startsWith("polygon/") || options.mode === "polygon" ? "polygon" : "bbox";
+    zip.file(path, yoloReadme(readme, mode));
   }
-  zip.file("classes.txt", labels.map((label) => label.name).join("\n"));
-  const validationPath = assets.length > 1 ? "images/val" : "images/train";
-  zip.file("data.yaml", `path: .\ntrain: images/train\nval: ${validationPath}\nnc: ${labels.length}\nnames:\n${labels.map((label, index) => `  ${index}: ${JSON.stringify(label.name)}`).join("\n")}\n`);
-  zip.file("README.txt", `${readme}\n`);
   const archive = await zip.generateAsync({ type: "blob" });
   downloadBlob("poligome-yolo.zip", archive);
   return archive;
