@@ -9,6 +9,23 @@ Thank you for helping build free, local-first data tooling for AI.
 - Keep data processing local by default. A feature that uploads user data needs explicit prior discussion and clear consent in the interface.
 - Keep the interface and user-facing errors available in Portuguese, English, French, and Spanish.
 
+## Branch names
+
+Name a branch after the problem it solves, so the branch list reads as a list of
+work in progress.
+
+- Prefix by intent: `fix/` for a defect, `feature/` for new behavior, `refactor/`
+  for structure with no behavior change, `test/` for coverage and test
+  infrastructure, `docs/` for documentation, `audit/` for an investigation that
+  produces findings.
+- After the prefix, lowercase kebab-case, two to six words:
+  `fix/mobile-touch-navigation`, `feature/coco-yolo-export-options`.
+- The name says what is being solved, never who or what produced it. A name a
+  tool generated, such as `claude/adoring-bardeen-coi4l0`, is renamed before the
+  pull request is opened.
+- Delete the branch once its pull request is merged or closed. A branch whose
+  content already lives in `main` only adds noise to the list.
+
 ## Development
 
 Poligome requires Node.js 22.13 or newer.
