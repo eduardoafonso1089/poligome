@@ -2,7 +2,7 @@
 
 import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Check, X } from "lucide-react";
+import { AlertTriangle, Check, X } from "lucide-react";
 import type { Asset, Label } from "../../lib/types";
 import { getCopy, storedLanguage, type Language } from "../../lib/i18n";
 import { translateErrorCode } from "../../lib/error-message";
@@ -15,6 +15,8 @@ import {
   type CocoDocumentPlan,
 } from "./coco-document-import";
 import type { CocoImportWorkerRequest, CocoImportWorkerResponse } from "./coco-import.worker";
+import { inspectAnnotationFile, type AnnotationPackageInspection } from "./annotation-package-import";
+import { summarizeImageIssues } from "./annotation-import-summary";
 
 function afterNextPaint() {
   return new Promise<void>((resolve) => {
@@ -71,6 +73,7 @@ type PendingCoco = {
   file: File;
   document: CocoDocumentInput;
   plan: CocoDocumentPlan;
+  inspection: AnnotationPackageInspection;
 };
 
 export type CocoImportHandle = { open: () => void };
@@ -116,17 +119,14 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
   ) ?? [], [geometryTypes, pending]);
   const activeImportSelection = pending ? currentImportSelection(pending) : { geometryTypes: [], selectedIndexes: [] };
   const canImport = activeImportSelection.geometryTypes.length > 0 && activeImportSelection.selectedIndexes.length > 0;
+  const issueSummary = useMemo(() => summarizeImageIssues(pending?.inspection.issues ?? []), [pending]);
 
   async function inspectFile(file: File) {
     setBusy(true);
     try {
-      const document = JSON.parse(await file.text()) as CocoDocumentInput;
-      const plan = planCocoDocument(document, assets, { unlabeledName: copy.unlabeled });
-      if (!plan.candidates.length) {
-        onImported({ labels, annotations, message: copy.noCategoriesSelected });
-        return;
-      }
-      setPending({ file, document, plan });
+      const inspection = await inspectAnnotationFile(file, assets);
+      const plan = planCocoDocument(inspection.document, assets, { unlabeledName: copy.unlabeled });
+      setPending({ file, document: inspection.document, plan, inspection });
       updateImportSelection(plan.geometryTypes, plan.candidates.map((candidate) => candidate.index), false);
       setTab("categories");
     } catch (error) {
@@ -261,7 +261,7 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
         labels: nextLabels,
         annotations: [],
         append: true,
-        message: `${importedAnnotations.length} ${copy.annotationsToLoad}${unmatched ? ` · ${unmatched}` : ""}.`,
+        message: `${importedAnnotations.length} ${copy.annotationsToLoad}${unmatched ? ` · ${unmatched}` : ""}${pending.inspection.issues.length ? ` · ${pending.inspection.issues.length} ${copy.partialImport}` : ""}.`,
       });
     } catch (error) {
       onImported({
@@ -282,7 +282,7 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
     <input
       ref={inputRef}
       type="file"
-      accept="application/json,.json"
+      accept="application/json,application/zip,.json,.zip"
       hidden
       onChange={(event) => {
         const file = event.target.files?.[0];
@@ -294,12 +294,22 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
       {busy ? `${copy.progress}…` : "COCO"}
     </button>}
 
-    {pending && <div className="modal-backdrop" role="presentation" onMouseDown={requestClose}>
-      <section className="sam-modal coco-import-modal" role="dialog" aria-modal="true" aria-busy={importing} aria-labelledby="coco-import-title" onMouseDown={(event) => event.stopPropagation()}>
+    {pending && <div className="modal-backdrop" role="presentation" onPointerDown={requestClose}>
+      <section className="sam-modal coco-import-modal" role="dialog" aria-modal="true" aria-busy={importing} aria-labelledby="coco-import-title" onPointerDown={(event) => event.stopPropagation()}>
         <header>
-          <div><strong>{copy.chooseAnnotations}</strong><div style={{ fontSize: 13, opacity: .72, marginTop: 4 }}>{copy.chooseAnnotationsHint}</div><div style={{ fontSize: 12, opacity: .6, marginTop: 2 }}>{pending.file.name}</div></div>
+          <div><strong id="coco-import-title">{copy.chooseAnnotations}</strong><div style={{ fontSize: 13, opacity: .72, marginTop: 4 }}>{copy.chooseAnnotationsHint}</div><div style={{ fontSize: 12, opacity: .6, marginTop: 2 }}>{pending.file.name} · {copy.annotationPackageFormat}: {pending.inspection.format.toUpperCase()}</div></div>
           <button type="button" onClick={requestClose} aria-label={copy.close}><X size={19} /></button>
         </header>
+
+        {issueSummary.total > 0 && <div className="annotation-import-warning" role="status">
+          <AlertTriangle size={18} />
+          <div>
+            {issueSummary.missing.length > 0 && <p><b>{copy.imagesWithoutMatch}: {issueSummary.missing.length}</b><span>{issueSummary.missing.slice(0, 3).join(", ")}</span></p>}
+            {issueSummary.ambiguous.length > 0 && <p><b>{copy.ambiguousImages}: {issueSummary.ambiguous.length}</b><span>{issueSummary.ambiguous.slice(0, 3).join(", ")}</span></p>}
+            {issueSummary.invalid.length > 0 && <p><b>{copy.invalidEntries}: {issueSummary.invalid.length}</b><span>{issueSummary.invalid.slice(0, 3).join(", ")}</span></p>}
+            {!pending.plan.candidates.length && <strong>{copy.noMatchingImages}</strong>}
+          </div>
+        </div>}
 
         <div className="coco-import-tabs">
           <button type="button" className={tab === "categories" ? "active" : ""} aria-pressed={tab === "categories"} onClick={() => setTab("categories")}>{copy.annotationCategories}</button>
