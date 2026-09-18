@@ -29,7 +29,7 @@ const entries = (markup) => buttons(markup).map((button) => ({
 
 test("every supported format is offered, in one menu", () => {
   const body = text(controls());
-  for (const format of ["COCO JSON", "YOLO ZIP", "GeoJSON", "Poligome"]) {
+  for (const format of ["COCO ZIP", "YOLO ZIP", "GeoJSON", "Poligome"]) {
     assert.ok(body.includes(format), `missing export format: ${format}`);
   }
   assert.ok(buttons(controls()).every((button) => attribute(button, "role") === "menuitem"));
