@@ -4,6 +4,7 @@ import { region, sourceOf } from './helpers/source.mjs';
 import { ViewportController } from '../app/editor/viewport/viewport-controller.ts';
 
 const WORKBENCH = 'app/editor/workbench/canonical-editor-workbench.tsx';
+const HOOK = 'app/editor/viewport/use-editor-viewport.ts';
 const touch = sourceOf('app/editor/viewport/use-touch-navigation.ts');
 const drawing = sourceOf('app/editor/drawing/use-drawing-interactions.ts');
 
@@ -49,11 +50,45 @@ test('pinch-pan combines scale and moving midpoint without annotation rescaling'
 // what cancels what, and in which order — since a browser cannot show that a
 // step was skipped, only that the result looked right by accident.
 
-test('pinch publishes scroll synchronously so the next touch frame matches controller state', () => {
-  const hook = sourceOf('app/editor/viewport/use-editor-viewport.ts');
-  assert.match(hook, /const applyScrollImmediately = useCallback/);
-  // Asynchronous publication would let the next touchmove read a stale scroll.
-  assert.match(hook, /applyScrollImmediately\(next\); publish\(next\);/);
+test('a gesture step never re-reads a scroll offset the element has not received yet', () => {
+  // The contract this protects: the frame after a pinch or wheel step must be
+  // computed from the offset the controller just published, never from the one
+  // still on the element. It used to be met by writing the scroll synchronously
+  // (applyScrollImmediately); that write is clamped by the pre-zoom scrollWidth
+  // when zooming in, so the offset is now simply not read back while pending.
+  assert.match(sourceOf(HOOK), /const pendingScrollRef = useRef/);
+  // publish marks the offset as owed to the element...
+  assert.match(
+    region(HOOK, 'const publish = useCallback', '}, []);'),
+    /pendingScrollRef\.current = \{ scrollLeft: next\.scrollLeft, scrollTop: next\.scrollTop \}/,
+  );
+  // ...and both read-backs stand down until it lands.
+  assert.match(region(HOOK, 'const onScroll = useCallback', '}, []);'), /if \(pendingScrollRef\.current\) return;/);
+  assert.match(
+    region(HOOK, 'const syncBeforeGesture = useCallback', '}, []);'),
+    /if \(pendingScrollRef\.current\) return controllerRef\.current\.sync\(\{ viewport \}\);/,
+  );
+  // Only the pre-paint flush clears it, so the element is authoritative again
+  // exactly when it is correct.
+  assert.match(region(HOOK, 'useLayoutEffect(() => { const scroller', '});'), /pendingScrollRef\.current = null;/);
+  // The queued frame this replaces applied intermediate offsets out of step
+  // with the zoom that produced them.
+  assert.doesNotMatch(sourceOf(HOOK), /requestAnimationFrame/);
+});
+
+test('zoom anchors against a derived canvas frame, never a measured one', () => {
+  // getBoundingClientRect on the canvas reports the last painted zoom. A wheel
+  // burst outruns React, so measuring would anchor each step to the zoom before
+  // it. The scroller's own box does not move when its content grows, so the
+  // frame is derived from it plus the controller's layout.
+  const frame = region(HOOK, 'const canvasFrame = useCallback', '}, []);');
+  assert.match(frame, /const scroller = scrollRef\.current;/);
+  assert.match(frame, /layout\.left - scrollLeft/);
+  assert.match(frame, /layout\.top - scrollTop/);
+  assert.doesNotMatch(sourceOf(HOOK), /canvasRef\.current\.getBoundingClientRect\(\)/);
+  for (const caller of ['const zoomTo = useCallback', 'const pinchPan = useCallback']) {
+    assert.match(region(HOOK, caller, '}, ['), /canvasFrame\(\)/, `${caller} must use the derived frame`);
+  }
 });
 
 test('select mode reserves empty-canvas one-finger drag for thresholded pan', () => {
