@@ -147,3 +147,75 @@ test("a label row for an image that is not loaded is reported once", async () =>
   assert.deepEqual(result.issues, [{ reference: "ausente", reason: "missing" }]);
   assert.equal(result.document.annotations?.length, 0);
 });
+
+test("a COCO document without categories keeps its classes, named after the class id", async () => {
+  const result = await inspectAnnotationFiles([textFile("anotacoes.json", JSON.stringify({
+    images: [{ id: 1, file_name: "rua.jpg", width: 640, height: 480 }],
+    annotations: [
+      { id: 1, image_id: 1, category_id: 7, bbox: [10, 20, 30, 40] },
+      { id: 2, image_id: 1, category_id: 12, bbox: [50, 60, 30, 40] },
+    ],
+  }))], assets);
+
+  assert.equal(result.format, "coco");
+  assert.deepEqual(result.document.categories, [{ id: 7, name: "7" }, { id: 12, name: "12" }]);
+  assert.equal(planCocoDocument(result.document, assets).candidates.length, 2);
+});
+
+test("a COCO file per image pairs with the image it is named after", async () => {
+  const perImage = (categoryName) => JSON.stringify({
+    categories: [{ id: 7, name: categoryName }],
+    annotations: [{ id: 1, category_id: 7, bbox: [10, 20, 30, 40] }],
+  });
+
+  const result = await inspectAnnotationFiles([
+    textFile("rua.json", perImage("carro")),
+    textFile("parque.json", perImage("arvore")),
+  ], assets);
+
+  assert.deepEqual(result.issues, []);
+  assert.deepEqual(result.document.images?.map((image) => image.file_name), ["rua.jpg", "parque.png"]);
+  assert.equal(planCocoDocument(result.document, assets).candidates.length, 2);
+});
+
+test("a bare COCO results array imports under the image its file names", async () => {
+  const result = await inspectAnnotationFiles([textFile("rua.json", JSON.stringify([
+    { image_id: 1, category_id: 7, bbox: [10, 20, 30, 40], score: 0.9 },
+    { image_id: 1, category_id: 7, bbox: [50, 60, 30, 40], score: 0.8 },
+  ]))], assets);
+
+  assert.equal(result.format, "coco");
+  assert.deepEqual(result.document.images?.map((image) => image.file_name), ["rua.jpg"]);
+  assert.deepEqual(result.document.categories, [{ id: 7, name: "7" }]);
+  assert.equal(planCocoDocument(result.document, assets).candidates.length, 2);
+});
+
+test("a ZIP of per-image COCO files pairs each one with its image", async () => {
+  const zip = new JSZip();
+  zip.file("images/rua.jpg", "bytes");
+  zip.file("annotations/rua.json", JSON.stringify({ annotations: [{ id: 1, category_id: 7, bbox: [10, 20, 30, 40] }] }));
+  zip.file("annotations/parque.json", JSON.stringify({ annotations: [{ id: 1, category_id: 7, bbox: [1, 2, 3, 4] }] }));
+
+  const result = await inspectAnnotationFile(await zipFile(zip, "coco.zip"), assets);
+
+  assert.equal(result.format, "coco");
+  assert.deepEqual(result.issues, []);
+  assert.deepEqual(result.document.images?.map((image) => image.file_name), ["rua.jpg", "parque.png"]);
+  assert.equal(planCocoDocument(result.document, assets).candidates.length, 2);
+});
+
+test("a COCO file named after no loaded image is reported, not guessed", async () => {
+  const result = await inspectAnnotationFiles([textFile("ausente.json", JSON.stringify({
+    annotations: [{ id: 1, category_id: 7, bbox: [10, 20, 30, 40] }],
+  }))], assets);
+
+  assert.deepEqual(result.issues, [{ reference: "ausente", reason: "missing" }]);
+  assert.equal(planCocoDocument(result.document, assets).candidates.length, 0);
+});
+
+test("JSON that is not annotations at all is still rejected", async () => {
+  await assert.rejects(
+    inspectAnnotationFiles([textFile("config.json", JSON.stringify({ name: "poligome", version: 4 }))], assets),
+    /annotationPackageUnsupported/,
+  );
+});

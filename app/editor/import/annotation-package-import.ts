@@ -13,10 +13,66 @@ export type AnnotationPackageInspection = {
   issues: ImageMatchIssue[];
 };
 
-function isCocoDocument(value: unknown): value is CocoDocumentInput {
+type CocoAnnotation = NonNullable<CocoDocumentInput["annotations"]>[number];
+
+function isCocoAnnotation(value: unknown): value is CocoAnnotation {
   if (!value || typeof value !== "object") return false;
+  const annotation = value as CocoAnnotation;
+  return Array.isArray(annotation.bbox) || Array.isArray(annotation.segmentation) || Array.isArray(annotation.keypoints);
+}
+
+/**
+ * The COCO a dataset actually ships, not only the complete document: the
+ * `images` and `categories` arrays are what a tool writes when it exports the
+ * whole dataset, and a per-image file or a results array carries neither. The
+ * annotations are the part that always exists, so they are what detection
+ * requires; `completeCocoDocument` fills the rest in.
+ */
+function cocoDocumentFrom(value: unknown): CocoDocumentInput | null {
+  if (Array.isArray(value)) {
+    const annotations = value.filter(isCocoAnnotation);
+    return annotations.length ? { annotations } : null;
+  }
+  if (!value || typeof value !== "object") return null;
   const document = value as CocoDocumentInput;
-  return Array.isArray(document.images) && Array.isArray(document.categories) && Array.isArray(document.annotations);
+  if (!Array.isArray(document.annotations)) return null;
+  const images = Array.isArray(document.images) ? document.images : undefined;
+  if (!images && !document.annotations.some(isCocoAnnotation)) return null;
+  return {
+    ...(images ? { images } : {}),
+    ...(Array.isArray(document.categories) ? { categories: document.categories } : {}),
+    annotations: document.annotations,
+  };
+}
+
+/**
+ * Supply what the document leaves out, the way the YOLO side does:
+ *
+ * - No `images`: the file itself names the image, so a per-image JSON pairs by
+ *   its own stem with a loaded image, and every annotation belongs to it.
+ * - No `categories`: each class id becomes a class named after the id, which
+ *   keeps the annotations instead of dropping their class.
+ *
+ * A reference that matches is stored under the loaded image's own name, because
+ * the planner downstream matches by name rather than by stem.
+ */
+function completeCocoDocument(document: CocoDocumentInput, source: string, assets: Asset[]): CocoDocumentInput {
+  const annotations = document.annotations ?? [];
+  const categories = document.categories?.length
+    ? document.categories
+    : [...new Set(annotations.flatMap((annotation) => typeof annotation.category_id === "number" ? [annotation.category_id] : []))]
+      .map((id) => ({ id, name: String(id) }));
+
+  if (document.images?.length) return { ...document, categories };
+
+  const reference = normalizePath(source).replace(/\.json$/i, "");
+  const match = matchImageReference(reference, assets, { allowStem: true });
+  const imageId = 1;
+  return {
+    images: [{ id: imageId, file_name: "asset" in match ? match.asset.name : reference }],
+    categories,
+    annotations: annotations.map((annotation) => ({ ...annotation, image_id: imageId })),
+  };
 }
 
 function normalizePath(value: string) {
@@ -136,8 +192,9 @@ export async function inspectAnnotationFile(file: File, assets: Asset[]): Promis
   }
 
   if (/\.json$/i.test(file.name) || file.type === "application/json") {
-    const document = JSON.parse(await file.text()) as unknown;
-    if (!isCocoDocument(document)) throw new Error("annotationPackageUnsupported");
+    const parsed = cocoDocumentFrom(JSON.parse(await file.text()) as unknown);
+    if (!parsed) throw new Error("annotationPackageUnsupported");
+    const document = completeCocoDocument(parsed, file.name, assets);
     return { format: "coco", roots: [file.name], document, issues: imageIssues(document, assets) };
   }
 
@@ -149,8 +206,11 @@ export async function inspectAnnotationFile(file: File, assets: Asset[]): Promis
   const cocoEntries: Array<{ path: string; document: CocoDocumentInput }> = [];
   for (const entry of entries.filter((candidate) => /\.json$/i.test(candidate.name) && !/poligome-manifest\.json$/i.test(candidate.name))) {
     try {
-      const document = JSON.parse(await entry.async("string")) as unknown;
-      if (isCocoDocument(document)) cocoEntries.push({ path: normalizePath(entry.name), document });
+      const path = normalizePath(entry.name);
+      const parsed = cocoDocumentFrom(JSON.parse(await entry.async("string")) as unknown);
+      // Each document is completed against its own path, so a folder of
+      // per-image files pairs each one with the image it is named after.
+      if (parsed) cocoEntries.push({ path, document: completeCocoDocument(parsed, path, assets) });
     } catch {
       // A ZIP may contain unrelated JSON; format detection ignores it.
     }
