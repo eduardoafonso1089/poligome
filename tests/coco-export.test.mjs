@@ -61,3 +61,23 @@ test("COCO ZIP contains references and metadata but no image entries", async () 
   assert.doesNotMatch(manifest, /secret-bytes|data:image/);
   assert.match(manifest, /private\.tif/);
 });
+
+test("COCO ZIP can keep the complete dataset in one document without split folders", async () => {
+  const assets = [
+    { id: "first", name: "first.png", src: "", width: 100, height: 50 },
+    { id: "second", name: "second.png", src: "", width: 80, height: 40 },
+  ];
+  const labels = [{ id: "object", name: "Object", color: "#fff", key: "" }];
+  const annotations = [
+    { id: "box", asset: "first", label: "object", type: "box", x: 10, y: 5, width: 20, height: 10 },
+  ];
+
+  const zip = await buildCocoArchive(assets, labels, annotations, { ...options, splitDataset: false });
+  const entries = Object.keys(zip.files);
+  const document = JSON.parse(await zip.file("annotations/instances.json").async("string"));
+
+  assert.deepEqual(document.images.map((image) => image.file_name), ["first.png", "second.png"]);
+  assert.equal(document.annotations.length, 1);
+  assert.equal(entries.some((entry) => /instances_(train|val|test)\.json$/.test(entry)), false);
+  assert.equal(entries.some((entry) => /(^|\/)images\//.test(entry)), false);
+});
