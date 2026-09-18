@@ -52,9 +52,8 @@ export type Asset = {
   geo?: GeoRef;
   raster?: RasterAsset;
   /**
-   * Runtime-only handle to a local/bundled tiled raster. This field itself is never
-   * serialized into project.json; in a complete .plgm, project.ts may bundle the
-   * underlying raster bytes and restore a new runtime handle when the project opens.
+   * Runtime-only handle to a local or legacy-bundled tiled raster. This field is
+   * never serialized into newly saved annotation-only project files.
    */
   runtimeRasterSource?: File;
   reviewScore?: number;

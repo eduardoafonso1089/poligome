@@ -32,7 +32,7 @@ import { createLabel as createPanelLabel, ensureUnlabeledLabel, moveItemById, re
 import { selectRange } from "../selection/selection-model";
 import { commandFromKeyboard, isEditableShortcutTarget, type VectorTool } from "../commands/editor-shortcuts";
 import { simplifyPolygonAnnotation, unionPolygonAnnotations } from "../geometry/vector-operations";
-import { PreRefactorStatus, PreRefactorToolbar, PreRefactorTopbar, type PreRefactorChromeProps, type ProjectSaveMode } from "../presentation/pre-refactor-chrome";
+import { PreRefactorStatus, PreRefactorToolbar, PreRefactorTopbar, type PreRefactorChromeProps } from "../presentation/pre-refactor-chrome";
 import {
   DemoTutorialChrome,
   DemoTutorialOverlay,
@@ -74,7 +74,6 @@ export function CanonicalEditorWorkbench() {
   const [current, setCurrent] = useState("");
   const [projectName, setProjectName] = useState(() => getCopy(storedLanguage()).newProject);
   const [language, setLanguage] = useState<Language>("pt");
-  const [saveMode, setSaveMode] = useState<ProjectSaveMode>("complete");
   const [strokePx, setStrokePx] = useState(1);
   const [hiddenAnnotationIds, setHiddenAnnotationIds] = useState<Set<string>>(() => new Set());
   const [hiddenLabelIds, setHiddenLabelIds] = useState<Set<string>>(() => new Set());
@@ -255,7 +254,6 @@ export function CanonicalEditorWorkbench() {
     setActiveLabel("");
     setCurrent("");
     setProjectName(copy.newProject);
-    setSaveMode("complete");
     editor.replaceAnnotations([], true);
     resetTransientVisibility();
     resetDemoTutorial();
@@ -720,12 +718,11 @@ export function CanonicalEditorWorkbench() {
     editor.dispatch({ type: "replace-annotation", annotation: { ...editor.selectedAnnotation, reviewScore: score } });
   }
 
-  async function saveProject(mode: ProjectSaveMode = saveMode) {
+  async function saveProject() {
     if (!assets.length) return;
-    setSaveMode(mode);
     setLoading(true);
     try {
-      const name = await saveEditorProject(projectName, assets, labels, editor.annotations, mode, copy);
+      const name = await saveEditorProject(projectName, assets, labels, editor.annotations, copy);
       editor.markSaved();
       setSessionDirty(false);
       setMessage(`${copy.projectSaved}: ${name}`);
@@ -939,7 +936,7 @@ export function CanonicalEditorWorkbench() {
     onDemo: () => { if (!projectDirty || window.confirm(copy.replaceUnsavedProject)) void loadDemo(); },
     onOpenProject: () => projectInputRef.current?.click(),
     onImportImages: () => imageInputRef.current?.click(),
-    onSaveProject: (mode: ProjectSaveMode) => void saveProject(mode),
+    onSaveProject: () => void saveProject(),
     onLanguageChange: changeLanguage,
     onSamSettings: () => window.dispatchEvent(new CustomEvent("poligome:open-sam")),
     onTool: chooseTool,
