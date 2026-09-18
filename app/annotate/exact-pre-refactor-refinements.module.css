@@ -197,9 +197,9 @@
   pointer-events: none;
 }
 
-/* The File menu still owns technical raster/COCO controls for functionality,
-   but the historical dropdown exposed only the four export rows. */
-.contract :global(.canonical-file-extras > button:nth-of-type(-n+4)) { display: none !important; }
+/* The File menu still owns technical raster controls for functionality, but
+   only semantic export menu items belong in the historical dropdown. */
+.contract :global(.canonical-file-extras > button:not([role="menuitem"])) { display: none !important; }
 .contract :global(.project-pop .canonical-file-extras > button) {
   width: 100%;
   min-height: 45px;
