@@ -27,11 +27,11 @@
   "yolo.package_layout": {
     "main": "images/<split>/<index>-<name>.jpg paired with labels/<split>/<index>-<name>.txt, boxes and polygons mixed in one file",
     "refactor": "no image bytes; labels/<stem>.txt under the split the dataset declares, with bbox/ and polygon/ dataset roots when both geometries are exported",
-    "reason": "Deliberate move to annotation-only packages that follow the public YOLO conventions: images stay on the user's device, the label stem matches the image stem YOLO pairs it with, and segmentation rows no longer share a file with detection rows. The rows themselves are unchanged, so the golden compares the rows written per image on both sides and separately asserts that no image entry rides along."
+    "reason": "Deliberate move to annotation-only packages that follow the public YOLO conventions: images stay on the user's device, the label stem matches the image stem YOLO pairs it with, and segmentation rows no longer share a file with detection rows. Canonical main now carries this layout, so the golden compares whole archives again; it asks both sides for one unsplit dataset with both geometries, which keeps the comparison deterministic, and separately asserts that no image entry rides along."
   },
   "project.annotation_only_save": {
     "main": "savePoligomeProjectV4(..., mode, copy), where mode 'complete' bundled the local image bytes",
     "refactor": "savePoligomeProjectV4(..., copy); every new .plgm is annotation-only",
-    "reason": "The save-mode dialog is gone and no export path bundles images any more; old .plgm files with bundled images stay readable. The golden calls each side with the signature it has and keeps comparing the semantic project content."
+    "reason": "The save-mode dialog is gone and no export path bundles images any more; old .plgm files with bundled images stay readable. Canonical main now carries the shorter signature, so the golden calls both sides the same way and keeps comparing the semantic project content."
   }
 }
