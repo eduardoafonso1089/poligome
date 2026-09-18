@@ -15,8 +15,9 @@ Name a branch after the problem it solves, so the branch list reads as a list of
 work in progress.
 
 - Prefix by intent: `fix/` for a defect, `feature/` for new behavior, `refactor/`
-  for structure with no behavior change, `docs/` for documentation, `audit/` for
-  an investigation that produces findings.
+  for structure with no behavior change, `test/` for coverage and test
+  infrastructure, `docs/` for documentation, `audit/` for an investigation that
+  produces findings.
 - After the prefix, lowercase kebab-case, two to six words:
   `fix/mobile-touch-navigation`, `feature/coco-yolo-export-options`.
 - The name says what is being solved, never who or what produced it. A name a
