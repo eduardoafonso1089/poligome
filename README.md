@@ -55,6 +55,67 @@ The refactored image annotator opens GeoTIFF and Cloud Optimized GeoTIFF files d
 Files that are not proper COGs still open, but the reader has to transfer far
 more than it needs. The local converter below turns them into real COGs.
 
+## Run Poligome locally
+
+Poligome can be installed and served directly from your own computer. This keeps
+the application, annotation workflow, and optional local helpers under your
+control.
+
+Requirements: **Node.js >= 22.13.0**, npm, and Git if you are cloning the
+repository.
+
+### Linux
+
+```bash
+git clone https://github.com/eduardoafonso1089/poligome.git
+cd poligome
+chmod +x install.sh
+./install.sh
+npm run dev
+```
+
+### Windows (PowerShell)
+
+```powershell
+git clone https://github.com/eduardoafonso1089/poligome.git
+cd poligome
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+npm run dev
+```
+
+If you already downloaded the repository, start inside its directory. Both
+installers validate the Node.js version and run `npm ci`, using the lockfile as
+the dependency source of truth. They do **not** silently install or upgrade
+Node.js.
+
+Manual installation remains available:
+
+```bash
+npm ci
+npm run dev
+```
+
+On Windows, see [REINSTALL_WINDOWS.md](REINSTALL_WINDOWS.md) if your network
+blocks the npm registry or you need the Windows-specific development path.
+
+## Local AI and Poligome Runtime
+
+Poligome is designed so AI assistance can run on the same computer as the
+dataset. The browser can communicate with a model service bound to loopback
+(`127.0.0.1`), receive inference results, and turn them into pre-annotations
+without sending the source images to a Poligome cloud service.
+
+We call this model-service direction **Poligome Runtime**. The goal is a
+plug-and-play local runtime with standard models first, followed by an extension
+path for users to connect their own models. A model may run in a local Python
+environment or a container; **Docker is not required to install or run the
+Poligome web interface itself**.
+
+The existing Local SAM connector is the first AI-oriented example of this local
+architecture. The canonical editor integration for SAM is still being developed
+separately. A generic runtime for arbitrary user models is also evolving work,
+not a feature claimed as complete on the current `main` branch.
+
 ## Local helpers
 
 Two optional connectors run on your own machine. Both are self-contained
@@ -102,6 +163,8 @@ app/editor/           canonical editor architecture and interface
 app/lib/              shared project, raster, SAM and i18n utilities
 public/               local connector installers, favicon and cursors
 docs/PLATFORM.md      hosting platform, bindings, and auth notes
+install.sh            Linux local setup
+install.ps1           Windows local setup
 ```
 
 The stack is React 19 and Next 16 running on
