@@ -29,6 +29,16 @@ const retiredKeys = {
     "imagesAndAnnotations", "imagesAndAnnotationsHint", "projectSavePrivacy",
     "saveProjectDescription", "saveProjectTitle", "sizeCalculatedOnSave",
   ],
+  // The SAM setup modal was replaced. The old one was a single install screen
+  // whose copy walked through downloading an installer and restarting the
+  // server; the new one has tabs, a model catalogue and a BYOM panel, and says
+  // all of that in its own words. None of these keys survived the rewrite.
+  "SAM setup modal rewritten for the model catalogue": [
+    "autoDownloadModel", "beforeRun", "installedAlready", "noUpload", "oneClickHint",
+    "oneClickSetup", "restartServerHint", "restartUnix", "restartWindows",
+    "samHardwareDetail", "samInstallerDetail", "samOffline", "samPrivacyDetail",
+    "samPrivacyIntro", "samSubtitle", "samTitle", "unixInstaller", "windowsInstaller",
+  ],
 };
 const retired = new Set(Object.values(retiredKeys).flat());
 

@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const repo = new URL("../", import.meta.url);
 
 async function executable(path, source) {
   await writeFile(path, source);

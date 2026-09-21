@@ -1,249 +1,408 @@
 @echo off
 chcp 65001 >nul
-setlocal EnableExtensions
-title Poligome SAM local
+setlocal EnableExtensions EnableDelayedExpansion
+title Poligome SAM local - instalar modelo
+set "POLIGOME_SAM_WINDOWS_INSTALLER_API=2"
 
+set "DEFAULT_SITE_URL=https://www.poligome.com"
+set "DEFAULT_ASSET_BASE_URL=https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
+set "DEFAULT_CONNECTOR_URL=%DEFAULT_ASSET_BASE_URL%/poligome-sam-local.py"
+set "DEFAULT_CONNECTOR_SHA256=587d9e065254b2be581a75a51a4263299c1e434ed3011e6ae27ea9dda5b7c6a2"
+set "SITE_URL=%POLIGOME_SITE_URL%"
+if not defined SITE_URL set "SITE_URL=%DEFAULT_SITE_URL%"
+if "!SITE_URL:~-1!"=="/" set "SITE_URL=!SITE_URL:~0,-1!"
+set "ASSET_BASE_URL=%POLIGOME_ASSET_BASE_URL%"
+if defined ASSET_BASE_URL (
+  set "ASSET_BASE_OVERRIDDEN=1"
+  if "!ASSET_BASE_URL:~-1!"=="/" set "ASSET_BASE_URL=!ASSET_BASE_URL:~0,-1!"
+  set "CONNECTOR_URL=!ASSET_BASE_URL!/poligome-sam-local.py"
+  set "CONNECTOR_SHA256="
+) else (
+  set "ASSET_BASE_OVERRIDDEN="
+  set "ASSET_BASE_URL=%DEFAULT_ASSET_BASE_URL%"
+  set "CONNECTOR_URL=%DEFAULT_CONNECTOR_URL%"
+  set "CONNECTOR_SHA256=%DEFAULT_CONNECTOR_SHA256%"
+)
 set "APP_DIR=%LOCALAPPDATA%\PoligomeSAM"
-set "VENV_DIR=%APP_DIR%\venv"
-set "CONNECTOR=%APP_DIR%\poligome-sam-local.py"
-set "CHECKPOINT=%APP_DIR%\sam_vit_b_01ec64.pth"
-set "READY_FILE=%APP_DIR%\dependencies-v3.ok"
-set "MODEL_URL=https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
-set "SAM_ARCHIVE_URL=https://github.com/facebookresearch/segment-anything/archive/dca509fe793f601edb92606367a655c15ac00fdf.zip"
-set "SITE_URL=https://www.poligome.com"
+set "BIN_DIR=%APP_DIR%\bin"
+set "INSTALLER_CACHE=%BIN_DIR%\poligome-sam-windows.bat"
+set "SELECTED_MODEL_FILE=%APP_DIR%\selected-model.txt"
+set "PENDING_MODEL_FILE=%APP_DIR%\pending-model.txt"
+set "PORT=7860"
 
+if /I "%~1"=="--help" goto :help
+if /I "%~1"=="-h" goto :help
+if /I "%~1"=="/?" goto :help
+if not "%~2"=="" goto :too_many_args
+call :validate_site_url
+if errorlevel 1 goto :site_error
+call :derive_site_origin
+if errorlevel 1 goto :site_error
+call :validate_asset_base_url
+if errorlevel 1 goto :asset_base_error
+
+set "MODEL_ID=%~1"
+if not defined MODEL_ID (
+  call :choose_model
+  if errorlevel 1 goto :invalid_model
+)
+call :normalize_model_id
+if errorlevel 1 goto :invalid_model
+
+call :set_model_metadata
+if errorlevel 1 goto :invalid_model
+call :cache_windows_installer
+if errorlevel 1 goto :state_error
+call :stage_windows_selection
+if errorlevel 1 goto :state_error
+goto :install_wsl_model
+
+:choose_model
+echo.
+echo Escolha o modelo:
+echo.
+echo   1^) SAM 2.1 Hiera Tiny   ^(instalação automática no WSL2^)
+echo   2^) SAM 2.1 Hiera Small  ^(WSL2; recomendado^)
+echo   3^) SAM 2.1 Hiera Base+  ^(instalação automática no WSL2^)
+echo   4^) SAM 2.1 Hiera Large  ^(instalação automática no WSL2^)
+echo   5^) MedSAM2              ^(imagem medica geral; WSL2^)
+echo   6^) MedSAM2 lesao em TC  ^(tomografia; WSL2^)
+echo   7^) MedSAM2 lesao em RM  ^(figado; WSL2^)
+echo   8^) MedSAM2 ecocardio    ^(ultrassom; WSL2^)
+echo   9^) MedSAM2 2411         ^(versao anterior; WSL2^)
+echo  10^) SAM 3 Concepts       ^(WSL2 + GPU NVIDIA^)
+echo.
+set /p "MODEL_CHOICE=Digite 1-10 ou o ID completo: "
+if "!MODEL_CHOICE!"=="1" (
+  set "MODEL_ID=sam2.1-hiera-tiny"
+  exit /b 0
+)
+if "!MODEL_CHOICE!"=="2" (
+  set "MODEL_ID=sam2.1-hiera-small"
+  exit /b 0
+)
+if "!MODEL_CHOICE!"=="3" (
+  set "MODEL_ID=sam2.1-hiera-base-plus"
+  exit /b 0
+)
+if "!MODEL_CHOICE!"=="4" (
+  set "MODEL_ID=sam2.1-hiera-large"
+  exit /b 0
+)
+if "!MODEL_CHOICE!"=="5" (
+  set "MODEL_ID=medsam2-latest"
+  exit /b 0
+)
+if "!MODEL_CHOICE!"=="6" (
+  set "MODEL_ID=medsam2-ct-lesion"
+  exit /b 0
+)
+if "!MODEL_CHOICE!"=="7" (
+  set "MODEL_ID=medsam2-mri-liver-lesion"
+  exit /b 0
+)
+if "!MODEL_CHOICE!"=="8" (
+  set "MODEL_ID=medsam2-us-heart"
+  exit /b 0
+)
+if "!MODEL_CHOICE!"=="9" (
+  set "MODEL_ID=medsam2-2411"
+  exit /b 0
+)
+if "!MODEL_CHOICE!"=="10" (
+  set "MODEL_ID=sam3-concepts"
+  exit /b 0
+)
+set "MODEL_ID=!MODEL_CHOICE!"
+if not defined MODEL_ID exit /b 1
+exit /b 0
+
+:normalize_model_id
+if /I "!MODEL_ID!"=="sam2.1-hiera-tiny" (
+  set "MODEL_ID=sam2.1-hiera-tiny"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="sam2.1-hiera-small" (
+  set "MODEL_ID=sam2.1-hiera-small"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="sam2.1-hiera-base-plus" (
+  set "MODEL_ID=sam2.1-hiera-base-plus"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="sam2.1-hiera-large" (
+  set "MODEL_ID=sam2.1-hiera-large"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="sam3" (
+  set "MODEL_ID=sam3-concepts"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="medsam2-latest" (
+  set "MODEL_ID=medsam2-latest"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="medsam2" (
+  set "MODEL_ID=medsam2-latest"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="medsam2-ct-lesion" (
+  set "MODEL_ID=medsam2-ct-lesion"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="medsam2-ct" (
+  set "MODEL_ID=medsam2-ct-lesion"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="medsam2-mri-liver-lesion" (
+  set "MODEL_ID=medsam2-mri-liver-lesion"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="medsam2-mri" (
+  set "MODEL_ID=medsam2-mri-liver-lesion"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="medsam2-us-heart" (
+  set "MODEL_ID=medsam2-us-heart"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="medsam2-us" (
+  set "MODEL_ID=medsam2-us-heart"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="medsam2-2411" (
+  set "MODEL_ID=medsam2-2411"
+  exit /b 0
+)
+if /I "!MODEL_ID!"=="sam3-concepts" (
+  set "MODEL_ID=sam3-concepts"
+  exit /b 0
+)
+exit /b 1
+
+:set_model_metadata
+set "FAMILY=wsl"
+if /I "!MODEL_ID!"=="sam2.1-hiera-tiny" exit /b 0
+if /I "!MODEL_ID!"=="sam2.1-hiera-small" exit /b 0
+if /I "!MODEL_ID!"=="sam2.1-hiera-base-plus" exit /b 0
+if /I "!MODEL_ID!"=="sam2.1-hiera-large" exit /b 0
+if /I "!MODEL_ID!"=="medsam2-latest" exit /b 0
+if /I "!MODEL_ID!"=="medsam2-ct-lesion" exit /b 0
+if /I "!MODEL_ID!"=="medsam2-mri-liver-lesion" exit /b 0
+if /I "!MODEL_ID!"=="medsam2-us-heart" exit /b 0
+if /I "!MODEL_ID!"=="medsam2-2411" exit /b 0
+if /I "!MODEL_ID!"=="sam3-concepts" exit /b 0
+exit /b 1
+
+:validate_site_url
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$uri=$null; if (-not [Uri]::TryCreate($env:SITE_URL,[UriKind]::Absolute,[ref]$uri)) { exit 1 }; if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or $env:SITE_URL -match '\s') { exit 1 }; exit 0" >nul 2>nul
+exit /b %ERRORLEVEL%
+
+:derive_site_origin
+set "SITE_ORIGIN="
+for /f "delims=" %%O in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$builder=New-Object System.UriBuilder($env:SITE_URL); if ($builder.Port -eq 443) { $builder.Port=-1 }; $builder.Uri.GetLeftPart([System.UriPartial]::Authority)"') do set "SITE_ORIGIN=%%O"
+if not defined SITE_ORIGIN exit /b 1
+exit /b 0
+
+:validate_asset_base_url
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$uri=$null; if (-not [Uri]::TryCreate($env:ASSET_BASE_URL,[UriKind]::Absolute,[ref]$uri)) { exit 1 }; if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or $env:ASSET_BASE_URL -match '\s') { exit 1 }; exit 0" >nul 2>nul
+exit /b %ERRORLEVEL%
+
+:validate_wsl
+where wsl.exe >nul 2>nul
+if errorlevel 1 exit /b 1
+wsl.exe --exec bash -lc "command -v bash >/dev/null 2>&1" >nul 2>nul
+if errorlevel 1 exit /b 2
+wsl.exe --exec bash -lc "grep -Eqi '(wsl2|microsoft-standard)' /proc/sys/kernel/osrelease" >nul 2>nul
+if errorlevel 1 exit /b 3
+wsl.exe --exec bash -lc "command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1" >nul 2>nul
+if errorlevel 1 exit /b 4
+exit /b 0
+
+:enable_wsl_urls
+set "POLIGOME_SITE_URL=!SITE_URL!"
+set "POLIGOME_BOOTSTRAP_ASSET_BASE_URL=!ASSET_BASE_URL!"
+set "POLIGOME_WINDOWS_PENDING_FILE=!PENDING_MODEL_FILE!"
+set "POLIGOME_WINDOWS_SELECTED_FILE=!SELECTED_MODEL_FILE!"
+if defined ASSET_BASE_OVERRIDDEN (
+  set "POLIGOME_ASSET_BASE_URL=!ASSET_BASE_URL!"
+  set "WSL_URL_VARIABLES=POLIGOME_SITE_URL:POLIGOME_BOOTSTRAP_ASSET_BASE_URL:POLIGOME_ASSET_BASE_URL"
+  if defined POLIGOME_DEVICE set "WSL_URL_VARIABLES=!WSL_URL_VARIABLES!:POLIGOME_DEVICE"
+) else (
+  set "POLIGOME_ASSET_BASE_URL="
+  set "WSL_URL_VARIABLES=POLIGOME_SITE_URL:POLIGOME_BOOTSTRAP_ASSET_BASE_URL"
+  if defined POLIGOME_DEVICE set "WSL_URL_VARIABLES=!WSL_URL_VARIABLES!:POLIGOME_DEVICE"
+)
+if defined WSLENV (
+  set "WSLENV=!WSL_URL_VARIABLES!:POLIGOME_WINDOWS_PENDING_FILE/p:POLIGOME_WINDOWS_SELECTED_FILE/p:!WSLENV!"
+) else (
+  set "WSLENV=!WSL_URL_VARIABLES!:POLIGOME_WINDOWS_PENDING_FILE/p:POLIGOME_WINDOWS_SELECTED_FILE/p"
+)
+exit /b 0
+
+:stage_windows_selection
+if not exist "!APP_DIR!" (
+  mkdir "!APP_DIR!"
+  if errorlevel 1 exit /b 1
+)
+>"!PENDING_MODEL_FILE!.part" echo !MODEL_ID!
+if errorlevel 1 exit /b 1
+move /Y "!PENDING_MODEL_FILE!.part" "!PENDING_MODEL_FILE!" >nul
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:cache_windows_installer
+if not exist "!APP_DIR!" (
+  mkdir "!APP_DIR!"
+  if errorlevel 1 exit /b 1
+)
+if not exist "!BIN_DIR!" (
+  mkdir "!BIN_DIR!"
+  if errorlevel 1 exit /b 1
+)
+copy /Y "%~f0" "!INSTALLER_CACHE!.part" >nul
+if errorlevel 1 exit /b 1
+set "INSTALLER_CANDIDATE=!INSTALLER_CACHE!.part"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$marker='set '+[char]34+'POLIGOME_SAM_WINDOWS_INSTALLER_API=2'+[char]34; if (-not (Select-String -LiteralPath $env:INSTALLER_CANDIDATE -SimpleMatch $marker -Quiet)) { exit 1 }; exit 0" >nul 2>nul
+if errorlevel 1 (
+  del /Q "!INSTALLER_CACHE!.part" >nul 2>nul
+  exit /b 1
+)
+move /Y "!INSTALLER_CACHE!.part" "!INSTALLER_CACHE!" >nul
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:commit_windows_selection
+if not exist "!PENDING_MODEL_FILE!" (
+  if not exist "!SELECTED_MODEL_FILE!" exit /b 1
+  set "ACTIVE_MODEL_ID="
+  set /p "ACTIVE_MODEL_ID="<"!SELECTED_MODEL_FILE!"
+  if "!ACTIVE_MODEL_ID!"=="!MODEL_ID!" exit /b 0
+  exit /b 1
+)
+set "STAGED_MODEL_ID="
+set /p "STAGED_MODEL_ID="<"!PENDING_MODEL_FILE!"
+if not "!STAGED_MODEL_ID!"=="!MODEL_ID!" exit /b 1
+move /Y "!PENDING_MODEL_FILE!" "!SELECTED_MODEL_FILE!" >nul
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:install_wsl_model
 echo.
 echo ==========================================
-echo        Poligome SAM local
+echo  Poligome SAM via WSL2 - !MODEL_ID!
 echo ==========================================
-echo This installer sets up SAM on your computer.
-echo Na primeira execucao o processo pode demorar alguns minutos.
+echo.
+echo O modelo e as dependências serão mantidos em ~/.poligome-sam dentro do WSL2.
+echo Nenhum checkpoint será copiado para a pasta do projeto.
 echo.
 
-if not exist "%APP_DIR%" mkdir "%APP_DIR%"
+call :validate_wsl
+if errorlevel 4 goto :wsl_downloader_missing
+if errorlevel 3 goto :wsl2_required
+if errorlevel 2 goto :wsl_distro_error
+if errorlevel 1 goto :wsl_missing
 
-set "SELF_PATH=%~f0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$content=[IO.File]::ReadAllText($env:SELF_PATH); $marker='# === POLIGOME_'+'PYTHON ==='; $index=$content.IndexOf($marker,[StringComparison]::Ordinal); if($index -lt 0){exit 41}; $python=$content.Substring($index+$marker.Length).TrimStart([char]13,[char]10); if([string]::IsNullOrWhiteSpace($python)){exit 42}; [IO.File]::WriteAllText($env:CONNECTOR,$python,[Text.UTF8Encoding]::new($false))"
-if errorlevel 1 goto :extract_error
+call :enable_wsl_urls
 
-set "PY_CMD="
-where py >nul 2>nul && set "PY_CMD=py -3"
-if not defined PY_CMD where python >nul 2>nul && set "PY_CMD=python"
-if defined PY_CMD %PY_CMD% --version >nul 2>nul || set "PY_CMD="
-if not defined PY_CMD (
-  where winget >nul 2>nul || goto :python_error
-  echo Installing Python 3.11...
-  winget install -e --id Python.Python.3.11 --scope user --accept-package-agreements --accept-source-agreements
-  if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" set "PY_CMD=%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
-)
-if not defined PY_CMD goto :python_error
+echo Baixando por HTTPS o instalador canônico para um arquivo temporário no WSL2...
+echo A seleção será confirmada em !SELECTED_MODEL_FILE! somente após a instalação.
+echo.
+start "" "!SITE_URL!"
+wsl.exe --exec bash -lc "set -euo pipefail; set -f; app_dir=$HOME/.poligome-sam; install_dir=$app_dir/bin; mkdir -p $install_dir; final=$install_dir/poligome-sam-macos-linux.sh; partial=$final.part.$$; runner=$final; wsl_selected=$app_dir/selected-model.txt; wsl_pending=$app_dir/pending-model.txt; wsl_pending_tmp=$wsl_pending.part.$$; downloaded=0; monitor_pid=0; valid_installer() { test -s $1 && grep -Fxq 'POLIGOME_SAM_INSTALLER_API=2' $1; }; stage_wsl_pending() { echo !MODEL_ID! >$wsl_pending_tmp; mv -f $wsl_pending_tmp $wsl_pending; }; commit_windows_selection() { local IFS=; if test -f $wsl_pending; then return 1; fi; if test -f $wsl_selected; then wsl_model=$(head -n 1 $wsl_selected | tr -d '\r\n'); else return 1; fi; if test -f $POLIGOME_WINDOWS_PENDING_FILE; then windows_model=$(head -n 1 $POLIGOME_WINDOWS_PENDING_FILE | tr -d '\r\n'); else return 1; fi; if test x$wsl_model = x!MODEL_ID! && test x$windows_model = x!MODEL_ID!; then mv -f $POLIGOME_WINDOWS_PENDING_FILE $POLIGOME_WINDOWS_SELECTED_FILE; return 0; fi; return 1; }; monitor_commit() { while true; do if commit_windows_selection; then return 0; fi; sleep 1; done; }; cleanup() { if test $monitor_pid -ne 0; then kill $monitor_pid >/dev/null 2>&1 || true; wait $monitor_pid >/dev/null 2>&1 || true; fi; rm -f $partial $wsl_pending_tmp; }; trap 'cleanup' EXIT HUP INT TERM; if command -v curl >/dev/null 2>&1 && curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 --retry-delay 2 --output $partial $POLIGOME_BOOTSTRAP_ASSET_BASE_URL/poligome-sam-macos-linux.sh; then downloaded=1; elif command -v wget >/dev/null 2>&1 && wget --https-only --tries=3 --output-document=$partial $POLIGOME_BOOTSTRAP_ASSET_BASE_URL/poligome-sam-macos-linux.sh; then downloaded=1; fi; if test $downloaded -eq 1 && valid_installer $partial; then runner=$partial; else rm -f $partial; valid_installer $final || exit 1; echo 'Download indisponível ou incompatível; usando o instalador WSL2 API 2 validado em cache.' >&2; fi; stage_wsl_pending; monitor_commit & monitor_pid=$(jobs -p); if POLIGOME_SITE_URL=$POLIGOME_SITE_URL bash $runner !MODEL_ID!; then run_status=0; else run_status=$?; fi; commit_windows_selection || true; kill $monitor_pid >/dev/null 2>&1 || true; wait $monitor_pid >/dev/null 2>&1 || true; monitor_pid=0; test $run_status -eq 0; if test $runner = $partial; then chmod 700 $partial; mv -f $partial $final; fi; trap - EXIT HUP INT TERM"
+if errorlevel 1 goto :wsl_install_error
 
-if not exist "%VENV_DIR%\Scripts\python.exe" (
-  echo Criando ambiente isolado...
-  %PY_CMD% -m venv "%VENV_DIR%"
-  if errorlevel 1 goto :install_error
-)
-set "PYTHON=%VENV_DIR%\Scripts\python.exe"
-
-if not exist "%READY_FILE%" (
-  echo Updating the package installer...
-  "%PYTHON%" -m pip install --upgrade pip
-  if errorlevel 1 goto :install_error
-  echo Installing PyTorch and the SAM dependencies. Please wait...
-  "%PYTHON%" -m pip install torch torchvision fastapi uvicorn pillow opencv-python-headless numpy
-  if errorlevel 1 goto :install_error
-  "%PYTHON%" -m pip install "%SAM_ARCHIVE_URL%"
-  if errorlevel 1 goto :install_error
-  echo pronto>"%READY_FILE%"
-)
-
-if not exist "%CHECKPOINT%" (
-  echo Downloading the official ViT-B checkpoint, about 375 MB...
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='Continue'; Invoke-WebRequest -Uri '%MODEL_URL%' -OutFile '%CHECKPOINT%'"
-  if errorlevel 1 goto :download_error
-)
+call :commit_windows_selection
+if errorlevel 1 goto :state_error
 
 echo.
-echo Setup complete. Keep this window open.
-echo O Poligome sera aberto no navegador; espere a mensagem SAM pronto.
-start "" "%SITE_URL%"
-echo.
-"%PYTHON%" "%CONNECTOR%" --checkpoint "%CHECKPOINT%" --model-type vit_b --device auto
-echo.
-echo The connector has stopped. Open this installer again to reuse it.
+echo O instalador WSL2 foi encerrado normalmente.
+echo Para reutilizar o modelo, execute poligome-sam-start-windows.bat.
 pause
 exit /b 0
 
-:python_error
+:help
+echo Poligome SAM local - instalador para Windows e WSL2
 echo.
-echo Nao foi possivel instalar ou localizar o Python 3.
-echo Install Python 3.11 from https://www.python.org/downloads/ and open this file again.
+echo Uso:
+echo   poligome-sam-windows.bat [MODELO]
+echo   poligome-sam-windows.bat --help
+echo.
+echo SAM 2.1 é instalado automaticamente na distribuição WSL2 padrão.
+echo SAM 3 também usa WSL2 e exige GPU NVIDIA disponível no WSL,
+echo Python 3.12+ e um runtime CUDA compatível com 12.6+.
+echo.
+echo O alias sam3 é aceito e normalizado para sam3-concepts.
+echo.
+echo Variáveis de ambiente opcionais:
+echo   POLIGOME_SITE_URL       Site HTTPS aberto no navegador e autorizado no CORS.
+echo   POLIGOME_ASSET_BASE_URL Origem HTTPS do conector e dos scripts canônicos.
+echo A origem padrão dos assets é !DEFAULT_ASSET_BASE_URL!.
+exit /b 0
+
+:wsl_missing
+echo.
+echo O comando wsl.exe não foi encontrado.
+echo Instale o WSL2 com uma distribuição Linux e execute este instalador novamente.
+echo Em um PowerShell como administrador, normalmente: wsl --install
+echo.
+echo Nao quer instalar o WSL2? Ha um caminho nativo de Windows, sem WSL nenhum:
+echo baixe o poligome-sam-windows-native.ps1 na mesma tela em que voce baixou
+echo este arquivo e siga o passo a passo "Windows sem WSL2".
 pause
 exit /b 1
 
-:extract_error
+:wsl_distro_error
 echo.
-echo Nao foi possivel preparar o conector local.
+echo O WSL está instalado, mas a distribuição Linux padrão não iniciou com bash.
+echo Abra a distribuição uma vez para concluir a configuração e tente novamente.
 pause
 exit /b 1
 
-:install_error
+:wsl2_required
 echo.
-echo Installing the dependencies failed. Check your connection and try again.
+echo A distribuição Linux padrão não parece estar usando WSL2.
+echo Converta-a com: wsl --set-version NOME_DA_DISTRIBUICAO 2
+echo Consulte os nomes disponíveis com: wsl --list --verbose
 pause
 exit /b 1
 
-:download_error
+:wsl_downloader_missing
 echo.
-echo Downloading the model failed. Check your connection and try again.
+echo O WSL2 precisa de curl ou wget para baixar o instalador canônico por HTTPS.
+echo No Ubuntu, execute: sudo apt update ^&^& sudo apt install -y curl
 pause
 exit /b 1
 
-# === POLIGOME_PYTHON ===
-from __future__ import annotations
+:wsl_install_error
+echo.
+echo A instalação de !MODEL_ID! no WSL2 falhou ou foi interrompida.
+echo Downloads incompletos do instalador foram removidos; checkpoints ficam somente no WSL2.
+echo A seleção anterior foi preservada e !MODEL_ID! continua pendente para retomada.
+echo Revise a mensagem acima; o iniciador tentará retomar a instalação automaticamente.
+pause
+exit /b 1
 
-import argparse
-import base64
-import hashlib
-import io
-import os
-import threading
-from pathlib import Path
+:too_many_args
+echo Erro: informe no máximo um modelo. Use --help para ver os IDs.
+exit /b 1
 
-import cv2
-import numpy as np
-import torch
-import uvicorn
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from PIL import Image
-from segment_anything import SamPredictor, sam_model_registry
+:site_error
+echo Erro: POLIGOME_SITE_URL deve ser uma URL HTTPS absoluta, sem credenciais, consulta, fragmento ou espaços.
+exit /b 1
 
+:asset_base_error
+echo Erro: POLIGOME_ASSET_BASE_URL deve ser uma URL HTTPS absoluta, sem credenciais, consulta, fragmento ou espaços.
+exit /b 1
 
-class PredictionRequest(BaseModel):
-    image: str
-    point_coords: list[list[float]]
-    point_labels: list[int]
-    multimask_output: bool = True
+:invalid_model
+echo Erro: modelo inválido. Use --help para ver os IDs aceitos.
+exit /b 1
 
+:state_error
+echo.
+echo Não foi possível preparar ou confirmar a seleção em !SELECTED_MODEL_FILE!.
+echo Nenhum arquivo de seleção parcial foi ativado.
+pause
+exit /b 1
 
-app = FastAPI(title="Poligome SAM local", version="2.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=os.environ.get(
-        "POLIGOME_ALLOWED_ORIGIN_REGEX",
-        r"^(https://(www\.)?poligome\.com|http://(localhost|127\.0\.0\.1)(:\d+)?)$",
-    ),
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
-)
-
-predictor: SamPredictor | None = None
-predictor_lock = threading.Lock()
-current_image_hash: str | None = None
-runtime = {"device": "carregando", "model_type": "desconhecido"}
-
-
-@app.middleware("http")
-async def allow_local_browser_access(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["Access-Control-Allow-Private-Network"] = "true"
-    return response
-
-
-@app.get("/")
-def root():
-    return {"service": "Poligome SAM local", "status": "ready", **runtime}
-
-
-@app.get("/health")
-def health():
-    return {"status": "ready" if predictor is not None else "loading", **runtime}
-
-
-def decode_image(data_url: str) -> np.ndarray:
-    try:
-        encoded = data_url.split(",", 1)[1] if "," in data_url else data_url
-        image_bytes = base64.b64decode(encoded)
-        return np.asarray(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
-    except Exception as error:
-        raise HTTPException(status_code=400, detail="Imagem invalida.") from error
-
-
-def mask_to_polygon(mask: np.ndarray) -> list[list[float]]:
-    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        raise HTTPException(status_code=422, detail="SAM did not find a contour.")
-    contour = max(contours, key=cv2.contourArea)
-    epsilon = max(1.0, 0.002 * cv2.arcLength(contour, True))
-    simplified = cv2.approxPolyDP(contour, epsilon, True)
-    if len(simplified) < 3:
-        simplified = contour
-    return simplified[:, 0, :].astype(float).tolist()
-
-
-@app.post("/predict")
-def predict(payload: PredictionRequest):
-    global current_image_hash
-    if predictor is None:
-        raise HTTPException(status_code=503, detail="O modelo ainda esta carregando.")
-    if not payload.point_coords or len(payload.point_coords) != len(payload.point_labels):
-        raise HTTPException(status_code=400, detail="Envie pontos e rotulos correspondentes.")
-    image_hash = hashlib.sha256(payload.image.encode("utf-8")).hexdigest()
-    image = decode_image(payload.image)
-    coordinates = np.asarray(payload.point_coords, dtype=np.float32)
-    labels = np.asarray(payload.point_labels, dtype=np.int32)
-    with predictor_lock:
-        reused_embedding = current_image_hash == image_hash
-        if not reused_embedding:
-            predictor.set_image(image)
-            current_image_hash = image_hash
-        masks, scores, _ = predictor.predict(
-            point_coords=coordinates,
-            point_labels=labels,
-            multimask_output=True,
-        )
-    best = int(np.argmax(scores))
-    return {
-        "polygon": mask_to_polygon(masks[best]),
-        "score": float(scores[best]),
-        "width": int(image.shape[1]),
-        "height": int(image.shape[0]),
-        "reused_embedding": reused_embedding,
-    }
-
-
-def main():
-    global predictor
-    parser = argparse.ArgumentParser(description="Runs SAM locally for Poligome.")
-    parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--model-type", choices=["vit_b", "vit_l", "vit_h"], default="vit_b")
-    parser.add_argument("--device", choices=["auto", "cpu", "cuda", "mps"], default="auto")
-    parser.add_argument("--port", type=int, default=7860)
-    args = parser.parse_args()
-    checkpoint = Path(args.checkpoint).expanduser().resolve()
-    if not checkpoint.is_file():
-        raise SystemExit(f"Checkpoint not found: {checkpoint}")
-    mps_available = bool(getattr(torch.backends, "mps", None) and torch.backends.mps.is_available())
-    if args.device == "auto":
-        device = "cuda" if torch.cuda.is_available() else "mps" if mps_available else "cpu"
-    else:
-        device = args.device
-    if device == "cuda" and not torch.cuda.is_available():
-        raise SystemExit("CUDA is not available. Use --device cpu.")
-    if device == "mps" and not mps_available:
-        raise SystemExit("Apple Silicon/MPS is not available. Use --device cpu.")
-    print(f"Carregando SAM {args.model_type} em {device}...")
-    sam = sam_model_registry[args.model_type](checkpoint=str(checkpoint))
-    sam.to(device=device)
-    sam.eval()
-    predictor = SamPredictor(sam)
-    runtime.update({"device": device, "model_type": args.model_type})
-    print(f"SAM pronto em http://127.0.0.1:{args.port}")
-    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")
-
-
-if __name__ == "__main__":
-    main()

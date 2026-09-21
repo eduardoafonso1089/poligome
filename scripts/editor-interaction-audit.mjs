@@ -149,7 +149,7 @@ async function desktop(browser) {
   });
 
   await check("desktop", "SAM modal", async () => {
-    await (await button(page,/Segmentar com SAM \(S\)|SAM/i)).click(); const dialog=page.getByRole('dialog',{name:/SAM local|SAM/i}).first(); await dialog.waitFor({state:'visible'}); await dialog.getByRole('button',{name:/Fechar|Close/i}).first().click();
+    await (await button(page,/Segmentar com SAM \(S\)|SAM/i)).click(); const dialog=page.getByRole('dialog',{name:/Segment Anything|SAM/i}).first(); await dialog.waitFor({state:'visible'}); await dialog.getByRole('button',{name:/Fechar|Close/i}).first().click();
   });
 
   await check("desktop", "Advanced polygon tools enabled + Duplicate works", async () => {
@@ -198,7 +198,7 @@ async function mobile(browser) {
 
   await check("mobile","Pan control toggles",async()=>{ const pan=page.locator('.drawing-actions').getByRole('button',{name:/Mover canvas|Pan/i}).first(); await pan.waitFor({state:'visible'}); await pan.tap(); const toolbar=page.getByRole('button',{name:/Mover canvas \(H\)|Pan/i}).first(); if(await toolbar.getAttribute('aria-pressed')!=="true") throw new Error("Pan inactive"); await pan.tap(); });
 
-  await check("mobile","SAM modal",async()=>{ await (await button(page,/Segmentar com SAM \(S\)|SAM/i)).tap(); const dialog=page.getByRole('dialog',{name:/SAM local|SAM/i}).first(); await dialog.waitFor({state:'visible'}); await dialog.getByRole('button',{name:/Fechar|Close/i}).first().tap(); });
+  await check("mobile","SAM modal",async()=>{ await (await button(page,/Segmentar com SAM \(S\)|SAM/i)).tap(); const dialog=page.getByRole('dialog',{name:/Segment Anything|SAM/i}).first(); await dialog.waitFor({state:'visible'}); await dialog.getByRole('button',{name:/Fechar|Close/i}).first().tap(); });
 
   await page.screenshot({path:"interaction-audit/mobile.png"}); result("mobile","No page errors",pageErrors.length===0,pageErrors.join(" | ")); await context.close();
 }
