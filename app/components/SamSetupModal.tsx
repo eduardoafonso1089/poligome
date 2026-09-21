@@ -635,10 +635,6 @@ export default function SamSetupModal({
     },
   } as const;
   const chosenPath = installPaths[installOs];
-  const windowsPlatformLabel = "Windows · WSL2";
-  const unixPlatformLabel = model.family === "sam3"
-    ? "Linux · NVIDIA CUDA"
-    : "Linux · macOS (Apple Silicon) · WSL2";
 
   return <div
     className="modal-backdrop sam-catalog-backdrop"
