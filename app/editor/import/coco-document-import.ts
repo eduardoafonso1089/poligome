@@ -32,6 +32,8 @@ export type CocoDocumentImportOptions = {
   selectedAnnotationIndexes?: Iterable<number>;
   geometryTypes?: Iterable<CocoGeometry>;
   unlabeledName?: string;
+  /** Ver `boxAsFallback` em CocoImportContext. Ligado só pelo BYOM. */
+  boxAsFallback?: boolean;
 };
 export type CocoDocumentPlanOptions = { unlabeledName?: string };
 export type CocoDocumentImportResult = { labels: Label[]; annotations: EditorAnnotation[]; imported: number; unmatched: number };
@@ -160,6 +162,7 @@ export function importCocoDocument(
       annotationId: () => makeId("annotation"),
       categoryKeypointNames: keypointNames,
       pointLabelId: (name) => ensureLabel(name, "keypoint").id,
+      boxAsFallback: options.boxAsFallback,
     });
     annotations.push(...converted);
     if (!converted.length) unmatched += 1;

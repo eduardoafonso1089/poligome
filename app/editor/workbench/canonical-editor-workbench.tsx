@@ -453,7 +453,9 @@ export function CanonicalEditorWorkbench() {
       const result = importCocoDocument(
         body.coco, assets, labels,
         (prefix) => makeId(prefix === "annotation" ? origin : prefix),
-        { unlabeledName: copy.unlabeled },
+        // O contrato do BYOM diz que a caixa vale quando o modelo não segmenta;
+        // sem isto, um objeto com os dois campos vira polígono e caixa soltos.
+        { unlabeledName: copy.unlabeled, boxAsFallback: true },
       );
       if (!result.annotations.length) { setMessage(`${modelId}: nenhuma anotação devolvida.`); return; }
 

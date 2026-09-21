@@ -38,8 +38,7 @@ O `list` deve mostrar os dois no ar:
 
 No editor, abra o botão do modelo de IA: os dois aparecem sob **BYOM · seu
 modelo**. Escolha um, abra uma imagem e clique em **Rodar BYOM**. O resultado
-aparece tracejado sobre a imagem, como proposta, e só vira anotação quando você
-clica em **Salvar**.
+entra direto na lista de anotações, já desenhado e pronto para você revisar.
 
 Os dois exemplos existem para serem um molde. Quando quiser trocar o miolo pelo
 seu modelo, o **Passo a passo** mais abaixo mostra o caminho inteiro: você
@@ -187,14 +186,19 @@ Como cada campo é lido:
 | --- | --- |
 | `categories[].name` | vira a classe da anotação; classes iguais às existentes são reaproveitadas, e as novas ganham cor automática |
 | `segmentation` | cada anel vira um polígono. Só o formato de lista de pontos (`[x, y, x, y, …]`) é aceito; RLE não |
-| `bbox` | `[x, y, largura, altura]`, usado quando não há `segmentation` |
+| `bbox` | `[x, y, largura, altura]`. É alternativa, não geometria à parte: quando a mesma anotação traz uma `segmentation` aproveitável, a caixa é ignorada e só o polígono é desenhado |
 | `keypoints` | trios `x, y, visibilidade` no formato COCO; cada ponto com visibilidade diferente de `0` vira uma anotação de ponto |
 | `category_id` | liga a anotação à classe; ausente, a anotação entra como não rotulada |
 | `images` | opcional. Quando ausente, o conector preenche com a imagem que enviou |
 
 Cada anotação precisa trazer ao menos um entre `segmentation`, `bbox` e
 `keypoints` — sem geometria não há o que desenhar, e o conector recusa a
-resposta inteira com uma mensagem dizendo qual anotação está incompleta.
+resposta inteira com uma mensagem dizendo qual anotação está incompleta. Não
+basta o campo existir: `segmentation: []` e `bbox: [1, 2]` são recusados do
+mesmo jeito, porque o editor não teria o que fazer com eles. O conector confere
+o que de fato dá para desenhar — um anel com ao menos três pontos, uma caixa com
+os quatro números, um ponto visível — para que uma resposta malformada apareça
+como erro do contêiner, e não como "o modelo não encontrou nada".
 
 `score` é opcional e hoje serve apenas de informação; o editor não filtra por
 ele. Se o seu modelo tem um limiar de confiança, aplique-o dentro do contêiner.
@@ -361,18 +365,18 @@ anotar: nada é desinstalado, o conector segue conectado e as listas continuam
 iguais.
 São caminhos independentes: o SAM segmenta o que você clica, o BYOM anota a
 imagem inteira, e as máscaras de um não alteram nem substituem as do outro — as
-anotações do BYOM entram somadas às que já existem.
+anotações do BYOM entram somadas às que já existem. A única exceção é reexecutar
+o mesmo modelo na mesma imagem, logo abaixo.
 
-O resultado não entra direto na lista de anotações: ele aparece como
-**proposta**, desenhada em tracejado sobre a imagem, e a barra oferece
-**Salvar** e **Descartar**. É o mesmo contrato do SAM, em que a máscara só vira
-anotação no salvar. Trocar de imagem esconde os botões, mas a proposta continua
-guardada e reaparece ao voltar.
+O resultado entra direto na lista de anotações: não há etapa de proposta nem
+botão de **Salvar**. O que o contêiner devolveu já está desenhado sobre a
+imagem, com as classes que ele indicou, e a revisão é feita ali mesmo — apagando
+ou corrigindo o que não serve, como em qualquer anotação.
 
-Salvar uma reexecução **substitui** o resultado anterior daquele modelo naquela
-imagem, em vez de empilhar máscaras idênticas. Cada anotação criada guarda a origem
-(`byom:<model-id>`), então anotações feitas à mão, as de outro modelo e as da
-mesma origem em outras imagens ficam intactas. O aviso na tela diz quantas foram
+Reexecutar o mesmo modelo na mesma imagem **substitui** o resultado anterior, em
+vez de empilhar máscaras idênticas. A origem viaja no id de cada anotação
+(`byom:<model-id>`), então anotações feitas à mão, as de outro modelo e as do
+mesmo modelo em outras imagens ficam intactas. O aviso na tela diz quantas foram
 substituídas.
 
 Clicar num modelo abre a ficha dele: explicação automática do que exporta,
