@@ -48,7 +48,8 @@ Local connectors accept browser requests from the official Poligome origins and 
 
 ## Run Poligome locally
 
-Requirements: **Node.js >= 22.13.0**, npm, and Git if you are cloning the repository.
+Requirements: Git if you are cloning the repository. The installers require an
+internet connection when they need to set up Node.js >= 22.13.0.
 
 ### Linux
 
@@ -57,7 +58,6 @@ git clone https://github.com/eduardoafonso1089/poligome.git
 cd poligome
 chmod +x install.sh
 ./install.sh
-npm run dev
 ```
 
 ### Windows (PowerShell)
@@ -69,7 +69,9 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 npm run dev
 ```
 
-Both installers validate the Node.js version and run `npm ci` using the lockfile as the dependency source of truth. They do not silently install or upgrade Node.js.
+Both installers validate the Node.js version and run `npm ci` using the lockfile as the dependency source of truth. If Node.js is missing or older than 22.13.0, the Linux installer downloads an official Node.js release to its user cache (without `sudo`), verifies its SHA-256 checksum, and prints the exact command needed to run the app with that cached runtime. The Windows installer first tries `winget`, then downloads and runs the official MSI installer. Windows may request administrator permission for the MSI fallback.
+
+After the installer finishes, copy the `Run:` command it prints. With an already compatible Node.js, this is simply `npm run dev`; after a Linux download it prepends the cached Node.js directory to `PATH` for that command.
 
 Manual installation is also available:
 
