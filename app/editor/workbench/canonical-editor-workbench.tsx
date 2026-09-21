@@ -3,6 +3,8 @@
 /** Onde o runtime atende. Mesma convenção do endpoint do conector SAM. */
 const RUNTIME_ENDPOINT_KEY = "poligome-runtime-endpoint";
 
+
+
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { Asset, Label } from "../../lib/types";
@@ -37,6 +39,7 @@ import {
   runtimeInfer,
   RuntimeError,
 } from "../../lib/runtime-client";
+import { RuntimeProgressBar, type RuntimeProgress } from "../presentation/runtime-progress-bar";
 import {
   ensureLabels,
   reconcileDrafts,
@@ -130,6 +133,18 @@ export function CanonicalEditorWorkbench() {
   const objectUrls = useRef<string[]>([]);
   // A execução em curso, para cancelá-la ao trocar de imagem ou recomeçar.
   const runtimeRunRef = useRef<AbortController | null>(null);
+  /**
+   * As classes como estão agora, não como estavam quando este callback nasceu.
+   *
+   * Um lote roda várias imagens com o mesmo fechamento, e `labels` ali dentro
+   * fica congelado no valor inicial. Sem esta referência, a segunda imagem
+   * recomeça da lista original e o `setLabels` dela apaga as classes que a
+   * primeira criou — as anotações da primeira passam a apontar para ids que não
+   * existem mais, e o painel mostra o id cru no lugar do nome.
+   */
+  const labelsRef = useRef(labels);
+  useEffect(() => { labelsRef.current = labels; }, [labels]);
+  const [runtimeProgress, setRuntimeProgress] = useState<RuntimeProgress | null>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const annotationImportRef = useRef<CocoImportHandle>(null);
@@ -472,7 +487,7 @@ export function CanonicalEditorWorkbench() {
     target: Asset,
     asked: { x: number; y: number; width: number; height: number } | undefined,
     controller: AbortController,
-    note: (text: string) => void,
+    note: (done: number, total: number) => void,
   ) => {
     const stored = (() => { try { return localStorage.getItem(RUNTIME_ENDPOINT_KEY); } catch { return null; } })();
     const endpoint = stored || DEFAULT_RUNTIME_ENDPOINT;
@@ -506,10 +521,8 @@ export function CanonicalEditorWorkbench() {
       : undefined;
 
     const drafted = new Map<string, EditorAnnotation>();
-    const fallbackLabelId = labels.find((label) => label.id === activeLabel)?.id
-      ?? labels[0]?.id ?? EMPTY_LABELS[0].id;
-    // As classes vão crescendo: um tile posterior pode trazer uma que ainda não existe.
-    let working = labels;
+    const fallbackLabelId = labelsRef.current.find((label) => label.id === activeLabel)?.id
+      ?? labelsRef.current[0]?.id ?? EMPTY_LABELS[0].id;
     let produced = 0;
 
     try {
@@ -518,16 +531,18 @@ export function CanonicalEditorWorkbench() {
       })) {
         if (controller.signal.aborted) return 0;
 
-        if (event.type === "progress") { note(`${event.done}/${event.total}`); continue; }
+        if (event.type === "progress") { note(event.done, event.total); continue; }
         if (event.type === "error") { throw new RuntimeError(event.error.code, event.error.message); }
 
         // Cada classe que o modelo nomeia vira uma classe do editor, com cor
         // própria. A anotação guarda o id dela, que é por onde o canvas pinta.
+        // As classes crescem tile a tile e imagem a imagem, sempre a partir do
+        // que existe agora — por isso a referência, e não o fechamento.
         const names = event.annotations.flatMap((a) => a.label ? [a.label] : []);
-        const resolved = ensureLabels(names, working, makeId);
-        if (resolved.labels.length !== working.length) {
-          working = resolved.labels;
-          setLabels(working);
+        const resolved = ensureLabels(names, labelsRef.current, makeId);
+        if (resolved.labels.length !== labelsRef.current.length) {
+          labelsRef.current = resolved.labels;
+          setLabels(resolved.labels);
         }
 
         const converted = toEditorAnnotations(event.annotations, {
@@ -561,7 +576,7 @@ export function CanonicalEditorWorkbench() {
       throw error;
     }
     return produced;
-  }, [activeLabel, editor, labels, makeId]);
+  }, [activeLabel, editor, makeId]);
 
   const describeFailure = useCallback((error: unknown) =>
     error instanceof RuntimeError ? `runtime: ${error.message}` : copy.errSamUnreachable, [copy]);
@@ -580,16 +595,18 @@ export function CanonicalEditorWorkbench() {
     runtimeRunRef.current?.abort();
     runtimeRunRef.current = controller;
 
+    setRuntimeProgress({ imageName: asset.name, imageIndex: 1, imageCount: 1, tilesDone: 0, tilesTotal: 0 });
     try {
       if (asked) setMessage(`runtime: região ${Math.round(asked.width)}x${Math.round(asked.height)}…`);
-      const count = await inferAsset(asset, asked, controller, (text) => setMessage(`runtime: ${text}`));
+      const count = await inferAsset(asset, asked, controller, (done, total) =>
+        setRuntimeProgress({ imageName: asset.name, imageIndex: 1, imageCount: 1, tilesDone: done, tilesTotal: total }));
       if (!controller.signal.aborted) {
         setMessage(`runtime: ${count} ${count === 1 ? "anotação" : "anotações"}.`);
       }
     } catch (error) {
       if (!controller.signal.aborted) setMessage(describeFailure(error));
     } finally {
-      if (runtimeRunRef.current === controller) runtimeRunRef.current = null;
+      if (runtimeRunRef.current === controller) { runtimeRunRef.current = null; setRuntimeProgress(null); }
     }
   }, [asset, copy, describeFailure, editor, inferAsset]);
 
@@ -615,9 +632,12 @@ export function CanonicalEditorWorkbench() {
       for (const [index, target] of assets.entries()) {
         if (controller.signal.aborted) return;
         const position = `${index + 1}/${assets.length}`;
+        const at = (tilesDone: number, tilesTotal: number) => setRuntimeProgress({
+          imageName: target.name, imageIndex: index + 1, imageCount: assets.length, tilesDone, tilesTotal,
+        });
+        at(0, 0);
         try {
-          total += await inferAsset(target, undefined, controller, (text) =>
-            setMessage(`runtime: ${position} ${target.name} · ${text}`));
+          total += await inferAsset(target, undefined, controller, at);
         } catch (error) {
           if (controller.signal.aborted) return;
           failed.push(target.name);
@@ -629,7 +649,7 @@ export function CanonicalEditorWorkbench() {
         ? `runtime: ${total} anotações em ${assets.length - failed.length} de ${assets.length} imagens; falhou em ${failed.join(", ")}.`
         : `runtime: ${total} ${total === 1 ? "anotação" : "anotações"} em ${assets.length} imagens.`);
     } finally {
-      if (runtimeRunRef.current === controller) runtimeRunRef.current = null;
+      if (runtimeRunRef.current === controller) { runtimeRunRef.current = null; setRuntimeProgress(null); }
     }
   }, [assets, copy, describeFailure, inferAsset]);
 
@@ -1469,6 +1489,7 @@ export function CanonicalEditorWorkbench() {
   } satisfies PreRefactorChromeProps;
 
   return <main className="shell" aria-label={`${copy.appTitle}: ${projectName}`}>
+    {runtimeProgress && <RuntimeProgressBar progress={runtimeProgress} copy={copy} />}
     <input ref={projectInputRef} type="file" accept=".plgm,application/vnd.poligome.project+zip" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file && (!projectDirty || window.confirm(copy.replaceUnsavedProject))) void openProject(file); event.currentTarget.value = ""; }} />
     <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/bmp,image/gif" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />
     <input ref={relinkInputRef} type="file" accept="image/*,.tif,.tiff" multiple hidden onChange={(event) => { void relinkProjectImages(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />

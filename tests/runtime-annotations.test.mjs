@@ -266,3 +266,46 @@ test('sameGeometry compara vértices de um polígono', () => {
   assert.ok(sameGeometry(poly('a', 1), poly('b', 1)));
   assert.ok(!sameGeometry(poly('a', 1), poly('b', 2)));
 });
+
+// ---------------------------------------------------------------------------
+// Classes acumulam entre tiles e entre imagens
+// ---------------------------------------------------------------------------
+
+test('a segunda chamada parte do que a primeira criou, não da lista original', () => {
+  // É o bug do lote: partir sempre da lista original faz a segunda imagem
+  // gerar ids novos para as mesmas classes e apagar as da primeira, deixando
+  // as anotações dela apontando para ids que não existem mais.
+  const makeId = ids();
+  const first = ensureLabels(['car'], [], makeId);
+  const second = ensureLabels(['person'], first.labels, makeId);
+
+  assert.equal(second.labels.length, 2);
+  assert.deepEqual(second.labels.map(l => l.name), ['car', 'person']);
+  // O id da primeira classe sobrevive: as anotações dela continuam válidas.
+  assert.equal(second.labels[0].id, first.labels[0].id);
+});
+
+test('a mesma classe numa segunda imagem reusa o id, não cria outro', () => {
+  const makeId = ids();
+  const first = ensureLabels(['car'], [], makeId);
+  const second = ensureLabels(['car'], first.labels, makeId);
+
+  assert.equal(second.labels.length, 1);
+  assert.equal(second.byName.get('car').id, first.byName.get('car').id);
+});
+
+test('classes de projeto preexistentes não são descartadas', () => {
+  const existing = [{ id: 'label-minha', name: 'Telhado', color: '#abcdef', key: 't' }];
+  const { labels } = ensureLabels(['car'], existing, ids());
+  assert.equal(labels.length, 2);
+  assert.equal(labels[0].id, 'label-minha');
+  assert.equal(labels[0].key, 't', 'preserva o atalho de teclado da classe');
+});
+
+test('toda classe devolvida tem id, nome e cor — o painel resolve por id', () => {
+  const { labels } = ensureLabels(['car', 'person', 'tree'], [], ids());
+  for (const label of labels) {
+    assert.ok(label.id && label.name && label.color, `classe incompleta: ${JSON.stringify(label)}`);
+    assert.notEqual(label.id, label.name, 'id e nome não podem ser a mesma coisa');
+  }
+});

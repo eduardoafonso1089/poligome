@@ -505,3 +505,35 @@ html[data-theme="light"]{--ink:#29262F;--muted:#6E6A75;--line:#DEDCE4;--green:#7
 .editor .canvas>img,.editor .canvas>svg{width:100%;height:100%}
 
 .demo-import{margin:0 13px 8px;width:calc(100% - 26px);height:31px;border:1px solid var(--tool-active-border);border-radius:8px;background:var(--tool-active-bg);color:var(--btn-accent-ink);display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;font-weight:700;cursor:pointer}.demo-import:disabled{opacity:.55;cursor:wait}.dataset-tabs{grid-template-columns:1fr 1fr 1fr}.dataset-tabs button{display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px}.quality-data{padding:12px}.quality-data section,.review-panel section{margin-bottom:12px;padding:11px;border:1px solid var(--line);border-radius:9px;background:var(--surface-soft)}.quality-data section>b,.review-panel section>b{display:block;font-size:11px;color:var(--btn-accent-ink)}.quality-data section>small,.review-panel section>small{display:block;margin:4px 0 9px;font-size:10px;color:var(--muted);line-height:1.4}.quality-bar{display:grid;grid-template-columns:minmax(0,1fr) 72px 24px;align-items:center;gap:6px;margin:7px 0;font-size:10px}.quality-bar span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.quality-bar i{height:6px;border-radius:6px;background:var(--theme-hover);overflow:hidden}.quality-bar em{display:block;height:100%;border-radius:6px;background:var(--green)}.quality-row{display:grid;grid-template-columns:9px minmax(0,1fr) auto;gap:6px;align-items:center;margin:7px 0;font-size:10px}.quality-row i{width:8px;height:8px;border-radius:2px}.quality-row span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.quality-row small{grid-column:2/-1;color:var(--muted)}.quality-suggestions p,.review-hint{margin:6px 0 0;font-size:10px;line-height:1.45;color:var(--muted)}.review-panel{padding:12px}.review-panel select{width:100%;height:30px;border:1px solid var(--line);border-radius:6px;background:var(--control-bg);color:var(--ink);padding:0 7px;font-size:11px}.review-score{display:flex;align-items:center;gap:2px}.review-score button{width:27px;height:27px;border:0;border-radius:5px;background:transparent;color:var(--tool-disabled-ink);font-size:18px;cursor:pointer}.review-score button.selected{color:var(--amber);background:var(--amber-bg)}.review-score small{margin-left:5px;font-size:10px;color:var(--muted)}
+
+/* Barra do runtime: fica acima de tudo porque um lote continua correndo
+   enquanto a pessoa olha outra imagem, e ela precisa ver isso de onde estiver. */
+.runtime-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 22px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  background: color-mix(in srgb, var(--panel, #1c1f1e) 92%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent, #6c8cff) 40%, transparent);
+  overflow: hidden;
+}
+.runtime-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--accent, #6c8cff) 28%, transparent);
+  transition: width 180ms ease-out;
+}
+.runtime-progress-text {
+  position: relative;
+  padding: 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--text, #e7ece9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
