@@ -37,7 +37,13 @@ import {
   runtimeInfer,
   RuntimeError,
 } from "../../lib/runtime-client";
-import { ensureLabels, toEditorAnnotations, withContext } from "../../lib/runtime-annotations";
+import {
+  ensureLabels,
+  reconcileDrafts,
+  toEditorAnnotations,
+  withContext,
+  withoutEdited,
+} from "../../lib/runtime-annotations";
 import { Check, Crosshair, ListRestart, LoaderCircle, Minus, Plus, Settings2, Sparkles, Square, X } from "lucide-react";
 import { requestSamAnnotations } from "../models/model-output";
 import type { SamBoxPrompt, SamPrompt } from "../../lib/types";
@@ -453,80 +459,67 @@ export function CanonicalEditorWorkbench() {
    * tiles, chega no lugar delas — senão o objeto que aparece em dois tiles
    * vizinhos ficaria duplicado na tela.
    */
-  const runRuntimeModel = useCallback(async () => {
-    if (!asset) { setMessage(copy.imageNotLoaded); return; }
-    leaveDemoTutorial();
-
+  /**
+   * Roda o poligome-runtime sobre uma imagem, desenhando conforme chega.
+   *
+   * Um resultado parcial é rascunho: o final vem com tudo já passado pela
+   * junção entre tiles, e trocar um pelo outro evita ver o mesmo objeto duas
+   * vezes. Só que o streaming existe justamente para a pessoa começar antes do
+   * fim — então o que ela editou no meio do caminho fica, e o que o modelo
+   * diria sobre aquele mesmo objeto sai do conjunto final.
+   */
+  const inferAsset = useCallback(async (
+    target: Asset,
+    asked: { x: number; y: number; width: number; height: number } | undefined,
+    controller: AbortController,
+    note: (text: string) => void,
+  ) => {
     const stored = (() => { try { return localStorage.getItem(RUNTIME_ENDPOINT_KEY); } catch { return null; } })();
     const endpoint = stored || DEFAULT_RUNTIME_ENDPOINT;
 
-    const controller = new AbortController();
-    runtimeRunRef.current?.abort();
-    runtimeRunRef.current = controller;
+    // Os bytes sobem uma vez; a inferência cita a imagem pelo id depois.
+    const fetched = await fetch(target.src, { signal: controller.signal });
+    if (!fetched.ok) throw new Error("asset");
+    const registered = await registerRuntimeImage(
+      endpoint, target.id, await fetched.blob(), controller.signal,
+    );
 
-    const selected = editor.selectedAnnotation?.asset === asset.id
-      ? editor.selectedAnnotation
-      : null;
+    // O runtime responde no pixel do arquivo que recebeu, e o editor guarda no
+    // pixel do asset. Escalar a partir do que o upload informou dispensa
+    // depender de os dois baterem.
+    const scaleX = registered.width ? (target.width ?? registered.width) / registered.width : 1;
+    const scaleY = registered.height ? (target.height ?? registered.height) / registered.height : 1;
 
-    const drafted: string[] = [];
+    // O que se pede é um pouco maior que o pedido: um recorte colado no objeto
+    // chega ao modelo sem entorno. A margem não alarga a resposta, porque o que
+    // volta é recortado em `asked`.
+    const region = asked
+      ? (() => {
+          const padded = withContext(
+            asked, target.width ?? registered.width, target.height ?? registered.height,
+          );
+          return {
+            x: padded.x / scaleX, y: padded.y / scaleY,
+            width: padded.width / scaleX, height: padded.height / scaleY,
+          };
+        })()
+      : undefined;
+
+    const drafted = new Map<string, EditorAnnotation>();
     const fallbackLabelId = labels.find((label) => label.id === activeLabel)?.id
       ?? labels[0]?.id ?? EMPTY_LABELS[0].id;
-    // As classes vão crescendo ao longo do fluxo: o tile seguinte pode trazer
-    // uma que ainda não existe.
+    // As classes vão crescendo: um tile posterior pode trazer uma que ainda não existe.
     let working = labels;
+    let produced = 0;
 
     try {
-      // Os bytes sobem uma vez; a inferência cita a imagem pelo id depois.
-      const response = await fetch(asset.src, { signal: controller.signal });
-      if (!response.ok) throw new Error("asset");
-      const registered = await registerRuntimeImage(
-        endpoint, asset.id, await response.blob(), controller.signal,
-      );
-
-      // O runtime responde no pixel do arquivo que recebeu, e o editor guarda
-      // no pixel do asset. Os dois coincidem no caso comum; escalar a partir do
-      // que o upload informou é o que dispensa depender disso.
-      const scaleX = registered.width ? (asset.width ?? registered.width) / registered.width : 1;
-      const scaleY = registered.height ? (asset.height ?? registered.height) / registered.height : 1;
-
-      // Uma caixa selecionada vira a região a inferir. É a diferença entre
-      // varrer a imagem inteira em grade e perguntar sobre uma coisa só: se a
-      // região couber no que o adaptador aceita numa chamada, o runtime nem
-      // fatia, e o resultado sai com a geometria da região em vez da do tile.
-      // A caixa desenhada, em pixel do asset. É ela que limita a resposta.
-      const asked = selected?.type === "box"
-        ? { x: selected.x, y: selected.y, width: selected.width, height: selected.height }
-        : undefined;
-
-      // O que se pede ao runtime é um pouco maior: um recorte colado no objeto
-      // chega ao modelo sem entorno, e um classificador decide pela textura. A
-      // margem não alarga a resposta, porque o que volta é recortado em `asked`.
-      const region = asked
-        ? (() => {
-            const padded = withContext(asked, asset.width ?? registered.width, asset.height ?? registered.height);
-            // A seleção está em pixel do asset; o runtime raciocina em pixel do
-            // arquivo que recebeu. Mesma conta da volta, ao contrário.
-            return {
-              x: padded.x / scaleX, y: padded.y / scaleY,
-              width: padded.width / scaleX, height: padded.height / scaleY,
-            };
-          })()
-        : undefined;
-      if (asked) setMessage(`runtime: região ${Math.round(asked.width)}x${Math.round(asked.height)}…`);
-
       for await (const event of runtimeInfer({
-        endpoint, imageId: asset.id, region, signal: controller.signal,
+        endpoint, imageId: target.id, region, signal: controller.signal,
       })) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) return 0;
 
-        if (event.type === "progress") {
-          setMessage(`runtime: ${event.done}/${event.total}`);
-          continue;
-        }
-        if (event.type === "error") {
-          setMessage(`runtime: ${event.error.message}`);
-          return;
-        }
+        if (event.type === "progress") { note(`${event.done}/${event.total}`); continue; }
+        if (event.type === "error") { throw new RuntimeError(event.error.code, event.error.message); }
 
         // Cada classe que o modelo nomeia vira uma classe do editor, com cor
         // própria. A anotação guarda o id dela, que é por onde o canvas pinta.
@@ -538,7 +531,7 @@ export function CanonicalEditorWorkbench() {
         }
 
         const converted = toEditorAnnotations(event.annotations, {
-          asset: asset.id,
+          asset: target.id,
           fallbackLabelId,
           makeId: () => makeId("runtime"),
           labelByName: resolved.byName,
@@ -548,36 +541,114 @@ export function CanonicalEditorWorkbench() {
         });
 
         if (event.partial) {
-          drafted.push(...converted.map((annotation) => annotation.id));
+          for (const annotation of converted) drafted.set(annotation.id, annotation);
           editor.appendAnnotations(converted, false);
           setSessionDirty(true);
           continue;
         }
 
-        // O final manda: fora os rascunhos, entra o conjunto já unificado.
-        if (drafted.length) editor.deleteAnnotations(drafted);
-        editor.appendAnnotations(converted, false);
+        const { discard, keptOriginals } = reconcileDrafts(drafted, editor.annotations);
+        if (discard.length) editor.deleteAnnotations(discard);
+        const settled = withoutEdited(converted, keptOriginals);
+        if (settled.length) editor.appendAnnotations(settled, false);
         setSessionDirty(true);
-        setMessage(`runtime: ${converted.length} ${converted.length === 1 ? "anotação" : "anotações"}.`);
+        produced = settled.length + keptOriginals.length;
       }
     } catch (error) {
-      if (controller.signal.aborted) return;
-      if (drafted.length) editor.deleteAnnotations(drafted);
-      setMessage(error instanceof RuntimeError ? `runtime: ${error.message}` : copy.errSamUnreachable);
+      // O que a pessoa editou sobrevive a uma falha; o resto era rascunho.
+      const { discard } = reconcileDrafts(drafted, editor.annotations);
+      if (discard.length) editor.deleteAnnotations(discard);
+      throw error;
+    }
+    return produced;
+  }, [activeLabel, editor, labels, makeId]);
+
+  const describeFailure = useCallback((error: unknown) =>
+    error instanceof RuntimeError ? `runtime: ${error.message}` : copy.errSamUnreachable, [copy]);
+
+  /** A imagem aberta, restrita à caixa selecionada quando houver uma. */
+  const runRuntimeModel = useCallback(async () => {
+    if (!asset) { setMessage(copy.imageNotLoaded); return; }
+    leaveDemoTutorial();
+
+    const selected = editor.selectedAnnotation?.asset === asset.id ? editor.selectedAnnotation : null;
+    const asked = selected?.type === "box"
+      ? { x: selected.x, y: selected.y, width: selected.width, height: selected.height }
+      : undefined;
+
+    const controller = new AbortController();
+    runtimeRunRef.current?.abort();
+    runtimeRunRef.current = controller;
+
+    try {
+      if (asked) setMessage(`runtime: região ${Math.round(asked.width)}x${Math.round(asked.height)}…`);
+      const count = await inferAsset(asset, asked, controller, (text) => setMessage(`runtime: ${text}`));
+      if (!controller.signal.aborted) {
+        setMessage(`runtime: ${count} ${count === 1 ? "anotação" : "anotações"}.`);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) setMessage(describeFailure(error));
     } finally {
       if (runtimeRunRef.current === controller) runtimeRunRef.current = null;
     }
-  }, [activeLabel, asset, copy, editor, labels, makeId]);
+  }, [asset, copy, describeFailure, editor, inferAsset]);
+
+  /**
+   * Todas as imagens do projeto, uma depois da outra.
+   *
+   * Sequencial e não em paralelo: do outro lado há um modelo só, e disparar
+   * tudo de uma vez apenas enfileiraria no runtime enquanto ocupa memória aqui.
+   * Uma imagem que falha não interrompe as demais — anotar trinta e perder a
+   * trigésima primeira é melhor do que parar na primeira que der errado.
+   */
+  const runRuntimeBatch = useCallback(async () => {
+    if (!assets.length) { setMessage(copy.imageNotLoaded); return; }
+    leaveDemoTutorial();
+
+    const controller = new AbortController();
+    runtimeRunRef.current?.abort();
+    runtimeRunRef.current = controller;
+
+    let total = 0;
+    const failed: string[] = [];
+    try {
+      for (const [index, target] of assets.entries()) {
+        if (controller.signal.aborted) return;
+        const position = `${index + 1}/${assets.length}`;
+        try {
+          total += await inferAsset(target, undefined, controller, (text) =>
+            setMessage(`runtime: ${position} ${target.name} · ${text}`));
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          failed.push(target.name);
+          setMessage(`runtime: ${position} ${target.name} · ${describeFailure(error)}`);
+        }
+      }
+      if (controller.signal.aborted) return;
+      setMessage(failed.length
+        ? `runtime: ${total} anotações em ${assets.length - failed.length} de ${assets.length} imagens; falhou em ${failed.join(", ")}.`
+        : `runtime: ${total} ${total === 1 ? "anotação" : "anotações"} em ${assets.length} imagens.`);
+    } finally {
+      if (runtimeRunRef.current === controller) runtimeRunRef.current = null;
+    }
+  }, [assets, copy, describeFailure, inferAsset]);
+
 
   useEffect(() => {
     const run = () => { void runRuntimeModel(); };
+    const runAll = () => { void runRuntimeBatch(); };
     window.addEventListener("poligome:run-runtime", run);
-    return () => window.removeEventListener("poligome:run-runtime", run);
-  }, [runRuntimeModel]);
+    window.addEventListener("poligome:run-runtime-all", runAll);
+    return () => {
+      window.removeEventListener("poligome:run-runtime", run);
+      window.removeEventListener("poligome:run-runtime-all", runAll);
+    };
+  }, [runRuntimeModel, runRuntimeBatch]);
 
-  // Sair da imagem cancela o que estiver correndo: anotação de outra imagem
-  // chegando no canvas seria pior do que resultado nenhum.
-  useEffect(() => () => runtimeRunRef.current?.abort(), [asset?.id]);
+  // Fechar o editor cancela o que estiver correndo. Trocar de imagem não:
+  // no lote, passar por todas é justamente o ponto, e a anotação carrega o
+  // asset a que pertence, então ela chega na imagem certa de qualquer forma.
+  useEffect(() => () => runtimeRunRef.current?.abort(), []);
 
   /**
    * Pergunta ao conector o que o modelo carregado aceita.

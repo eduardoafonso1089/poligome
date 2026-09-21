@@ -169,6 +169,106 @@ export function ensureLabels(
   return { labels, byName };
 }
 
+/**
+ * O que um resultado parcial deixou no canvas, e o que fazer com isso quando o
+ * final chega.
+ *
+ * O parcial é rascunho: o final vem com tudo já passado pela junção entre
+ * tiles, e trocar um pelo outro é o que evita ver o mesmo objeto duas vezes.
+ * Só que entre um e outro a pessoa pode ter mexido — é para isso que o
+ * streaming existe, para ela começar antes do fim. Apagar o que ela editou
+ * seria desfazer trabalho sem avisar.
+ *
+ * Então o rascunho intocado sai, e o editado fica. O que o modelo diria sobre
+ * aquele mesmo objeto é descartado do conjunto final, porque a versão da pessoa
+ * já está lá e duas cópias do mesmo objeto é o problema que a junção resolve.
+ */
+export function reconcileDrafts(
+  drafted: ReadonlyMap<string, EditorAnnotation>,
+  onCanvas: readonly EditorAnnotation[],
+): { discard: string[]; keptOriginals: EditorAnnotation[] } {
+  const byId = new Map(onCanvas.map((annotation) => [annotation.id, annotation]));
+  const discard: string[] = [];
+  const keptOriginals: EditorAnnotation[] = [];
+
+  for (const [id, original] of drafted) {
+    const current = byId.get(id);
+    // Já apagado pela pessoa: nada a remover, e nada a preservar.
+    if (!current) continue;
+    if (sameGeometry(current, original)) discard.push(id);
+    else keptOriginals.push(original);
+  }
+  return { discard, keptOriginals };
+}
+
+/** Igualdade estrutural do que a pessoa consegue mexer: forma e classe. */
+export function sameGeometry(a: EditorAnnotation, b: EditorAnnotation): boolean {
+  if (a.type !== b.type || a.label !== b.label) return false;
+  switch (a.type) {
+    case "box": {
+      const other = b as typeof a;
+      return a.x === other.x && a.y === other.y
+        && a.width === other.width && a.height === other.height
+        && (a.rotation ?? 0) === (other.rotation ?? 0);
+    }
+    case "point": {
+      const other = b as typeof a;
+      return a.x === other.x && a.y === other.y;
+    }
+    default: {
+      const other = b as { vertices: ReadonlyArray<{ x: number; y: number }> };
+      if (a.vertices.length !== other.vertices.length) return false;
+      return a.vertices.every((v, i) => v.x === other.vertices[i].x && v.y === other.vertices[i].y);
+    }
+  }
+}
+
+/** Caixa envolvente de uma anotação do editor. */
+export function editorEnvelope(annotation: EditorAnnotation): Bounds {
+  switch (annotation.type) {
+    case "box":
+      return { x: annotation.x, y: annotation.y, width: annotation.width, height: annotation.height };
+    case "point":
+      return { x: annotation.x, y: annotation.y, width: 0, height: 0 };
+    default: {
+      const xs = annotation.vertices.map((v) => v.x);
+      const ys = annotation.vertices.map((v) => v.y);
+      return { x: Math.min(...xs), y: Math.min(...ys),
+               width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
+    }
+  }
+}
+
+function iou(a: Bounds, b: Bounds): number {
+  const left = Math.max(a.x, b.x), top = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.width, b.x + b.width);
+  const bottom = Math.min(a.y + a.height, b.y + b.height);
+  if (right <= left || bottom <= top) return 0;
+  const overlap = (right - left) * (bottom - top);
+  const union = a.width * a.height + b.width * b.height - overlap;
+  return union > 0 ? overlap / union : 0;
+}
+
+/**
+ * Tira do conjunto final o que já está no canvas como edição da pessoa.
+ *
+ * A comparação é com a geometria **original** do rascunho, não com a editada:
+ * é ela que o modelo devolveria de novo, e é por ela que dá para reconhecer que
+ * se trata do mesmo objeto depois de a pessoa tê-lo arrastado.
+ */
+export function withoutEdited(
+  annotations: readonly EditorAnnotation[],
+  keptOriginals: readonly EditorAnnotation[],
+  threshold = 0.5,
+): EditorAnnotation[] {
+  if (!keptOriginals.length) return [...annotations];
+  const originals = keptOriginals.map(editorEnvelope);
+  return annotations.filter((annotation) => {
+    const box = editorEnvelope(annotation);
+    return !originals.some((original) => iou(box, original) >= threshold);
+  });
+}
+
 function flatten(vertices: ReadonlyArray<{ x: number; y: number }>): number[] {
   return vertices.flatMap((vertex) => [vertex.x, vertex.y]);
 }

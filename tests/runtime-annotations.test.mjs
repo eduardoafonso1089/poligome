@@ -204,3 +204,65 @@ test('com região pedida, o que veio só da margem não vira anotação', () => 
   });
   assert.equal(converted.length, 1);
 });
+
+// ---------------------------------------------------------------------------
+// Editar o parcial sem perdê-lo quando o final chega
+// ---------------------------------------------------------------------------
+
+import { reconcileDrafts, withoutEdited, sameGeometry } from '../app/lib/runtime-annotations.ts';
+
+const drawn = (id, x, label = 'l-1') => ({ id, asset: 'img', label, type: 'box', x, y: 0, width: 50, height: 50 });
+
+test('rascunho intocado é descartado quando o final chega', () => {
+  const drafts = new Map([['d-1', drawn('d-1', 10)]]);
+  const { discard, keptOriginals } = reconcileDrafts(drafts, [drawn('d-1', 10)]);
+  assert.deepEqual(discard, ['d-1']);
+  assert.equal(keptOriginals.length, 0);
+});
+
+test('rascunho que a pessoa moveu fica', () => {
+  const drafts = new Map([['d-1', drawn('d-1', 10)]]);
+  const { discard, keptOriginals } = reconcileDrafts(drafts, [drawn('d-1', 90)]);
+  assert.deepEqual(discard, []);
+  assert.equal(keptOriginals.length, 1);
+  assert.equal(keptOriginals[0].x, 10, 'preserva a geometria original, não a editada');
+});
+
+test('rascunho que a pessoa reclassificou fica', () => {
+  const drafts = new Map([['d-1', drawn('d-1', 10, 'l-1')]]);
+  const { discard } = reconcileDrafts(drafts, [drawn('d-1', 10, 'l-2')]);
+  assert.deepEqual(discard, []);
+});
+
+test('rascunho que a pessoa apagou não é apagado de novo nem preservado', () => {
+  const drafts = new Map([['d-1', drawn('d-1', 10)]]);
+  const { discard, keptOriginals } = reconcileDrafts(drafts, []);
+  assert.deepEqual(discard, []);
+  assert.equal(keptOriginals.length, 0);
+});
+
+test('o final descarta o que o modelo repetiria sobre a anotação já editada', () => {
+  // A comparação é com a geometria original: é por ela que se reconhece o
+  // mesmo objeto depois de a pessoa tê-lo arrastado.
+  const kept = [drawn('d-1', 10)];
+  const settled = withoutEdited([drawn('f-1', 12), drawn('f-2', 500)], kept);
+  assert.deepEqual(settled.map(a => a.id), ['f-2']);
+});
+
+test('sem edição nenhuma, o final passa inteiro', () => {
+  const settled = withoutEdited([drawn('f-1', 10), drawn('f-2', 500)], []);
+  assert.equal(settled.length, 2);
+});
+
+test('sameGeometry distingue forma, posição e classe', () => {
+  assert.ok(sameGeometry(drawn('a', 10), drawn('b', 10)));
+  assert.ok(!sameGeometry(drawn('a', 10), drawn('b', 11)));
+  assert.ok(!sameGeometry(drawn('a', 10, 'l-1'), drawn('b', 10, 'l-2')));
+});
+
+test('sameGeometry compara vértices de um polígono', () => {
+  const poly = (id, x) => ({ id, asset: 'img', label: 'l', type: 'polygon',
+                             vertices: [{ id: 'v1', x, y: 0 }, { id: 'v2', x: 5, y: 5 }], holes: [] });
+  assert.ok(sameGeometry(poly('a', 1), poly('b', 1)));
+  assert.ok(!sameGeometry(poly('a', 1), poly('b', 2)));
+});
