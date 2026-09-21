@@ -6,7 +6,7 @@ VENV_DIR="${APP_DIR}/venv"
 CONNECTOR="${APP_DIR}/poligome-cog-local.py"
 READY_FILE="${APP_DIR}/dependencies-v1.ok"
 SAIDA_DIR="${APP_DIR}/convertidos"
-SITE_URL="https://www.poligome.com/annotate"
+SITE_URL="https://poligome.com/annotate"
 
 printf '\n==========================================\n'
 printf '       Poligome local COG\n'

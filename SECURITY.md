@@ -14,7 +14,7 @@ Until stable releases begin, security fixes are applied to the latest revision o
 
 ## Local connectors
 
-The SAM and COG helpers listen on loopback by default. Their browser access is limited to `https://poligome.com`, `https://www.poligome.com`, and local development origins. A self-hosted instance can set `POLIGOME_ALLOWED_ORIGIN_REGEX` to an anchored regular expression matching its own trusted origins.
+The SAM and COG helpers listen on loopback by default. Their browser access is limited to `https://poligome.com`, `https://www.poligome.com`, and local development origins. A self-hosted instance can add its own trusted origins: the SAM connector takes `POLIGOME_ALLOWED_ORIGINS` as a comma-separated list, and the COG helper takes `POLIGOME_ALLOWED_ORIGIN_REGEX` as an anchored regular expression.
 
 Do not expose connector ports to a public network. Do not configure a permissive origin such as `.*` on a machine that handles sensitive data.
 

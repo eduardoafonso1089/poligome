@@ -18,7 +18,7 @@ UNIT_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
 UNIT="${UNIT_DIR}/poligome-sam.service"
 LAUNCHER="${APP_DIR}/bin/poligome-sam-service-run.sh"
 PORT="7860"
-SITE_URL="${POLIGOME_SITE_URL:-https://www.poligome.com}"
+SITE_URL="${POLIGOME_SITE_URL:-https://poligome.com}"
 # auto escolhe CUDA, depois MPS, depois CPU. Forçar cpu é a saída de quem tem
 # uma GPU que o PyTorch enxerga mas que não aguenta o modelo.
 DEVICE="${POLIGOME_DEVICE:-auto}"

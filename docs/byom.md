@@ -22,7 +22,7 @@ do Poligome, que é assunto do [sam.md](sam.md), e o Docker.
 
 ```bash
 # constrói a imagem de exemplo e sobe os dois modelos
-bash poligome-byom-macos-linux.sh examples
+bash public/poligome-byom-macos-linux.sh examples
 
 # confere o estado sem abrir o editor
 bash poligome-byom-macos-linux.sh list
@@ -71,7 +71,7 @@ subir tudo de novo:
 
 ```bash
 # os exemplos oficiais
-bash poligome-byom-macos-linux.sh examples
+bash public/poligome-byom-macos-linux.sh examples
 
 # um modelo específico
 bash poligome-byom-macos-linux.sh start --model-id byom-meu-modelo
@@ -106,7 +106,7 @@ fica em `~/.poligome-sam/byom` **dentro da distribuição WSL**, não em
 A CLI é a mesma, executada de dentro do WSL:
 
 ```bash
-wsl bash poligome-byom-macos-linux.sh examples
+wsl bash public/poligome-byom-macos-linux.sh examples
 ```
 
 O que muda é o Docker: ele precisa responder ao comando `docker` **de dentro
@@ -234,7 +234,7 @@ para que a lista nunca dependa do que existe na máquina de quem escreveu o
 contrato. Um comando constrói a imagem e registra os dois:
 
 ```bash
-bash poligome-byom-macos-linux.sh examples
+bash public/poligome-byom-macos-linux.sh examples
 ```
 
 | modelo | porta | o que faz |

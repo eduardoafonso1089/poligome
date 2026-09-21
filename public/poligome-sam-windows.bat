@@ -4,10 +4,10 @@ setlocal EnableExtensions EnableDelayedExpansion
 title Poligome SAM local - instalar modelo
 set "POLIGOME_SAM_WINDOWS_INSTALLER_API=2"
 
-set "DEFAULT_SITE_URL=https://www.poligome.com"
+set "DEFAULT_SITE_URL=https://poligome.com"
 set "DEFAULT_ASSET_BASE_URL=https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 set "DEFAULT_CONNECTOR_URL=%DEFAULT_ASSET_BASE_URL%/poligome-sam-local.py"
-set "DEFAULT_CONNECTOR_SHA256=587d9e065254b2be581a75a51a4263299c1e434ed3011e6ae27ea9dda5b7c6a2"
+set "DEFAULT_CONNECTOR_SHA256=867f643f424f203be91d1e0d964135b7f469fe9fe1a349efbb4ef36182208722"
 set "SITE_URL=%POLIGOME_SITE_URL%"
 if not defined SITE_URL set "SITE_URL=%DEFAULT_SITE_URL%"
 if "!SITE_URL:~-1!"=="/" set "SITE_URL=!SITE_URL:~0,-1!"

@@ -8,7 +8,7 @@ set "VENV_DIR=%APP_DIR%\venv"
 set "CONNECTOR=%APP_DIR%\poligome-cog-local.py"
 set "READY_FILE=%APP_DIR%\dependencies-v1.ok"
 set "SAIDA_DIR=%APP_DIR%\convertidos"
-set "SITE_URL=https://www.poligome.com/annotate"
+set "SITE_URL=https://poligome.com/annotate"
 
 echo.
 echo ==========================================
