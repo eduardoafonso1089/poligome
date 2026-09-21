@@ -1,0 +1,10 @@
+{
+  "model_id": "byom-otsu",
+  "name": "Exemplo Otsu",
+  "image": "poligome-byom-exemplo",
+  "endpoint": "http://127.0.0.1:8080",
+  "notes": "Exemplo oficial do Poligome. Separa objeto de fundo por limiar de Otsu; objetos encostados viram uma região só. Serve de molde: troque a função predict() em serve.py pelo seu modelo.",
+  "env": {
+    "METHOD": "otsu"
+  }
+}

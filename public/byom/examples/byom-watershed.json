@@ -1,0 +1,11 @@
+{
+  "model_id": "byom-watershed",
+  "name": "Exemplo Watershed",
+  "image": "poligome-byom-exemplo",
+  "endpoint": "http://127.0.0.1:8081",
+  "notes": "Exemplo oficial do Poligome. Watershed sobre a transformada de distância: objetos que se tocam viram instâncias separadas. SEED_FACTOR ajusta o quanto ele insiste em dividir.",
+  "env": {
+    "METHOD": "watershed",
+    "SEED_FACTOR": "0.6"
+  }
+}

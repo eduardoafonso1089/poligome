@@ -174,6 +174,13 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "dist/**",
+    // Worktrees criados por ferramentas de edição dentro do próprio
+    // repositório. Eles duplicam app/ inteiro, e como o caminho não casa com
+    // o `files: ["app/**"]` que rebaixa os achados legados de react-hooks, a
+    // cópia era reportada como 48 erros enquanto os arquivos verdadeiros
+    // ficavam em aviso. O CI nunca viu isso, porque clona limpo; quem roda
+    // `npm run lint` na própria máquina via.
+    ".kilo/**",
   ]),
 ]);
 

@@ -12,7 +12,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { lineCount, sourceOf } from "./helpers/source.mjs";
 
 const repo = (path) => new URL(`../${path}`, import.meta.url);
@@ -22,13 +22,23 @@ const exists = async (path) => access(repo(path)).then(() => true, () => false);
  * SAM is integrated from its own branch. Its modules and connector assets look
  * orphaned to any dead-code sweep, so the decision to keep them is recorded as
  * a test rather than as a sentence someone has to notice.
+ *
+ * The BYOM merge brought the model catalog and its setup modal along with the
+ * connector, but the editor UI that used to mount them lived in the pre-refactor
+ * annotator route, which this branch deletes. They stay until the canonical
+ * editor mounts them; deleting them would mean redoing the catalog from scratch.
  */
 const DORMANT_BY_DECISION = [
   "app/lib/sam.ts",
+  "app/lib/sam-models.ts",
+  "app/components/SamSetupModal.tsx",
   "app/editor/models/model-output.ts",
   "public/poligome-sam-local.py",
   "public/poligome-sam-windows.bat",
   "public/poligome-sam-macos-linux.sh",
+  "public/poligome-byom-macos-linux.sh",
+  "public/byom/serve.py",
+  "public/byom/Dockerfile",
 ];
 
 test("modules kept for the SAM branch are still present", async () => {
@@ -40,9 +50,9 @@ test("modules kept for the SAM branch are still present", async () => {
 test("the dormant SAM modules still load", async () => {
   // Presence is not enough: a module that no longer parses is as good as gone.
   const sam = await import("../app/lib/sam.ts");
-  assert.equal(typeof sam.requestSamMask, "function");
+  assert.equal(typeof sam.requestSamPredictions, "function");
   const output = await import("../app/editor/models/model-output.ts");
-  assert.equal(typeof output.requestSamAnnotation, "function");
+  assert.equal(typeof output.requestSamAnnotations, "function");
 });
 
 test("the polygon union path is still wired, even without a toolbar button", async () => {
@@ -60,6 +70,31 @@ test("the canonical route is a composition and nothing else", async () => {
   // The lint rules in eslint.config.mjs enforce what it may import; this only
   // guards the size, which no rule expresses well.
   assert.ok(lineCount("app/annotate/page.tsx") < 30, "the route must not grow into a monolith again");
+});
+
+test("the connector assets bash and python run keep LF endings", async () => {
+  // .gitattributes explains the failure this guards: a CRLF checkout turns
+  // `set -euo pipefail` into `pipefail` plus a carriage return, bash refuses the
+  // option, and because that line fails the script carries on *without* `set -e`,
+  // swallowing every error after it. The same checkout changes the connector's
+  // SHA-256, so the installer's integrity check rejects the correct file. Both
+  // failures are silent, and an editor that rewrites endings on save causes them.
+  const mustBeLf = [
+    "public/poligome-sam-macos-linux.sh",
+    "public/poligome-sam-start-macos-linux.sh",
+    "public/poligome-sam-service-linux.sh",
+    "public/poligome-byom-macos-linux.sh",
+    "public/poligome-cog-macos-linux.sh",
+    "public/poligome-sam-local.py",
+    "public/poligome-cog-local.py",
+    "public/byom/serve.py",
+    "public/byom/Dockerfile",
+  ];
+  const crlf = Buffer.from([0x0d, 0x0a]);
+  for (const path of mustBeLf) {
+    const bytes = await readFile(repo(path));
+    assert.equal(bytes.includes(crlf), false, `${path} carries CRLF; bash and the SHA-256 pin both break on it`);
+  }
 });
 
 test("every documented export format still has a builder", async () => {

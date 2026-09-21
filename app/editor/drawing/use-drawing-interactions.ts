@@ -16,7 +16,9 @@ import {
   type BoxDraft,
 } from "./annotation-builder";
 
-export type DrawingTool = "select" | "pan" | "box" | "polygon" | "line" | "point" | "freehand";
+// "sam" não desenha nada por conta própria: o clique vira prompt para o modelo, e
+// quem o trata é o workbench, antes de chamar este hook.
+export type DrawingTool = "select" | "pan" | "box" | "polygon" | "line" | "point" | "freehand" | "sam";
 
 export type DrawingDraft =
   | { type: "box"; box: BoxDraft }

@@ -25,6 +25,15 @@ import { useTouchNavigation } from "../viewport/use-touch-navigation";
 import { clientPointToImage, screenPixelsToImageUnits } from "../viewport/svg-image-space";
 import { CogTiledLayer } from "../raster/cog-tiled-layer";
 import { demoRouteTarget } from "../session/demo-route";
+import { importCocoDocument, type CocoDocumentInput } from "../import/coco-document-import";
+import { assetAsDataUrl } from "../../lib/sam";
+import { connectorBaseUrl, fetchHealth, DEFAULT_SAM_ENDPOINT } from "../../lib/sam-connector";
+import { Check, Crosshair, ListRestart, LoaderCircle, Minus, Plus, Settings2, Sparkles, Square, X } from "lucide-react";
+import { requestSamAnnotations } from "../models/model-output";
+import type { SamBoxPrompt, SamPrompt } from "../../lib/types";
+
+type SamInteractionMode = "points" | "box" | "text";
+import type { PolygonAnnotation } from "../models/annotation-model";
 import { QualityReviewPanel } from "../review/quality-review-panel";
 import { setAssetReviewScore, setLabelReviewScore } from "../review/quality-review-model";
 import { EditorManagementPanels } from "../panels/editor-management-panels";
@@ -63,6 +72,26 @@ function labelsMatch(current: Label[], next: Label[]) {
 export function CanonicalEditorWorkbench() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [labels, setLabels] = useState<Label[]>([]);
+  // Os três tipos de prompt que o conector aceita. O modo existe porque arrastar
+  // uma caixa e clicar um ponto são o mesmo gesto no mesmo pixel: sem escolher
+  // antes, um cancela o outro.
+  const [samMode, setSamMode] = useState<SamInteractionMode>("points");
+  const [samPrompts, setSamPrompts] = useState<SamPrompt[]>([]);
+  const [samBoxStart, setSamBoxStart] = useState<{ x: number; y: number } | null>(null);
+  const [samBox, setSamBox] = useState<SamBoxPrompt | null>(null);
+  const [samText, setSamText] = useState("");
+  const [samThreshold, setSamThreshold] = useState(0.5);
+  // Lista, e não uma máscara só: uma busca por texto devolve um objeto por
+  // resultado, e é justamente isso que faz valer a pena escrever a busca.
+  const [samPreviews, setSamPreviews] = useState<PolygonAnnotation[]>([]);
+  const [samLoading, setSamLoading] = useState(false);
+  const [samNegative, setSamNegative] = useState(false);
+  // O que o modelo carregado aceita agora, dito pelo próprio conector: o catálogo
+  // descreve o modelo escolhido, e escolhido não é o mesmo que carregado.
+  const [samCapabilities, setSamCapabilities] = useState<readonly string[]>([]);
+  // null enquanto a sondagem não voltou: dizer "não encontrado" antes de ter
+  // procurado acusaria o usuário de um problema que talvez não exista.
+  const [samConnectorFound, setSamConnectorFound] = useState<boolean | null>(null);
   const [activeLabel, setActiveLabel] = useState("");
   const [tool, setTool] = useState<DrawingTool>("select");
   const [vectorTool, setVectorTool] = useState<VectorTool>(null);
@@ -293,6 +322,18 @@ export function CanonicalEditorWorkbench() {
     }
   }
 
+  /**
+   * Encerra o tutorial sem repor o conjunto de anotações da demo.
+   *
+   * O exitDemoTutorial troca tudo pelas anotações prontas, o que é certo para o
+   * botão de sair, e errado quando o que acabou de chegar é o resultado de um
+   * modelo: ele seria descartado junto.
+   */
+  function leaveDemoTutorial() {
+    setDemoTutorialStep(null);
+    setDemoTutorialToolPrompt(null);
+  }
+
   function exitDemoTutorial() {
     if (demoAnnotationsRef.current.length) {
       editor.replaceAnnotations([...demoAnnotationsRef.current], editor.saved);
@@ -331,6 +372,180 @@ export function CanonicalEditorWorkbench() {
   function exploreDemoModels() {
     exitDemoTutorial();
     window.dispatchEvent(new CustomEvent("poligome:open-sam"));
+  }
+
+  /**
+   * Roda um contêiner BYOM sobre a imagem aberta e ingere o COCO devolvido.
+   *
+   * O pedido sai daqui, e não do modal, porque é aqui que a imagem existe: o
+   * catálogo só sabe qual modelo você escolheu. O resultado entra somado ao que
+   * já havia, pelo mesmo caminho de um COCO importado à mão.
+   */
+  const runByomModel = useCallback(async (modelId: string) => {
+    if (!asset) { setMessage(copy.imageNotLoaded); return; }
+    // Mesmo motivo do acceptSamMask: o tutorial da demo removeria a primeira
+    // anotação devolvida pelo contêiner.
+    leaveDemoTutorial();
+    const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
+    const base = connectorBaseUrl(stored || DEFAULT_SAM_ENDPOINT);
+    if (!base) { setMessage(copy.errSamUnreachable); return; }
+    setMessage(`${modelId}: anotando…`);
+    try {
+      const { url } = await assetAsDataUrl(asset, copy);
+      const response = await fetch(`${base}/byom/annotate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_id: modelId, image: url, file_name: asset.name }),
+        signal: AbortSignal.timeout(300_000),
+      });
+      if (!response.ok) {
+        // O conector escreve estes detalhes para quem está anotando; passam como estão.
+        const body = await response.json().catch(() => null) as { detail?: unknown } | null;
+        setMessage(typeof body?.detail === "string" ? body.detail : `${modelId}: HTTP ${response.status}`);
+        return;
+      }
+      const body = await response.json() as { coco?: CocoDocumentInput };
+      if (!body.coco) { setMessage(`${modelId}: resposta sem documento COCO.`); return; }
+      const result = importCocoDocument(body.coco, assets, labels, makeId, { unlabeledName: copy.unlabeled });
+      if (!result.annotations.length) { setMessage(`${modelId}: nenhuma anotação devolvida.`); return; }
+      applyCocoImport({
+        labels: result.labels,
+        annotations: result.annotations,
+        append: true,
+        message: `${modelId}: ${result.annotations.length} ${result.annotations.length === 1 ? "anotação" : "anotações"}.`,
+      });
+    } catch {
+      setMessage(copy.errSamUnreachable);
+    }
+  }, [applyCocoImport, asset, assets, copy, labels, makeId]);
+
+  useEffect(() => {
+    const run = (event: Event) => {
+      const modelId = (event as CustomEvent<{ modelId?: string }>).detail?.modelId;
+      if (typeof modelId === "string") void runByomModel(modelId);
+    };
+    window.addEventListener("poligome:run-byom", run);
+    return () => window.removeEventListener("poligome:run-byom", run);
+  }, [runByomModel]);
+
+  /**
+   * Pergunta ao conector o que o modelo carregado aceita.
+   *
+   * Vem do conector, e não do catálogo, porque o catálogo descreve o modelo que
+   * você escolheu na tela e aqui o que importa é o que está carregado: oferecer
+   * "Texto" sobre um SAM 2.1 seria prometer algo que o pedido recusaria.
+   */
+  useEffect(() => {
+    if (tool !== "sam") return;
+    let cancelled = false;
+    const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
+    const base = connectorBaseUrl(stored || DEFAULT_SAM_ENDPOINT);
+    // A escrita fica no retorno da promessa, e não no corpo do efeito: um setState
+    // síncrono aqui dispara uma renderização em cascata por nada.
+    void (base ? fetchHealth(base) : Promise.resolve(null)).then((health) => {
+      if (cancelled) return;
+      setSamConnectorFound(health !== null);
+      setSamCapabilities(Array.isArray(health?.capabilities) ? health.capabilities : []);
+    });
+    return () => { cancelled = true; };
+  }, [tool]);
+
+  // Um modo que o modelo carregado não aceita não vale — trocar de modelo pelo
+  // painel deixaria a barra em “Texto” sobre um SAM 2.1. Derivado, e não corrigido
+  // por efeito: assim não existe um quadro em que o modo errado valeu.
+  const activeSamMode: SamInteractionMode =
+    samMode === "points" || !samCapabilities.length
+      || samCapabilities.includes(samMode === "box" ? "box" : "text")
+      ? samMode
+      : "points";
+
+  /**
+   * Cada clique com a ferramenta SAM acrescenta um prompt e repete a predição com
+   * todos eles: é assim que um ponto negativo corrige o que o positivo pegou
+   * demais. A máscara fica como proposta até o usuário salvar, do mesmo jeito que
+   * um rascunho de polígono — errar um clique não pode sujar a lista.
+   */
+  const runSam = useCallback(async ({ prompts, box, text }: {
+    prompts?: SamPrompt[];
+    box?: SamBoxPrompt | null;
+    text?: string;
+  }) => {
+    if (!asset) return;
+    if (!prompts?.length && !box && !text?.trim()) { setSamPreviews([]); return; }
+    const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
+    setSamLoading(true);
+    try {
+      const annotations = await requestSamAnnotations({
+        makeId,
+        asset,
+        label: activeLabel,
+        endpoint: stored || DEFAULT_SAM_ENDPOINT,
+        prompts,
+        box,
+        text,
+        threshold: samThreshold,
+        copy,
+      });
+      setSamPreviews(annotations);
+      if (text?.trim() && !annotations.length) setMessage(copy.errSamNoPolygon);
+    } catch (error) {
+      setSamPreviews([]);
+      setMessage(error instanceof Error ? error.message : copy.errSamUnreachable);
+    } finally {
+      setSamLoading(false);
+    }
+  }, [activeLabel, asset, copy, makeId, samThreshold]);
+
+  function addSamPrompt(point: { x: number; y: number }, negative: boolean) {
+    const next: SamPrompt[] = [...samPrompts, { x: point.x, y: point.y, label: negative ? 0 : 1 }];
+    setSamPrompts(next);
+    void runSam({ prompts: next });
+  }
+
+  /** Limpa prompts e proposta sem tocar no modo nem no texto já digitado. */
+  function clearSamPrompts() {
+    setSamPrompts([]);
+    setSamBoxStart(null);
+    setSamBox(null);
+    setSamPreviews([]);
+  }
+
+  function restartSam() {
+    clearSamPrompts();
+    setSamText("");
+    setSamNegative(false);
+    setMessage(copy.samRestarted);
+  }
+
+  /**
+   * Trocar de modo apaga o que estava montado: um ponto não sobrevive a virar
+   * caixa, e deixá-lo no ar faria a próxima predição misturar dois pedidos.
+   */
+  function chooseSamMode(mode: SamInteractionMode) {
+    if (mode === samMode) return;
+    clearSamPrompts();
+    setSamNegative(false);
+    setSamMode(mode);
+  }
+
+  function runSamText() {
+    const query = samText.trim();
+    if (!query) { setMessage(copy.samDescribeConcept); return; }
+    void runSam({ prompts: [], box: null, text: query });
+  }
+
+  function acceptSamMask() {
+    if (!samPreviews.length) return;
+    // O tutorial da demo apaga o que não for a caixa pedida sobre o telhado, e
+    // isso incluía a primeira máscara do SAM — justamente o que o usuário
+    // instalou o conector para ver. Quem chegou até aqui já passou do tutorial:
+    // encerrá-lo sem repor as anotações da demo preserva a máscara.
+    leaveDemoTutorial();
+    editor.appendAnnotations(samPreviews, true);
+    const total = samPreviews.length;
+    clearSamPrompts();
+    setSessionDirty(true);
+    setMessage(total > 1 ? `${total} ${copy.imageAnnotations}. ${copy.samSavedToolActive}` : copy.samSavedToolActive);
   }
 
   useEffect(() => {
@@ -461,6 +676,9 @@ export function CanonicalEditorWorkbench() {
   }
 
   function chooseTool(next: DrawingTool) {
+    // Sair da ferramenta SAM descarta os prompts e a proposta: guardá-los faria a
+    // máscara reaparecer numa ferramenta que não a produziu.
+    if (next !== "sam" && (samPrompts.length || samBox || samPreviews.length)) clearSamPrompts();
     if (next !== tool) drawing.cancelDraft();
     advanced.cancel();
     setVectorTool(null);
@@ -797,6 +1015,37 @@ export function CanonicalEditorWorkbench() {
   const canvasCursor = panning ? (touch.navigating || mousePanning ? "grabbing" : "grab") : vectorEditing || !selecting ? "crosshair" : "default";
   const overlay = <>
     <DrawingDraftLayer draft={drawing.draft} color={activeColor} lineThickness={lineThickness} />
+    {/* As máscaras aparecem tracejadas porque ainda são proposta: só o salvar as
+        torna anotação. Uma busca por texto propõe várias de uma vez. */}
+    {samPreviews.map((preview) => <polygon
+      key={preview.id}
+      className="sam-mask-preview"
+      points={preview.vertices.map((vertex) => `${vertex.x},${vertex.y}`).join(" ")}
+      fill={`${activeColor}26`}
+      stroke={activeColor}
+      strokeWidth={lineThickness}
+      strokeDasharray="10 6"
+      vectorEffect="non-scaling-stroke"
+      pointerEvents="none"
+    />)}
+    {samBox && <rect
+      className="sam-box-prompt"
+      x={samBox.x}
+      y={samBox.y}
+      width={samBox.w}
+      height={samBox.h}
+      fill={`${activeColor}16`}
+      stroke={activeColor}
+      strokeWidth={lineThickness}
+      strokeDasharray="9 6"
+      vectorEffect="non-scaling-stroke"
+      pointerEvents="none"
+    />}
+    {samPrompts.map((prompt, index) => <g key={`sam-prompt-${index}`} className={`sam-prompt ${prompt.label === 1 ? "positive" : "negative"}`}>
+      <circle cx={prompt.x} cy={prompt.y} r={6 * guideUnit} strokeWidth={2 * guideUnit} vectorEffect="non-scaling-stroke" />
+      <line x1={prompt.x - 3 * guideUnit} y1={prompt.y} x2={prompt.x + 3 * guideUnit} y2={prompt.y} strokeWidth={2 * guideUnit} vectorEffect="non-scaling-stroke" />
+      {prompt.label === 1 && <line x1={prompt.x} y1={prompt.y - 3 * guideUnit} x2={prompt.x} y2={prompt.y + 3 * guideUnit} strokeWidth={2 * guideUnit} vectorEffect="non-scaling-stroke" />}
+    </g>)}
     <AdvancedVectorDraftLayer draft={advanced.draft} color={activeColor} lineThickness={lineThickness} />
     <DemoTutorialOverlay step={demoTutorialStep} toolPrompt={demoTutorialToolPrompt} imageSize={imageSize} />
     {coordinatesGuide && cursorPoint && <g className="coordinate-guide" pointerEvents="none">
@@ -830,6 +1079,19 @@ export function CanonicalEditorWorkbench() {
       return;
     }
     if (coordinatesGuide) setCursorPoint(imagePoint);
+    if (tool === "sam") {
+      // Arrastar uma caixa e clicar um ponto são o mesmo gesto: o modo escolhido
+      // no painel decide qual dos dois este toque é.
+      if (activeSamMode === "box") {
+        setSamBoxStart(imagePoint);
+        setSamBox({ ...imagePoint, w: 0, h: 0, label: 1 });
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        return;
+      }
+      // Shift ou botão direito marcam o que deve ficar de fora, sem trocar de modo.
+      if (activeSamMode === "points") addSamPrompt(imagePoint, samNegative || event.button === 2 || event.shiftKey);
+      return;
+    }
     if (vectorEditing) advanced.onPointerDown(event);
     else if (selecting) interactions.selectAtCanvas(event);
     else drawing.onPointerDown(event);
@@ -846,6 +1108,17 @@ export function CanonicalEditorWorkbench() {
       return;
     }
     if (coordinatesGuide && event.pointerType !== "touch") setCursorPoint(clientPointToImage(event.currentTarget, event.clientX, event.clientY, imageSize));
+    if (tool === "sam" && samBoxStart) {
+      const point = clientPointToImage(event.currentTarget, event.clientX, event.clientY, imageSize);
+      setSamBox({
+        x: Math.min(samBoxStart.x, point.x),
+        y: Math.min(samBoxStart.y, point.y),
+        w: Math.abs(point.x - samBoxStart.x),
+        h: Math.abs(point.y - samBoxStart.y),
+        label: 1,
+      });
+      return;
+    }
     if (vectorEditing) advanced.onPointerMove(event);
     else if (selecting) interactions.moveCanvasSelection(event);
     else drawing.onPointerMove(event);
@@ -856,6 +1129,14 @@ export function CanonicalEditorWorkbench() {
     if (pan?.pointerId === event.pointerId) {
       mousePanRef.current = null;
       setMousePanning(false);
+      return;
+    }
+    if (tool === "sam" && samBoxStart) {
+      setSamBoxStart(null);
+      // Uma caixa de dois pixels é um clique que escorregou, não um pedido: mandá-la
+      // ao modelo devolveria uma máscara sem relação com o que o usuário queria.
+      if (!samBox || samBox.w < 8 || samBox.h < 8) { setSamBox(null); return; }
+      void runSam({ box: samBox, prompts: samPrompts });
       return;
     }
     if (vectorEditing) advanced.onPointerUp(event);
@@ -1106,6 +1387,63 @@ export function CanonicalEditorWorkbench() {
               </div>
             </div>
           </section>
+          {/* Sem conector a ferramenta abria normal, e o usuário só descobria o
+              problema depois de clicar e esperar. Avisar antes, com o caminho
+              para resolver, é a diferença entre um erro e uma instrução. */}
+          {tool === "sam" && samConnectorFound === false ? <div className="sam-controls sam-controls-offline">
+            <span className="sam-prompt-count">{copy.errSamUnreachable}</span>
+            <div className="sam-actions">
+              <button className="accept" onClick={() => window.dispatchEvent(new CustomEvent("poligome:open-sam"))}><Settings2 size={14} />{copy.samOpenInstall}</button>
+              <button aria-label={copy.samDeactivate} title={copy.samDeactivate} onClick={() => chooseTool("select")}><X size={15} /></button>
+            </div>
+          </div> : tool === "sam" && <div className="sam-controls">
+            <div className="sam-mode">
+              {/* Só aparece o que o modelo carregado aceita: oferecer texto num SAM 2.1
+                  seria prometer o que o conector recusa na hora do pedido. */}
+              <button className={activeSamMode === "points" ? "active" : ""} onClick={() => chooseSamMode("points")}><Crosshair size={13} />{copy.samModePoints}</button>
+              {samCapabilities.includes("box") && <button className={activeSamMode === "box" ? "active" : ""} onClick={() => chooseSamMode("box")}><Square size={13} />{copy.samModeBox}</button>}
+              {samCapabilities.includes("text") && <button className={activeSamMode === "text" ? "active" : ""} onClick={() => chooseSamMode("text")}><Sparkles size={13} />{copy.samModeText}</button>}
+            </div>
+            <div className="sam-mode-input">
+              {activeSamMode === "points" && <>
+                <button className={samNegative ? "" : "active positive"} onClick={() => setSamNegative(false)}><Plus size={13} />{copy.samInclude}</button>
+                <button className={samNegative ? "active negative" : ""} onClick={() => setSamNegative(true)}><Minus size={13} />{copy.samExclude}</button>
+              </>}
+              {activeSamMode === "box" && <small>{copy.samBoxHint}</small>}
+              {activeSamMode === "text" && <form className="sam-text-form" onSubmit={(event) => { event.preventDefault(); runSamText(); }}>
+                <input
+                  aria-label={copy.samTextLabel}
+                  placeholder={copy.samTextPlaceholder}
+                  value={samText}
+                  onChange={(event) => { setSamPreviews([]); setSamText(event.target.value); }}
+                />
+                <button type="submit" disabled={!samText.trim() || samLoading}>{copy.samTextSubmit}</button>
+                <label title={copy.samThresholdLabel}>
+                  {copy.samThresholdShort} {Math.round(samThreshold * 100)}%
+                  <input
+                    aria-label={copy.samThresholdLabel}
+                    type="range" min="0.1" max="0.95" step="0.05"
+                    value={samThreshold}
+                    onChange={(event) => { setSamPreviews([]); setSamThreshold(Number(event.target.value)); }}
+                  />
+                </label>
+              </form>}
+              <span className="sam-prompt-count">
+                {samLoading
+                  ? <><LoaderCircle className="spin" size={13} />{copy.samSegmenting}</>
+                  : samPreviews.length
+                    ? `${samPreviews.length} ${copy.samProposals}`
+                    : activeSamMode === "points" ? `${samPrompts.length} ${copy.samPoints}` : ""}
+              </span>
+            </div>
+            <div className="sam-actions">
+              <button disabled={!samPrompts.length && !samBox && !samText && !samPreviews.length} onClick={restartSam}><ListRestart size={14} />{copy.samRestart}</button>
+              <button className="accept" disabled={!samPreviews.length || samLoading} onClick={acceptSamMask}><Check size={14} />{copy.samSaveEdit}{samPreviews.length > 1 ? ` (${samPreviews.length})` : ""}</button>
+              <button aria-label={copy.samConfigure} title={copy.samConfigure} onClick={() => window.dispatchEvent(new CustomEvent("poligome:open-sam"))}><Settings2 size={15} /></button>
+              {/* Sem isto a barra não tinha saída: entrar na ferramenta era fácil e sair, não. */}
+              <button aria-label={copy.samDeactivate} title={copy.samDeactivate} onClick={() => chooseTool("select")}><X size={15} /></button>
+            </div>
+          </div>}
         </div>
         <PreRefactorStatus {...chromeProps} />
       </section>

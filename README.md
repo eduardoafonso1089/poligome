@@ -40,7 +40,7 @@ The repository already includes the Local SAM connector as an AI-oriented local 
 
 Optional helper services run on your own computer and bind to loopback rather than acting as public APIs.
 
-**Local SAM** provides the local service and installers used for AI pre-annotation workflows. The implementation is available in `public/poligome-sam-local.py` together with Windows and macOS/Linux installers and launchers.
+**Local SAM** — AI pre-annotation, plus BYOM for your own containerized model. The catalog, the installers and the editor UI are described in [SAM local](#sam-local) and [BYOM](#byom--traga-o-seu-próprio-modelo) below.
 
 **Local COG converter** supports large geospatial rasters. `public/poligome-cog-windows.bat` and `public/poligome-cog-macos-linux.sh` install the required Python packages and start the converter on `http://127.0.0.1:7861`. The manual service is `public/poligome-cog-local.py`.
 
@@ -82,6 +82,58 @@ npm run dev
 
 For additional Windows troubleshooting, see [REINSTALL_WINDOWS.md](REINSTALL_WINDOWS.md).
 
+## SAM local
+
+O Poligome usa um conector FastAPI executado no computador do usuário; imagens e prompts não são enviados ao Site. A tela **Ativar SAM local** contém um catálogo com requisitos, licença, tamanho do checkpoint, plataforma e benchmark oficial — sempre acompanhado do hardware em que o número foi medido.
+
+O passo a passo completo, incluindo a aprovação da Meta para o SAM 3, está em [docs/sam.md](docs/sam.md). Vale ler antes a seção **O que exige ação manual**: o conector é um processo local, precisa estar rodando sempre que a IA for usada e não volta sozinho depois de fechar o terminal ou reiniciar — o editor encontra o que está no ar, mas nenhuma página web pode iniciá-lo. No Linux o serviço de usuário resolve isso; em Windows e macOS ainda não há equivalente.
+
+Modelos disponíveis:
+
+| Família | Variantes | Uso nesta versão | Requisitos principais |
+| --- | --- | --- | --- |
+| SAM 2.1 | Hiera Tiny, Small, Base+, Large | pontos positivos/negativos e caixas; Small é o padrão | Python 3.10+, PyTorch 2.5.1+, Torchvision 0.20.1+; CUDA recomendada |
+| MedSAM2 | Generalista médico, lesão em TC, lesão hepática em RM, ecocardiograma e o peso anterior 2411 | pontos positivos/negativos e caixas | mesmo runtime do SAM 2.1; nenhum ambiente adicional |
+| SAM 3 | Imagem e conceitos | pontos, caixas e texto com múltiplas instâncias | Python 3.12+, PyTorch 2.7+, GPU e CUDA 12.6+; acesso gated no Hugging Face |
+
+SAM 2.1 também possui tracking de vídeo no upstream. O SAM 3.1, lançado pela Meta em 27/03/2026, adiciona Object Multiplex para vídeo, mas ainda não está integrado nem é instalado pelo Poligome. O editor atual integra somente imagens e deixa essa diferença explícita.
+
+Instalação e início:
+
+- `public/poligome-sam-macos-linux.sh <model-id>` instala no Linux, macOS quando suportado ou WSL2 e inicia o modelo escolhido;
+- `public/poligome-sam-windows.bat <model-id>` delega a instalação ao WSL2, preservando o mesmo menu e ID de modelo;
+- os launchers `public/poligome-sam-start-macos-linux.sh` e `public/poligome-sam-start-windows.bat` reiniciam uma instalação existente e retomam automaticamente uma instalação interrompida;
+- `public/poligome-sam-local.py` é o conector manual unificado, com CLI `--model`, `--checkpoint`, `--model-config` (nome Hydra do SAM 2), `--device`, `--port` e `--app-dir`;
+- `public/poligome-sam-service-linux.sh install` registra o conector como serviço de usuário do systemd, para que ele suba no login e nenhum terminal precise ficar aberto (`status` e `uninstall` completam o ciclo). Em macOS e no WSL2 sem systemd, use o iniciador comum.
+
+A troca de modelo acontece pela própria interface: `GET /models` lista o que está instalado em `~/.poligome-sam` e `POST /load {"model_id"}` recarrega o conector no venv da família pedida. Como cada família tem runtime próprio, a troca usa `execv` para substituir o processo preservando PID, terminal e processo pai, de modo que os instaladores que aguardam o conector continuam válidos; a porta fica indisponível por instantes e o modal acompanha o `/health` até o `ready`. Modelos não instalados são recusados com HTTP 409 explicando o que falta, em vez de subir quebrados.
+
+O endpoint padrão é `http://127.0.0.1:7860/predict`. O conector valida o modelo solicitado, publica estado e capacidades em `/health`, detecta o dispositivo compatível e mantém em cache a representação da imagem atual para acelerar refinamentos. Requisições do navegador aceitam somente a origem oficial, origens loopback de desenvolvimento e origens adicionais declaradas em `POLIGOME_ALLOWED_ORIGINS`; os launchers configuram isso a partir de `POLIGOME_SITE_URL`. O MedSAM2 é um ajuste fino do SAM 2.1 Hiera Tiny para imagem médica publicado pelo grupo de Bo Wang. Ele carrega com a configuração oficial `sam2.1_hiera_t.yaml` e reaproveita o runtime do SAM 2.1, então instalá-lo custa apenas o checkpoint de 156 MB. Atenção à licença: o código do projeto é Apache 2.0, mas o card oficial dos pesos restringe o uso a pesquisa e educação, de modo que uso comercial não está autorizado; o catálogo mostra isso na tela antes da instalação. Em fotografia comum o resultado é pior que o do SAM 2.1 padrão, e prompts de caixa funcionam melhor que pontos, refletindo como o modelo foi treinado. Além do generalista, o repositório oficial publica ajustes finos por modalidade — `medsam2-ct-lesion` (lesão em TC), `medsam2-mri-liver-lesion` (lesão hepática em RM) e `medsam2-us-heart` (ultrassom cardíaco) — mais o peso base `medsam2-2411`, mantido apenas para reprodutibilidade. Todos partem do mesmo SAM 2.1 Hiera Tiny, carregam com o mesmo `sam2.1_hiera_t.yaml` e ocupam cerca de 156 MB cada, então acrescentar um deles a uma instalação existente custa só o download do checkpoint. O ajuste fino de ultrassom foi treinado pelo upstream em vídeo; como este editor integra apenas imagens, ele é usado quadro a quadro. A restrição de licença de pesquisa e educação vale para todos eles.
+
+## BYOM — traga o seu próprio modelo
+
+Além do catálogo oficial, o Poligome roda modelos de segmentação empacotados por você em um contêiner Docker. O propósito é diferente do SAM: não há prompt. O contêiner recebe a imagem inteira e devolve um documento COCO já rotulado, e o editor desenha as máscaras, caixas e pontos com as classes que o próprio modelo indicou, prontas para revisão.
+
+O empacotamento imita o do Amazon SageMaker, então um contêiner preparado para lá roda aqui com pouca ou nenhuma mudança: a imagem sobe com `serve`, escuta na porta 8080, responde `GET /ping` com 200 quando está pronta e recebe a inferência em `POST /invocations`; os pesos ficam em `/opt/ml/model`.
+
+- `public/byom/serve.py` e `public/byom/Dockerfile` são um exemplo executável com dois métodos escolhidos pela variável `METHOD` — `otsu`, que funde objetos encostados numa região só, e `watershed`, que os separa em instâncias distintas. Nenhum precisa de GPU, e os dois devolvem COCO com polígono, caixa e ponto central. Serve de molde: troque a função `predict()` pelo seu modelo;
+- `public/poligome-byom-macos-linux.sh` cuida do ciclo de vida com `examples`, `build`, `register`, `start`, `stop`, `status`, `list`, `logs` e `remove`. `examples` constrói a imagem e registra os dois modelos oficiais versionados em `public/byom/examples` — `byom-otsu` e `byom-watershed`, que saem da mesma imagem mudando só a variável `METHOD`. A imagem não é versionada, porque o tarball tem ~347 MB contra menos de 4 MB de todo o histórico; em vez disso a base do Dockerfile é fixada por digest, então reconstruir depois produz a mesma imagem;
+- o registro grava `~/.poligome-sam/byom/<id>.json`. O conector não carrega o modelo: ele encaminha para o contêiner e valida a resposta antes de repassá-la ao editor, o que transforma um COCO malformado numa mensagem clara em vez de um polígono torto na tela;
+- o identificador precisa começar com `byom-`, e o endpoint só pode ser `127.0.0.1` ou `localhost`: um endereço remoto tiraria as imagens da máquina do usuário;
+- `segmentation` vira polígono, `bbox` vira caixa e `keypoints` vira ponto, com `categories[].name` definindo a classe.
+
+O conector expõe `GET /byom/models`, que lista os contêineres registrados com o estado de cada um, `POST /byom/register` para importar ou editar um registro, `DELETE /byom/models/{id}` para removê-lo e `POST /byom/annotate`, que roda um deles sobre uma imagem. Um contêiner pode implementar `GET /metadata` para declarar suas classes; quando não implementa, o conector guarda o resumo da última execução e a interface explica o modelo a partir dele. Na interface, o botão do modelo de IA no topo mostra o que está em uso — `SAM 2.1`, `MedSAM2` ou `BYOM` com o nome do contêiner, e os dois juntos quando ambos estão ativos, já que são caminhos independentes e as máscaras de um não interferem nas do outro — e dentro dele **Trazer meu modelo** reúne o contrato, o passo a passo, os arquivos para baixar e os contêineres registrados. O passo a passo completo está em [docs/byom.md](docs/byom.md), começando por **O que exige ação manual**: o BYOM depende do conector e do contêiner, e os contêineres são criados sem política de reinício, então reiniciar a máquina ou o Docker os deixa parados — o registro sobrevive, o processo não.
+
+Checkpoints SAM 2.1 vêm dos downloads oficiais da Meta; SAM 3 exige solicitar acesso em https://huggingface.co/facebook/sam3, esperar a aprovação manual e executar `hf auth login` localmente. O fluxo foi verificado ponta a ponta com uma conta aprovada: download do checkpoint de 3,45 GB, carga em CUDA, prompts de ponto e caixa, e prompts de texto devolvendo múltiplas instâncias do conceito. O instaladores invocam o CLI do Hugging Face pelo console script quando ele é utilizável e, quando o shebang aponta para um interpretador que não existe mais — o que acontece se a pasta do app for renomeada —, caem no entry point resolvido pelo próprio pacote.
+
+Os instaladores mantêm separadas a URL do Site e a origem pública dos arquivos: `POLIGOME_SITE_URL` controla a página aberta e o CORS, enquanto as atualizações dos scripts usam por padrão `https://raw.githubusercontent.com/eduardoafonso1089/epiaka/main/public`; o bootstrap do conector usa um commit público imutável e confere sua soma SHA-256. `POLIGOME_ASSET_BASE_URL` pode substituir essa origem HTTPS. Em desenvolvimento ou numa instalação offline no Linux/macOS, `POLIGOME_CONNECTOR_PATH` aceita explicitamente uma cópia local do conector. O runtime do SAM 3 fixa `setuptools<81` enquanto a revisão upstream usada ainda depender de `pkg_resources` e instala explicitamente as dependências usadas pelo import principal.
+
+A seleção é transacional: o modelo escolhido fica em `pending-model.txt` durante a instalação e só é promovido a `selected-model.txt` depois que runtime, dispositivo, checkpoint e o `/health` do modelo exato passam nas validações. Os iniciadores retomam esse estado pendente; checkpoints incompletos não são reutilizados, pois os cinco artefatos são conferidos contra seus tamanhos oficiais antes da ativação.
+
+Pesos e dependências nunca são gravados no checkout: Linux, macOS e WSL2 usam `~/.poligome-sam/`. O `.gitignore` também bloqueia formatos de checkpoint, ambientes virtuais e diretórios de modelos como proteção adicional.
+
+Por segurança de memória, o serviço limita cada imagem a 16 megapixels, processa no máximo quatro corpos de previsão simultaneamente e devolve no máximo 64 instâncias SAM 3. Esses valores podem ser ajustados conscientemente com `POLIGOME_MAX_IMAGE_PIXELS`, `POLIGOME_MAX_CONCURRENT_REQUESTS` e `POLIGOME_SAM3_MAX_PREDICTIONS`; o limiar conceitual mínimo do SAM 3 usa `POLIGOME_SAM3_MIN_CONCEPT_THRESHOLD` e começa em `0.1`.
+
 ## Interface
 
 Poligome supports Portuguese, English, French and Spanish, with light, dark and system themes.
@@ -95,16 +147,21 @@ npm ci
 npm run dev
 ```
 
-Useful checks include:
+- `npm run install:ci`: perform the one bounded lockfile install
+- `npm run dev`: start the Vite/Vinext development server
+- `npm run build`: build and validate the deployable Sites artifact
+- `npm run start`: start the built Vinext application
+- `npm run typecheck`: run `tsc --noEmit` over the project
+- `npm run test:unit`: run the Node test suite without building
+- `npm run test:sam-installers`: exercise all five SAM installer paths with isolated mocks and sparse checkpoints
+- `npm run test:byom`: exercise the BYOM lifecycle script against a mocked Docker
+- `npm test`: typecheck, then run the unit, SAM installer and BYOM suites
+- `npm run validate:artifact`: recheck an existing artifact's manifest and ESM `default.fetch` export
+- `npm run db:generate`: generate Drizzle migrations after schema changes
 
-```bash
-npm run typecheck
-npm test
-npm run lint
-npm run build
-```
-
-Some development and build scripts use Bash utilities. Windows contributors can use a compatible shell environment when working with those scripts; the local setup itself is available through `install.ps1`.
+The npm scripts target Linux and use `flock` and GNU `timeout`. On Windows, run
+Vite directly — see [REINSTALL_WINDOWS.md](REINSTALL_WINDOWS.md) for the full
+path, including the workaround for networks that block the npm registry.
 
 ## Project layout
 

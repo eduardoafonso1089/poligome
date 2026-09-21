@@ -14,15 +14,17 @@
     "build:pages": "next build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && npm run test:unit",
+    "test": "npm run typecheck && npm run test:unit && npm run test:sam-installers && npm run test:byom",
     "test:unit": "node --import tsx --import ./tests/helpers/register-hooks.mjs --test tests/*.test.mjs",
     "test:coverage": "node --import tsx --import ./tests/helpers/register-hooks.mjs --test --experimental-test-coverage --test-coverage-exclude='**/*.css' --test-coverage-exclude='tests/**' tests/*.test.mjs",
     "test:build": "npm run build && node --import tsx --import ./tests/helpers/register-hooks.mjs --test tests/*.test.mjs",
+    "test:sam-installers": "bash tests/sam-installers.test.sh",
     "test:audit": "bash scripts/run-audits.sh",
     "benchmark:cog": "node --import tsx scripts/benchmark-cog.mjs",
     "validate:artifact": "bash scripts/validate-artifact.sh",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"
+    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
+    "test:byom": "bash tests/byom.test.sh"
   },
   "dependencies": {
     "@types/d3-contour": "^3.0.6",
@@ -61,5 +63,5 @@
     "wrangler": "4.92.0"
   },
   "type": "module",
-  "displayName": "poligome.com — Anotação de Imagens"
+  "displayName": "poligome.com \u2014 Anota\u00e7\u00e3o de Imagens"
 }
