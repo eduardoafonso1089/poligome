@@ -36,7 +36,7 @@ export type CocoDocumentImportOptions = {
 export type CocoDocumentPlanOptions = { unlabeledName?: string };
 export type CocoDocumentImportResult = { labels: Label[]; annotations: EditorAnnotation[]; imported: number; unmatched: number };
 
-const IMPORT_COLORS = ["#6c8cff", "#d987ff", "#26c6b6", "#ff8a65", "#ffd166", "#7ee081", "#59b0f6", "#f26d9d"];
+export const IMPORT_COLORS = ["#6c8cff", "#d987ff", "#26c6b6", "#ff8a65", "#ffd166", "#7ee081", "#59b0f6", "#f26d9d"];
 const ALL_GEOMETRIES: CocoGeometry[] = ["box", "point", "polygon"];
 
 function names(value: unknown) {

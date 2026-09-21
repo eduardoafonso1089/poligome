@@ -11,6 +11,8 @@
 
 import { contours } from "d3-contour";
 import type { EditorAnnotation, AnnotationBase } from "../editor/models/annotation-model";
+import { IMPORT_COLORS } from "../editor/import/coco-document-import";
+import type { Label } from "./types";
 import {
   createBox,
   createPoint,
@@ -57,6 +59,42 @@ export function maskToPolygon(mask: RuntimeMask): number[] | null {
       ? mask.bounds.x + value * scaleX
       : mask.bounds.y + value * scaleY,
   );
+}
+
+/**
+ * Garante uma classe para cada nome que o modelo devolveu.
+ *
+ * O canvas resolve a cor por `labelById.get(annotation.label)`, então a
+ * anotação precisa guardar o **id** da classe, não o nome dela. Guardar o nome
+ * faz toda anotação cair no cinza padrão — que é o mesmo que não ter classe.
+ *
+ * Reusa a paleta da importação de propósito: uma anotação vinda do modelo tem
+ * de parecer com uma anotação feita à mão, e duas paletas diferentes na mesma
+ * tela seriam duas linguagens para a mesma coisa.
+ */
+export function ensureLabels(
+  names: readonly string[],
+  existing: readonly Label[],
+  makeId: (prefix: string) => string,
+): { labels: Label[]; byName: Map<string, Label> } {
+  const labels = [...existing];
+  const byName = new Map<string, Label>();
+
+  for (const raw of names) {
+    const name = raw.trim();
+    if (!name || byName.has(name)) continue;
+    const found = labels.find((label) => label.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (found) { byName.set(name, found); continue; }
+    const created: Label = {
+      id: makeId("label"),
+      name,
+      color: IMPORT_COLORS[labels.length % IMPORT_COLORS.length],
+      key: "",
+    };
+    labels.push(created);
+    byName.set(name, created);
+  }
+  return { labels, byName };
 }
 
 function flatten(vertices: ReadonlyArray<{ x: number; y: number }>): number[] {
@@ -111,16 +149,67 @@ export function toEditorAnnotation(
  */
 export function toEditorAnnotations(
   annotations: readonly RuntimeAnnotation[],
-  options: { asset: string; fallbackLabel: string; makeId: () => string },
+  options: {
+    asset: string;
+    /** Classe usada quando o modelo não rotula. Já é um id, não um nome. */
+    fallbackLabelId: string;
+    makeId: () => string;
+    /** Nome da classe -> classe do editor. O id dela é o que a anotação guarda. */
+    labelByName?: Map<string, Label>;
+    /** Pixel do arquivo enviado -> pixel do asset. 1 quando coincidem. */
+    scaleX?: number;
+    scaleY?: number;
+  },
 ): EditorAnnotation[] {
+  const scaleX = options.scaleX ?? 1;
+  const scaleY = options.scaleY ?? 1;
   const converted: EditorAnnotation[] = [];
+
   for (const annotation of annotations) {
-    const editorAnnotation = toEditorAnnotation(annotation, {
+    const scaled = scaleX === 1 && scaleY === 1
+      ? annotation
+      : scaleAnnotation(annotation, scaleX, scaleY);
+    const named = annotation.label ? options.labelByName?.get(annotation.label.trim()) : undefined;
+    const editorAnnotation = toEditorAnnotation(scaled, {
       id: options.makeId(),
       asset: options.asset,
-      label: annotation.label ?? options.fallbackLabel,
+      label: named?.id ?? options.fallbackLabelId,
     });
     if (editorAnnotation) converted.push(editorAnnotation);
   }
   return converted;
+}
+
+/**
+ * Leva uma anotação do pixel do arquivo enviado para o pixel do asset.
+ *
+ * Os dois coincidem no caso comum, mas não quando o editor guarda a imagem numa
+ * resolução diferente da do arquivo — um recorte de raster, por exemplo. Escalar
+ * a partir do que o runtime informou no upload é o que torna isso indiferente,
+ * em vez de depender de os dois baterem por sorte.
+ */
+function scaleAnnotation(
+  annotation: RuntimeAnnotation,
+  scaleX: number,
+  scaleY: number,
+): RuntimeAnnotation {
+  const point = (p: { x: number; y: number }) => ({ x: p.x * scaleX, y: p.y * scaleY });
+  const rect = (r: { x: number; y: number; width: number; height: number }) => ({
+    x: r.x * scaleX, y: r.y * scaleY, width: r.width * scaleX, height: r.height * scaleY,
+  });
+
+  switch (annotation.kind) {
+    case "box":
+      return { ...annotation, box: rect(annotation.box) };
+    case "polygon":
+    case "polyline":
+      return { ...annotation, vertices: annotation.vertices.map(point) };
+    case "keypoint":
+      return { ...annotation, at: point(annotation.at) };
+    case "mask":
+      // A grade do RLE não muda; o que muda é a área que ela cobre.
+      return { ...annotation, mask: { ...annotation.mask, bounds: rect(annotation.mask.bounds) } };
+    default:
+      return annotation;
+  }
 }

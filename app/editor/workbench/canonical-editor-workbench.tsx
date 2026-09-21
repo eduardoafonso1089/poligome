@@ -37,7 +37,7 @@ import {
   runtimeInfer,
   RuntimeError,
 } from "../../lib/runtime-client";
-import { toEditorAnnotations } from "../../lib/runtime-annotations";
+import { ensureLabels, toEditorAnnotations } from "../../lib/runtime-annotations";
 import { Check, Crosshair, ListRestart, LoaderCircle, Minus, Plus, Settings2, Sparkles, Square, X } from "lucide-react";
 import { requestSamAnnotations } from "../models/model-output";
 import type { SamBoxPrompt, SamPrompt } from "../../lib/types";
@@ -465,14 +465,25 @@ export function CanonicalEditorWorkbench() {
     runtimeRunRef.current = controller;
 
     const drafted: string[] = [];
-    const fallbackLabel = labels.find((label) => label.id === activeLabel)?.name
-      ?? labels[0]?.name ?? "objeto";
+    const fallbackLabelId = labels.find((label) => label.id === activeLabel)?.id
+      ?? labels[0]?.id ?? EMPTY_LABELS[0].id;
+    // As classes vão crescendo ao longo do fluxo: o tile seguinte pode trazer
+    // uma que ainda não existe.
+    let working = labels;
 
     try {
       // Os bytes sobem uma vez; a inferência cita a imagem pelo id depois.
       const response = await fetch(asset.src, { signal: controller.signal });
       if (!response.ok) throw new Error("asset");
-      await registerRuntimeImage(endpoint, asset.id, await response.blob(), controller.signal);
+      const registered = await registerRuntimeImage(
+        endpoint, asset.id, await response.blob(), controller.signal,
+      );
+
+      // O runtime responde no pixel do arquivo que recebeu, e o editor guarda
+      // no pixel do asset. Os dois coincidem no caso comum; escalar a partir do
+      // que o upload informou é o que dispensa depender disso.
+      const scaleX = registered.width ? (asset.width ?? registered.width) / registered.width : 1;
+      const scaleY = registered.height ? (asset.height ?? registered.height) / registered.height : 1;
 
       for await (const event of runtimeInfer({ endpoint, imageId: asset.id, signal: controller.signal })) {
         if (controller.signal.aborted) return;
@@ -486,8 +497,22 @@ export function CanonicalEditorWorkbench() {
           return;
         }
 
+        // Cada classe que o modelo nomeia vira uma classe do editor, com cor
+        // própria. A anotação guarda o id dela, que é por onde o canvas pinta.
+        const names = event.annotations.flatMap((a) => a.label ? [a.label] : []);
+        const resolved = ensureLabels(names, working, makeId);
+        if (resolved.labels.length !== working.length) {
+          working = resolved.labels;
+          setLabels(working);
+        }
+
         const converted = toEditorAnnotations(event.annotations, {
-          asset: asset.id, fallbackLabel, makeId: () => makeId("runtime"),
+          asset: asset.id,
+          fallbackLabelId,
+          makeId: () => makeId("runtime"),
+          labelByName: resolved.byName,
+          scaleX,
+          scaleY,
         });
 
         if (event.partial) {
