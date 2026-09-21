@@ -24,6 +24,78 @@ import { decodeRle, type RuntimeAnnotation, type RuntimeMask } from "./runtime-c
 /** Abaixo disto o polígono não fecha e não há o que desenhar. */
 const MIN_POLYGON_POINTS = 3;
 
+/**
+ * Quanto se pega em volta da região pedida, por lado, em fração do lado dela.
+ *
+ * Um recorte colado no objeto chega ao modelo sem nada em volta, e um
+ * classificador redimensiona esse recorte para 224 px: sem contexto ele decide
+ * pela textura. A margem devolve o entorno sem alargar a resposta, porque o que
+ * sai é recortado de volta na região que a pessoa desenhou.
+ */
+export const CONTEXT_MARGIN = 0.25;
+
+/** Margem mínima, para que uma caixa pequena não fique com contexto nenhum. */
+const MIN_CONTEXT_PX = 32;
+
+export type Bounds = { x: number; y: number; width: number; height: number };
+
+/**
+ * A região a inferir: a caixa pedida mais contexto, contida na imagem.
+ */
+export function withContext(region: Bounds, imageWidth: number, imageHeight: number): Bounds {
+  const padX = Math.max(region.width * CONTEXT_MARGIN, MIN_CONTEXT_PX);
+  const padY = Math.max(region.height * CONTEXT_MARGIN, MIN_CONTEXT_PX);
+  const left = Math.max(0, region.x - padX);
+  const top = Math.max(0, region.y - padY);
+  const right = Math.min(imageWidth, region.x + region.width + padX);
+  const bottom = Math.min(imageHeight, region.y + region.height + padY);
+  return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+}
+
+function envelope(annotation: RuntimeAnnotation): Bounds {
+  switch (annotation.kind) {
+    case "box": return annotation.box;
+    case "mask": return annotation.mask.bounds;
+    case "keypoint": return { x: annotation.at.x, y: annotation.at.y, width: 0, height: 0 };
+    default: {
+      const xs = annotation.vertices.map((v) => v.x);
+      const ys = annotation.vertices.map((v) => v.y);
+      return { x: Math.min(...xs), y: Math.min(...ys),
+               width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
+    }
+  }
+}
+
+/**
+ * Restringe o resultado à região pedida, descartando o que veio só da margem.
+ *
+ * O critério é o centro, e não a interseção: um objeto que a margem revelou pela
+ * metade tem o centro fora e não é o que a pessoa pediu. Caixa que passa é ainda
+ * recortada na região — geometria que traça contorno não, porque cortá-la
+ * mutilaria um objeto que o modelo viu inteiro, e ajustar isso é do canvas.
+ */
+export function clipToRegion(
+  annotation: RuntimeAnnotation,
+  region: Bounds,
+): RuntimeAnnotation | null {
+  const box = envelope(annotation);
+  const centreX = box.x + box.width / 2;
+  const centreY = box.y + box.height / 2;
+  const inside =
+    centreX >= region.x && centreX <= region.x + region.width &&
+    centreY >= region.y && centreY <= region.y + region.height;
+  if (!inside) return null;
+
+  if (annotation.kind !== "box") return annotation;
+
+  const left = Math.max(box.x, region.x);
+  const top = Math.max(box.y, region.y);
+  const right = Math.min(box.x + box.width, region.x + region.width);
+  const bottom = Math.min(box.y + box.height, region.y + region.height);
+  if (right <= left || bottom <= top) return null;
+  return { ...annotation, box: { x: left, y: top, width: right - left, height: bottom - top } };
+}
+
 function area(points: number[]): number {
   let total = 0;
   for (let index = 0; index + 3 < points.length; index += 2) {
@@ -159,6 +231,8 @@ export function toEditorAnnotations(
     /** Pixel do arquivo enviado -> pixel do asset. 1 quando coincidem. */
     scaleX?: number;
     scaleY?: number;
+    /** Região pedida, em pixel do asset. O que veio só da margem é descartado. */
+    clipTo?: Bounds;
   },
 ): EditorAnnotation[] {
   const scaleX = options.scaleX ?? 1;
@@ -166,9 +240,11 @@ export function toEditorAnnotations(
   const converted: EditorAnnotation[] = [];
 
   for (const annotation of annotations) {
-    const scaled = scaleX === 1 && scaleY === 1
+    const positioned = scaleX === 1 && scaleY === 1
       ? annotation
       : scaleAnnotation(annotation, scaleX, scaleY);
+    const scaled = options.clipTo ? clipToRegion(positioned, options.clipTo) : positioned;
+    if (!scaled) continue;
     const named = annotation.label ? options.labelByName?.get(annotation.label.trim()) : undefined;
     const editorAnnotation = toEditorAnnotation(scaled, {
       id: options.makeId(),

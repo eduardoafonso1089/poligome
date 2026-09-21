@@ -37,7 +37,7 @@ import {
   runtimeInfer,
   RuntimeError,
 } from "../../lib/runtime-client";
-import { ensureLabels, toEditorAnnotations } from "../../lib/runtime-annotations";
+import { ensureLabels, toEditorAnnotations, withContext } from "../../lib/runtime-annotations";
 import { Check, Crosshair, ListRestart, LoaderCircle, Minus, Plus, Settings2, Sparkles, Square, X } from "lucide-react";
 import { requestSamAnnotations } from "../models/model-output";
 import type { SamBoxPrompt, SamPrompt } from "../../lib/types";
@@ -464,6 +464,10 @@ export function CanonicalEditorWorkbench() {
     runtimeRunRef.current?.abort();
     runtimeRunRef.current = controller;
 
+    const selected = editor.selectedAnnotation?.asset === asset.id
+      ? editor.selectedAnnotation
+      : null;
+
     const drafted: string[] = [];
     const fallbackLabelId = labels.find((label) => label.id === activeLabel)?.id
       ?? labels[0]?.id ?? EMPTY_LABELS[0].id;
@@ -485,7 +489,34 @@ export function CanonicalEditorWorkbench() {
       const scaleX = registered.width ? (asset.width ?? registered.width) / registered.width : 1;
       const scaleY = registered.height ? (asset.height ?? registered.height) / registered.height : 1;
 
-      for await (const event of runtimeInfer({ endpoint, imageId: asset.id, signal: controller.signal })) {
+      // Uma caixa selecionada vira a região a inferir. É a diferença entre
+      // varrer a imagem inteira em grade e perguntar sobre uma coisa só: se a
+      // região couber no que o adaptador aceita numa chamada, o runtime nem
+      // fatia, e o resultado sai com a geometria da região em vez da do tile.
+      // A caixa desenhada, em pixel do asset. É ela que limita a resposta.
+      const asked = selected?.type === "box"
+        ? { x: selected.x, y: selected.y, width: selected.width, height: selected.height }
+        : undefined;
+
+      // O que se pede ao runtime é um pouco maior: um recorte colado no objeto
+      // chega ao modelo sem entorno, e um classificador decide pela textura. A
+      // margem não alarga a resposta, porque o que volta é recortado em `asked`.
+      const region = asked
+        ? (() => {
+            const padded = withContext(asked, asset.width ?? registered.width, asset.height ?? registered.height);
+            // A seleção está em pixel do asset; o runtime raciocina em pixel do
+            // arquivo que recebeu. Mesma conta da volta, ao contrário.
+            return {
+              x: padded.x / scaleX, y: padded.y / scaleY,
+              width: padded.width / scaleX, height: padded.height / scaleY,
+            };
+          })()
+        : undefined;
+      if (asked) setMessage(`runtime: região ${Math.round(asked.width)}x${Math.round(asked.height)}…`);
+
+      for await (const event of runtimeInfer({
+        endpoint, imageId: asset.id, region, signal: controller.signal,
+      })) {
         if (controller.signal.aborted) return;
 
         if (event.type === "progress") {
@@ -513,6 +544,7 @@ export function CanonicalEditorWorkbench() {
           labelByName: resolved.byName,
           scaleX,
           scaleY,
+          clipTo: asked,
         });
 
         if (event.partial) {

@@ -124,3 +124,83 @@ test('uma máscara sem geometria aproveitável é descartada, não vira anotaç�
   ], { asset: 'img', fallbackLabelId: 'u', makeId: () => 'm-1' });
   assert.equal(converted.length, 0);
 });
+
+// ---------------------------------------------------------------------------
+// Contexto em volta da região, resposta dentro dela
+// ---------------------------------------------------------------------------
+
+import { withContext, clipToRegion, CONTEXT_MARGIN } from '../app/lib/runtime-annotations.ts';
+
+test('a margem cresce com o tamanho da caixa', () => {
+  const padded = withContext({ x: 400, y: 400, width: 200, height: 200 }, 2000, 2000);
+  assert.equal(padded.x, 400 - 200 * CONTEXT_MARGIN);
+  assert.equal(padded.width, 200 + 2 * 200 * CONTEXT_MARGIN);
+});
+
+test('uma caixa pequena ainda ganha um mínimo de contexto', () => {
+  // 25% de 8px seriam 2px, que não é contexto nenhum.
+  const padded = withContext({ x: 100, y: 100, width: 8, height: 8 }, 2000, 2000);
+  assert.ok(padded.width >= 8 + 2 * 32);
+});
+
+test('a margem não sai da imagem', () => {
+  const padded = withContext({ x: 0, y: 0, width: 100, height: 100 }, 120, 120);
+  assert.equal(padded.x, 0);
+  assert.equal(padded.y, 0);
+  assert.ok(padded.x + padded.width <= 120);
+  assert.ok(padded.y + padded.height <= 120);
+});
+
+test('a caixa que cobre a região com margem volta recortada na região pedida', () => {
+  // É o caso do classificador: ele devolve o recorte inteiro como uma caixa só.
+  const asked = { x: 100, y: 100, width: 200, height: 200 };
+  const clipped = clipToRegion(
+    { kind: 'box', box: { x: 50, y: 50, width: 300, height: 300 }, label: 'telhado' },
+    asked,
+  );
+  assert.deepEqual(clipped.box, asked);
+  assert.equal(clipped.label, 'telhado');
+});
+
+test('o que a margem revelou pela metade fica de fora', () => {
+  const asked = { x: 100, y: 100, width: 100, height: 100 };
+  // Centro em (40,150): fora da região no eixo x.
+  const out = clipToRegion({ kind: 'box', box: { x: 10, y: 130, width: 60, height: 40 } }, asked);
+  assert.equal(out, null);
+});
+
+test('o que está dentro passa', () => {
+  const asked = { x: 100, y: 100, width: 100, height: 100 };
+  const kept = clipToRegion({ kind: 'box', box: { x: 120, y: 120, width: 40, height: 40 } }, asked);
+  assert.deepEqual(kept.box, { x: 120, y: 120, width: 40, height: 40 });
+});
+
+test('contorno com o centro dentro não é mutilado pelo recorte', () => {
+  // Cortar um polígono traçado partiria um objeto que o modelo viu inteiro.
+  const asked = { x: 100, y: 100, width: 100, height: 100 };
+  const polygon = { kind: 'polygon', vertices: [{ x: 90, y: 140 }, { x: 160, y: 140 }, { x: 160, y: 160 }] };
+  assert.deepEqual(clipToRegion(polygon, asked), polygon);
+});
+
+test('um ponto fora da região some', () => {
+  const asked = { x: 100, y: 100, width: 100, height: 100 };
+  assert.equal(clipToRegion({ kind: 'keypoint', at: { x: 50, y: 50 } }, asked), null);
+});
+
+test('sem região pedida, nada é descartado', () => {
+  const annotations = [{ kind: 'box', box: { x: 0, y: 0, width: 10, height: 10 } }];
+  assert.equal(toEditorAnnotations(annotations, {
+    asset: 'img', fallbackLabelId: 'u', makeId: () => 'a-1',
+  }).length, 1);
+});
+
+test('com região pedida, o que veio só da margem não vira anotação', () => {
+  const converted = toEditorAnnotations([
+    { kind: 'box', box: { x: 120, y: 120, width: 20, height: 20 } },   // dentro
+    { kind: 'box', box: { x: 0, y: 0, width: 20, height: 20 } },       // só na margem
+  ], {
+    asset: 'img', fallbackLabelId: 'u', makeId: () => `a-${Math.random()}`,
+    clipTo: { x: 100, y: 100, width: 100, height: 100 },
+  });
+  assert.equal(converted.length, 1);
+});
