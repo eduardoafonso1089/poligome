@@ -1,5 +1,8 @@
 "use client";
 
+/** Onde o runtime atende. Mesma convenção do endpoint do conector SAM. */
+const RUNTIME_ENDPOINT_KEY = "poligome-runtime-endpoint";
+
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { Asset, Label } from "../../lib/types";
@@ -28,6 +31,13 @@ import { demoRouteTarget } from "../session/demo-route";
 import { importCocoDocument, type CocoDocumentInput } from "../import/coco-document-import";
 import { assetAsDataUrl } from "../../lib/sam";
 import { connectorBaseUrl, fetchHealth, DEFAULT_SAM_ENDPOINT } from "../../lib/sam-connector";
+import {
+  DEFAULT_RUNTIME_ENDPOINT,
+  registerRuntimeImage,
+  runtimeInfer,
+  RuntimeError,
+} from "../../lib/runtime-client";
+import { toEditorAnnotations } from "../../lib/runtime-annotations";
 import { Check, Crosshair, ListRestart, LoaderCircle, Minus, Plus, Settings2, Sparkles, Square, X } from "lucide-react";
 import { requestSamAnnotations } from "../models/model-output";
 import type { SamBoxPrompt, SamPrompt } from "../../lib/types";
@@ -112,6 +122,8 @@ export function CanonicalEditorWorkbench() {
   const [demoTutorialStep, setDemoTutorialStep] = useState<DemoTutorialStep | null>(null);
   const [demoTutorialToolPrompt, setDemoTutorialToolPrompt] = useState<DemoTutorialToolPrompt>(null);
   const objectUrls = useRef<string[]>([]);
+  // A execução em curso, para cancelá-la ao trocar de imagem ou recomeçar.
+  const runtimeRunRef = useRef<AbortController | null>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const annotationImportRef = useRef<CocoImportHandle>(null);
@@ -427,6 +439,88 @@ export function CanonicalEditorWorkbench() {
     window.addEventListener("poligome:run-byom", run);
     return () => window.removeEventListener("poligome:run-byom", run);
   }, [runByomModel]);
+
+  /**
+   * Roda o poligome-runtime sobre a imagem aberta, desenhando conforme chega.
+   *
+   * Fica ao lado do BYOM em vez de substituí-lo: são transportes diferentes
+   * para a mesma ideia, e vê-los lado a lado é o que diz se o streaming paga o
+   * que custa. O BYOM devolve um documento COCO inteiro no fim; aqui cada tile
+   * que o runtime termina vira anotação no canvas na hora.
+   *
+   * Um resultado parcial é rascunho. As anotações dele entram marcadas por esta
+   * execução e saem quando o resultado final, já passado pela junção entre
+   * tiles, chega no lugar delas — senão o objeto que aparece em dois tiles
+   * vizinhos ficaria duplicado na tela.
+   */
+  const runRuntimeModel = useCallback(async () => {
+    if (!asset) { setMessage(copy.imageNotLoaded); return; }
+    leaveDemoTutorial();
+
+    const stored = (() => { try { return localStorage.getItem(RUNTIME_ENDPOINT_KEY); } catch { return null; } })();
+    const endpoint = stored || DEFAULT_RUNTIME_ENDPOINT;
+
+    const controller = new AbortController();
+    runtimeRunRef.current?.abort();
+    runtimeRunRef.current = controller;
+
+    const drafted: string[] = [];
+    const fallbackLabel = labels.find((label) => label.id === activeLabel)?.name
+      ?? labels[0]?.name ?? "objeto";
+
+    try {
+      // Os bytes sobem uma vez; a inferência cita a imagem pelo id depois.
+      const response = await fetch(asset.src, { signal: controller.signal });
+      if (!response.ok) throw new Error("asset");
+      await registerRuntimeImage(endpoint, asset.id, await response.blob(), controller.signal);
+
+      for await (const event of runtimeInfer({ endpoint, imageId: asset.id, signal: controller.signal })) {
+        if (controller.signal.aborted) return;
+
+        if (event.type === "progress") {
+          setMessage(`runtime: ${event.done}/${event.total}`);
+          continue;
+        }
+        if (event.type === "error") {
+          setMessage(`runtime: ${event.error.message}`);
+          return;
+        }
+
+        const converted = toEditorAnnotations(event.annotations, {
+          asset: asset.id, fallbackLabel, makeId: () => makeId("runtime"),
+        });
+
+        if (event.partial) {
+          drafted.push(...converted.map((annotation) => annotation.id));
+          editor.appendAnnotations(converted, false);
+          setSessionDirty(true);
+          continue;
+        }
+
+        // O final manda: fora os rascunhos, entra o conjunto já unificado.
+        if (drafted.length) editor.deleteAnnotations(drafted);
+        editor.appendAnnotations(converted, false);
+        setSessionDirty(true);
+        setMessage(`runtime: ${converted.length} ${converted.length === 1 ? "anotação" : "anotações"}.`);
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (drafted.length) editor.deleteAnnotations(drafted);
+      setMessage(error instanceof RuntimeError ? `runtime: ${error.message}` : copy.errSamUnreachable);
+    } finally {
+      if (runtimeRunRef.current === controller) runtimeRunRef.current = null;
+    }
+  }, [activeLabel, asset, copy, editor, labels, makeId]);
+
+  useEffect(() => {
+    const run = () => { void runRuntimeModel(); };
+    window.addEventListener("poligome:run-runtime", run);
+    return () => window.removeEventListener("poligome:run-runtime", run);
+  }, [runRuntimeModel]);
+
+  // Sair da imagem cancela o que estiver correndo: anotação de outra imagem
+  // chegando no canvas seria pior do que resultado nenhum.
+  useEffect(() => () => runtimeRunRef.current?.abort(), [asset?.id]);
 
   /**
    * Pergunta ao conector o que o modelo carregado aceita.
