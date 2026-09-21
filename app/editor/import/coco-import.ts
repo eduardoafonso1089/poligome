@@ -30,6 +30,16 @@ export type CocoImportContext = {
   annotationId: () => string;
   pointLabelId?: (name: string, index: number) => string;
   categoryKeypointNames?: string[];
+  /**
+   * Trata `bbox` como alternativa a `segmentation`, e não como geometria à
+   * parte: a caixa só vira anotação quando não sobrou polígono.
+   *
+   * O BYOM liga isto porque o contrato dele diz que a caixa serve para quando o
+   * modelo não segmenta — sem a opção, um objeto com os dois campos virava um
+   * polígono e uma caixa soltos, empilhados no mesmo lugar. Na importação COCO
+   * à mão a escolha das geometrias é de quem importa, e lá isto fica desligado.
+   */
+  boxAsFallback?: boolean;
 };
 
 function arrays(value: unknown): unknown[][] {
@@ -92,11 +102,13 @@ export function cocoAnnotationToEditor(input: CocoAnnotationInput, context: Coco
   const scale = coordinateScale(context);
   const result: EditorAnnotation[] = [];
 
+  let drewPolygon = false;
   if (context.geometryTypes.has("polygon")) {
     for (const ring of arrays(input.segmentation)) {
       const coordinates = coordinatesFromRing(ring, scale.x, scale.y);
       if (coordinates.length < 3) continue;
       result.push(createPolygon({ id: context.annotationId(), asset: context.assetId, label: context.labelId }, coordinates));
+      drewPolygon = true;
     }
   }
 
@@ -113,7 +125,8 @@ export function cocoAnnotationToEditor(input: CocoAnnotationInput, context: Coco
     }
   }
 
-  if (context.geometryTypes.has("box") && Array.isArray(input.bbox) && input.bbox.length >= 4) {
+  const boxSuppressed = context.boxAsFallback === true && drewPolygon;
+  if (!boxSuppressed && context.geometryTypes.has("box") && Array.isArray(input.bbox) && input.bbox.length >= 4) {
     const [x, y, width, height] = input.bbox.slice(0, 4).map(Number);
     if ([x, y, width, height].every(Number.isFinite)) {
       result.push(createBox(

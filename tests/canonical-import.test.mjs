@@ -46,3 +46,33 @@ test('COCO source dimensions rescale only when loaded image dimensions differ',(
 test('COCO geometry discovery identifies available representations',()=>{
   assert.deepEqual(cocoGeometryTypes({segmentation:[[0,0,10,0,10,10]],bbox:[0,0,10,10]}),['polygon','box']);
 });
+
+// O BYOM promete a caixa como alternativa à segmentação, não como geometria à
+// parte: sem isto um objeto com os dois campos virava um polígono e uma caixa
+// empilhados no mesmo lugar, e separá-los era trabalho manual.
+test('boxAsFallback drops the bbox when the same annotation already drew a polygon',()=>{
+  const makeId=ids();
+  const result=cocoAnnotationToEditor(
+    {segmentation:[[0,0,100,0,100,100]],bbox:[0,0,100,100],keypoints:[50,50,2]},
+    {assetId:'img',sourceWidth:100,sourceHeight:100,labelId:'weed',geometryTypes:new Set(['polygon','box','point']),annotationId:makeId,boxAsFallback:true},
+  );
+  assert.deepEqual(result.map(annotation=>annotation.type),['polygon','point']);
+});
+
+test('boxAsFallback keeps the bbox when there is no usable segmentation',()=>{
+  const makeId=ids();
+  const result=cocoAnnotationToEditor(
+    {segmentation:[],bbox:[0,0,100,100]},
+    {assetId:'img',sourceWidth:100,sourceHeight:100,labelId:'weed',geometryTypes:new Set(['polygon','box']),annotationId:makeId,boxAsFallback:true},
+  );
+  assert.deepEqual(result.map(annotation=>annotation.type),['box']);
+});
+
+test('manual COCO import still honours every geometry the person selected',()=>{
+  const makeId=ids();
+  const result=cocoAnnotationToEditor(
+    {segmentation:[[0,0,100,0,100,100]],bbox:[0,0,100,100]},
+    {assetId:'img',sourceWidth:100,sourceHeight:100,labelId:'weed',geometryTypes:new Set(['polygon','box']),annotationId:makeId},
+  );
+  assert.deepEqual(result.map(annotation=>annotation.type),['polygon','box']);
+});

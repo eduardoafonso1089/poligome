@@ -3,7 +3,7 @@ set -euo pipefail
 
 POLIGOME_SAM_STARTER_API=2
 
-DEFAULT_SITE_URL="https://www.poligome.com"
+DEFAULT_SITE_URL="https://poligome.com"
 DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE_URL="${POLIGOME_SITE_URL:-${DEFAULT_SITE_URL}}"

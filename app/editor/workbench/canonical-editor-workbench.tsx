@@ -411,8 +411,16 @@ export function CanonicalEditorWorkbench() {
    * Roda um contêiner BYOM sobre a imagem aberta e ingere o COCO devolvido.
    *
    * O pedido sai daqui, e não do modal, porque é aqui que a imagem existe: o
-   * catálogo só sabe qual modelo você escolheu. O resultado entra somado ao que
-   * já havia, pelo mesmo caminho de um COCO importado à mão.
+   * catálogo só sabe qual modelo você escolheu. O resultado entra pelo mesmo
+   * caminho de um COCO importado à mão.
+   *
+   * Reexecutar o mesmo modelo na mesma imagem **substitui** o resultado
+   * anterior em vez de empilhar máscaras idênticas: sem isso, rodar duas vezes
+   * dobrava a contagem e deixava contornos sobrepostos que só dá para separar
+   * apagando um a um. A origem viaja no id da anotação (`byom:<model-id>`),
+   * que é o único campo que já sobrevive a salvar e reabrir — então o que foi
+   * feito à mão, o que veio de outro modelo e o que este mesmo modelo produziu
+   * em outra imagem ficam intactos.
    */
   const runByomModel = useCallback(async (modelId: string) => {
     if (!asset) { setMessage(copy.imageNotLoaded); return; }
@@ -439,18 +447,37 @@ export function CanonicalEditorWorkbench() {
       }
       const body = await response.json() as { coco?: CocoDocumentInput };
       if (!body.coco) { setMessage(`${modelId}: resposta sem documento COCO.`); return; }
-      const result = importCocoDocument(body.coco, assets, labels, makeId, { unlabeledName: copy.unlabeled });
+      // Só o id da anotação leva a marca; classes e keypoints continuam com os
+      // prefixos de sempre, porque são compartilhados com o resto do editor.
+      const origin = `byom:${modelId}`;
+      const result = importCocoDocument(
+        body.coco, assets, labels,
+        (prefix) => makeId(prefix === "annotation" ? origin : prefix),
+        // O contrato do BYOM diz que a caixa vale quando o modelo não segmenta;
+        // sem isto, um objeto com os dois campos vira polígono e caixa soltos.
+        { unlabeledName: copy.unlabeled, boxAsFallback: true },
+      );
       if (!result.annotations.length) { setMessage(`${modelId}: nenhuma anotação devolvida.`); return; }
+
+      const superseded = editor.annotations
+        .filter((annotation) => annotation.asset === asset.id && annotation.id.startsWith(`${origin}-`))
+        .map((annotation) => annotation.id);
+      if (superseded.length) editor.deleteAnnotations(superseded);
+
+      const count = result.annotations.length;
+      const replaced = superseded.length
+        ? ` ${superseded.length} ${superseded.length === 1 ? "anterior substituída" : "anteriores substituídas"}.`
+        : "";
       applyCocoImport({
         labels: result.labels,
         annotations: result.annotations,
         append: true,
-        message: `${modelId}: ${result.annotations.length} ${result.annotations.length === 1 ? "anotação" : "anotações"}.`,
+        message: `${modelId}: ${count} ${count === 1 ? "anotação" : "anotações"}.${replaced}`,
       });
     } catch {
       setMessage(copy.errSamUnreachable);
     }
-  }, [applyCocoImport, asset, assets, copy, labels, makeId]);
+  }, [applyCocoImport, asset, assets, copy, editor, labels, makeId]);
 
   useEffect(() => {
     const run = (event: Event) => {
@@ -578,8 +605,11 @@ export function CanonicalEditorWorkbench() {
     return produced;
   }, [activeLabel, editor, makeId]);
 
+  // O runtime e o conector SAM são serviços distintos, em endpoints distintos.
+  // Mandar verificar o SAM quando quem não respondeu foi o runtime manda a
+  // pessoa mexer no serviço errado.
   const describeFailure = useCallback((error: unknown) =>
-    error instanceof RuntimeError ? `runtime: ${error.message}` : copy.errSamUnreachable, [copy]);
+    error instanceof RuntimeError ? `runtime: ${error.message}` : copy.errRuntimeUnreachable, [copy]);
 
   /** A imagem aberta, restrita à caixa selecionada quando houver uma. */
   const runRuntimeModel = useCallback(async () => {

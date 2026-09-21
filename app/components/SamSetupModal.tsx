@@ -578,7 +578,11 @@ export default function SamSetupModal({
   const pendingCapabilities = upstreamCapabilities.filter((key) => !integratedCapabilities.has(key)).map(labelOf);
   // Cada sistema escreve a variável de ambiente à sua maneira, e errar a sintaxe é
   // o tipo de detalhe que faz o usuário desistir achando que o produto não serve.
-  const unixCommand = `${forceCpu ? "POLIGOME_DEVICE=cpu " : ""}bash poligome-sam-macos-linux.sh ${model.id}`;
+  // Nenhum dos scripts guarda a escolha: cada um lê POLIGOME_DEVICE do ambiente
+  // e, sem ela, volta para `auto`. Então o prefixo precisa acompanhar também os
+  // comandos de religar e de serviço, senão marcar a caixa vale só na instalação.
+  const unixCpuPrefix = forceCpu ? "POLIGOME_DEVICE=cpu " : "";
+  const unixCommand = `${unixCpuPrefix}bash poligome-sam-macos-linux.sh ${model.id}`;
   const windowsCommand = `${forceCpu ? "set POLIGOME_DEVICE=cpu && " : ""}poligome-sam-windows.bat ${model.id}`;
   // A forma completa, com powershell -File: digitar só o nome do .ps1 é recusado
   // pela política de execução, e dois cliques abrem o Bloco de Notas. Mostrar o
@@ -823,15 +827,22 @@ export default function SamSetupModal({
               {installOs === "unix" && <>
                 <p>Baixe o iniciador uma vez e guarde-o junto do instalador. Ele sobe o conector com o modelo que já estava escolhido, sem baixar nada de novo.</p>
                 <a className="sam-step-download" href="/poligome-sam-start-macos-linux.sh" download><Download size={14} />Baixar poligome-sam-start-macos-linux.sh</a>
-                <code>{String.raw`cd ~/Downloads
-bash poligome-sam-start-macos-linux.sh`}</code>
+                <code>{`cd ~/Downloads
+${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`}</code>
                 <p>No Linux dá para nunca mais pensar nisso: o serviço de usuário sobe o conector sozinho a cada login, e aí nenhuma janela precisa ficar aberta.</p>
                 <a className="sam-step-download" href="/poligome-sam-service-linux.sh" download><Download size={14} />Baixar poligome-sam-service-linux.sh</a>
-                <code>{"bash poligome-sam-service-linux.sh install"}</code>
+                <code>{`${unixCpuPrefix}bash poligome-sam-service-linux.sh install`}</code>
               </>}
               {installOs === "wsl" && <>
                 <p>Baixe o iniciador uma vez e guarde-o junto do instalador. Dois cliques nele sobem o conector com o modelo que já estava escolhido, sem baixar nada de novo.</p>
                 <a className="sam-step-download" href="/poligome-sam-start-windows.bat" download><Download size={14} />Baixar poligome-sam-start-windows.bat</a>
+                {/* Dois cliques não carregam variável de ambiente, e sem ela o
+                    iniciador volta para `auto`. Quem escolheu CPU precisa do
+                    comando, não do atalho. */}
+                {forceCpu && <>
+                  <p>Como você marcou CPU, chame o iniciador pelo Prompt de Comando: dois cliques não levam a escolha junto.</p>
+                  <code>{String.raw`cd %USERPROFILE%\Downloads` + "\n" + "set POLIGOME_DEVICE=cpu && poligome-sam-start-windows.bat"}</code>
+                </>}
               </>}
               {installOs === "native" && <>
                 <p>Este caminho não tem iniciador à parte, e não precisa: rodar o mesmo comando de novo reconhece o que já está instalado e só levanta o conector, em segundos.</p>

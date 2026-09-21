@@ -3,10 +3,10 @@ set -euo pipefail
 
 POLIGOME_SAM_INSTALLER_API=2
 
-DEFAULT_SITE_URL="https://www.poligome.com"
+DEFAULT_SITE_URL="https://poligome.com"
 DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 DEFAULT_CONNECTOR_URL="${DEFAULT_ASSET_BASE_URL}/poligome-sam-local.py"
-DEFAULT_CONNECTOR_SHA256="587d9e065254b2be581a75a51a4263299c1e434ed3011e6ae27ea9dda5b7c6a2"
+DEFAULT_CONNECTOR_SHA256="867f643f424f203be91d1e0d964135b7f469fe9fe1a349efbb4ef36182208722"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE_URL="${POLIGOME_SITE_URL:-${DEFAULT_SITE_URL}}"
 SITE_URL="${SITE_URL%/}"

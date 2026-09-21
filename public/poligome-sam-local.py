@@ -125,6 +125,10 @@ MIN_SAM3_CONCEPT_THRESHOLD = _bounded_env_float(
     maximum=0.95,
 )
 DEFAULT_ALLOWED_ORIGINS = (
+    # Os dois nomes do site são o mesmo site. Aceitar só um deles devolve 403 a
+    # quem digitou o outro, e a mensagem que chega ao editor é indistinguível de
+    # um conector fora do ar.
+    "https://poligome.com",
     "https://www.poligome.com",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -492,6 +496,53 @@ def _record_byom_run(registration: ByomRegistration, summary: dict[str, Any]) ->
               file=sys.stderr, flush=True)
 
 
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _polygon_rings(segmentation: Any) -> list[list[Any]]:
+    """As listas que o editor leria como contorno, no mesmo critério dele.
+
+    O importador aceita tanto `[x, y, ...]` solto quanto uma lista de anéis, e
+    descarta o que não fecha três pontos. Repetir o critério aqui é o que faz
+    "o conector aceitou" significar "o editor desenha".
+    """
+    if not isinstance(segmentation, list) or not segmentation:
+        return []
+    if all(_is_number(item) for item in segmentation):
+        return [segmentation]
+    return [ring for ring in segmentation if isinstance(ring, list)]
+
+
+def _has_drawable_polygon(segmentation: Any) -> bool:
+    rings = _polygon_rings(segmentation)
+    return any(
+        len(ring) >= 6 and len(ring) % 2 == 0 and all(_is_number(value) for value in ring)
+        for ring in rings
+    )
+
+
+def _has_drawable_bbox(bbox: Any) -> bool:
+    return isinstance(bbox, list) and len(bbox) >= 4 and all(_is_number(value) for value in bbox[:4])
+
+
+def _has_drawable_keypoints(keypoints: Any) -> bool:
+    if not isinstance(keypoints, list) or not keypoints:
+        return False
+    if all(_is_number(item) for item in keypoints):
+        stride = 3 if len(keypoints) >= 3 and len(keypoints) % 3 == 0 else 2
+        return any(
+            _is_number(keypoints[offset])
+            and _is_number(keypoints[offset + 1])
+            and (stride == 2 or (_is_number(keypoints[offset + 2]) and keypoints[offset + 2] > 0))
+            for offset in range(0, len(keypoints) - 1, stride)
+        )
+    return any(
+        isinstance(item, dict) and _is_number(item.get("x")) and _is_number(item.get("y"))
+        for item in keypoints
+    )
+
+
 def _validate_coco_document(document: Any, width: int, height: int, file_name: str) -> dict[str, Any]:
     """Confere o COCO devolvido antes de repassá-lo ao editor.
 
@@ -526,15 +577,31 @@ def _validate_coco_document(document: Any, width: int, height: int, file_name: s
     for index, annotation in enumerate(annotations):
         if not isinstance(annotation, dict):
             raise RuntimeError(f"a anotação {index} não é um objeto JSON.")
-        has_geometry = (
-            isinstance(annotation.get("segmentation"), list)
-            or isinstance(annotation.get("bbox"), list)
-            or isinstance(annotation.get("keypoints"), list)
-        )
-        if not has_geometry:
+
+        # Estar presente não basta: `segmentation: []` e `bbox: [1, 2]` passavam
+        # aqui e eram descartados adiante pelo importador, e o que a pessoa lia
+        # era "nenhuma anotação devolvida" — como se o modelo não tivesse achado
+        # nada, e não como o contêiner respondendo fora do contrato.
+        present = [
+            key for key in ("segmentation", "bbox", "keypoints")
+            if annotation.get(key) is not None
+        ]
+        if not present:
             raise RuntimeError(
                 f"a anotação {index} não traz segmentation, bbox nem keypoints; "
                 "sem geometria não há o que desenhar."
+            )
+        drawable = (
+            _has_drawable_polygon(annotation.get("segmentation"))
+            or _has_drawable_bbox(annotation.get("bbox"))
+            or _has_drawable_keypoints(annotation.get("keypoints"))
+        )
+        if not drawable:
+            raise RuntimeError(
+                f"a anotação {index} traz {', '.join(present)}, mas nenhuma geometria "
+                "utilizável: segmentation precisa de ao menos um anel com 3 pontos "
+                "(6 números pares), bbox precisa de [x, y, largura, altura] numéricos "
+                "e keypoints precisa de ao menos um ponto visível."
             )
 
     return {
