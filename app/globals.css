@@ -576,6 +576,14 @@ html[data-theme="light"]{--ink:#29262F;--muted:#6E6A75;--line:#DEDCE4;--green:#7
 .ai-conn-address{flex:1;min-width:220px;display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:10px;font-weight:650}
 .ai-conn-address input{height:32px;padding:0 9px;border:1px solid var(--line);border-radius:8px;background:var(--control-bg);color:var(--ink);font-family:var(--mono,ui-monospace,monospace);font-size:11px;outline:0}
 .ai-conn-address input:focus{border-color:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 18%,transparent)}
+.ai-conn-address input[aria-invalid=true]{border-color:var(--danger)}
+.ai-conn-address .byom-reason{margin:0;font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+.ai-conn-row>button:disabled{opacity:.5;cursor:not-allowed}
+.sam-catalog-modal :is(button,a,input,select,summary):focus-visible,.preannotate-modal :is(button,a,input,select):focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.sam-catalog-modal :is(.sam-model-hero p,.sam-steps li p,.sam-install-panel>div:first-child>p,.sam-relaunch p,.sam-manual-note,.ai-conn-detail,.ai-conn-warning,.ai-guide-kinds p,.ai-guide-rule,.byom-import-hint){font-size:14px;line-height:1.5}
+.sam-catalog-modal :is(.sam-steps li b,.sam-steps li code,.sam-relaunch code,.ai-conn-address,.ai-conn-row>button,.ai-guide-table table){font-size:14px}
+.sam-catalog-modal .ai-conn-address input{font-size:14px;height:38px}
+.preannotate-modal :is(.pa-note,.pa-warning,.pa-empty p,.pa-scopes label,.pa-param){font-size:14px;line-height:1.5}
 .ai-conn-list{margin:10px 0 0;padding:0;list-style:none}
 .ai-conn-list li{display:grid;grid-template-columns:9px minmax(0,auto) 1fr;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:11px}
 .ai-conn-list li:first-child{border-top:0}

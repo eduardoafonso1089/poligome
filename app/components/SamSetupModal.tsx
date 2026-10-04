@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { containModalFocus } from "../lib/modal-focus";
 import {
   AlertTriangle, Check, Cpu, Download, ExternalLink, Gauge, HardDrive,
   KeyRound, Laptop, Layers, Link2, Network, Plus, PowerOff, ScanSearch, Server, ShieldCheck, Sparkles, Terminal, WandSparkles, X,
@@ -301,6 +302,8 @@ export default function SamSetupModal({
 }: Props) {
   const ai = getAiCopy(language);
   const sc = getSamCopy(language);
+  const dialogRef = useRef<HTMLElement>(null);
+  useEffect(() => dialogRef.current ? containModalFocus(dialogRef.current) : undefined, []);
   // O que a área de detalhe mostra em cada aba. No Assistido, "model" é a ficha
   // do SAM escolhido à esquerda; no Automático, o guia vem primeiro porque a
   // primeira pergunta ali é qual dos dois tipos serve.
@@ -430,7 +433,7 @@ export default function SamSetupModal({
     // clique dentro dele, não pode derrubar a tela no meio de um formulário.
     onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
   >
-    <section className="sam-catalog-modal" role="dialog" aria-modal="true" aria-labelledby="sam-catalog-title">
+    <section ref={dialogRef} tabIndex={-1} className="sam-catalog-modal" role="dialog" aria-modal="true" aria-labelledby="sam-catalog-title">
       <header>
         <div><span><Sparkles size={21} /></span><div><h2 id="sam-catalog-title">{ai.hubTitle}</h2><p>{ai.hubSubtitle}</p></div></div>
         <button onClick={onClose} aria-label={ai.close}><X size={21} /></button>

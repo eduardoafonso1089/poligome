@@ -1,3 +1,4 @@
+import { localEndpointError } from "./local-endpoint";
 import { contours } from "d3-contour";
 import { fill } from "./i18n";
 import type { Copy } from "./i18n";
@@ -362,6 +363,7 @@ export async function requestSamPredictions({
   requestSeq,
   signal,
 }: SamRequest): Promise<SamPredictionResult> {
+  if (localEndpointError(endpoint)) throw new Error(copy.errSamInvalidEndpoint);
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (signal?.aborted) controller.abort();

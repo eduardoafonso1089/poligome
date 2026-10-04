@@ -564,7 +564,7 @@ export const SAM_MODELS = [
     },
     license: APACHE_2_LICENSE,
     description:
-      "Modelo padrão recomendado para segmentação interativa e tracking. É pouco maior que Tiny e melhora especialmente o benchmark MOSE.",
+      "Recomendado para começar: você indica o objeto com pontos ou uma caixa e o modelo sugere o contorno. É um pouco maior que Tiny. Vídeo não está disponível neste editor.",
     capabilities: SAM2_CAPABILITIES,
     capabilityNotes: [
       "Propaga máscaras para frente ou para trás e permite adicionar novos objetos depois do início do tracking.",

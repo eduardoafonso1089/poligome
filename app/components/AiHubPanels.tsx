@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { localEndpointError } from "../lib/local-endpoint";
 import {
   AlertTriangle, Boxes, Check, Cpu, Gauge, Layers, Pencil, RefreshCw, Server, ShieldCheck, Sparkles, Trash2, ScanSearch,
 } from "lucide-react";
@@ -309,16 +310,19 @@ export function ContainerModelPanel({
  * Gravar a cada tecla disparava uma sondagem por letra, e cada uma espera
  * segundos por uma porta que ainda está pela metade.
  */
-function EndpointField({ copy, value, placeholder, onCommit }: { copy: AiCopy; value: string; placeholder: string; onCommit: (value: string) => void }) {
+function EndpointField({ copy, value, placeholder, onCommit, onValidityChange }: { copy: AiCopy; value: string; placeholder: string; onCommit: (value: string) => void; onValidityChange: (valid: boolean) => void }) {
   const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
-  const commit = () => { const next = draft.trim(); if (next && next !== value) onCommit(next); else setDraft(value); };
+  const errorId = useId();
+  const reason = localEndpointError(draft);
+  useEffect(() => { setDraft(value); onValidityChange(!localEndpointError(value)); }, [value, onValidityChange]);
+  const commit = () => { const next = draft.trim(); if (!localEndpointError(next) && next !== value) onCommit(next); };
   return <label className="ai-conn-address">{copy.connAddress}<input
     type="url" value={draft} placeholder={placeholder} spellCheck={false}
-    onChange={(event) => setDraft(event.target.value)}
+    aria-invalid={Boolean(reason)} aria-describedby={reason ? errorId : undefined}
+    onChange={(event) => { setDraft(event.target.value); onValidityChange(!localEndpointError(event.target.value)); }}
     onBlur={commit}
-    onKeyDown={(event) => { if (event.key === "Enter") commit(); if (event.key === "Escape") { event.stopPropagation(); setDraft(value); } }}
-  /></label>;
+    onKeyDown={(event) => { if (event.key === "Enter") commit(); if (event.key === "Escape") { event.stopPropagation(); setDraft(value); onValidityChange(!localEndpointError(value)); } }}
+  />{reason && <span id={errorId} role="alert" className="byom-reason">{reason === "remote" ? copy.connLocalOnly : copy.connInvalidAddress}</span>}</label>;
 }
 
 type ServiceState = "checking" | "ready" | "offline";
@@ -339,6 +343,8 @@ export function ConnectionsPanel({
   onShowRuntimeInstall: () => void;
 }) {
   const up = containers.filter((model) => model.ready).length;
+  const [connectorAddressValid, setConnectorAddressValid] = useState(() => !localEndpointError(connector.endpoint));
+  const [runtimeAddressValid, setRuntimeAddressValid] = useState(() => !localEndpointError(runtime.endpoint));
   const runtimePort = (() => { try { return new URL(runtime.endpoint).port; } catch { return ""; } })();
   return <div className="byom-panel">
     <section className="sam-model-hero">
@@ -351,8 +357,8 @@ export function ConnectionsPanel({
       {connector.state === "ready" && <p className="ai-conn-detail">{fill(copy.connServing, { model: connector.serving })}{connector.host ? ` · ${fill(copy.connHost, { host: connector.host })}` : ""}</p>}
       {connector.state === "offline" && <p className="ai-conn-detail">{copy.connConnectorHow}</p>}
       <div className="ai-conn-row">
-        <EndpointField copy={copy} value={connector.endpoint} placeholder="http://127.0.0.1:7860/predict" onCommit={connector.onEndpoint} />
-        <button onClick={connector.onRetry}><RefreshCw size={13} />{copy.connRetry}</button>
+        <EndpointField copy={copy} value={connector.endpoint} placeholder="http://127.0.0.1:7860/predict" onCommit={connector.onEndpoint} onValidityChange={setConnectorAddressValid} />
+        <button disabled={!connectorAddressValid} onClick={connector.onRetry}><RefreshCw size={13} />{copy.connRetry}</button>
         {connector.state === "offline" && <button className="primary" onClick={onShowInstall}>{copy.connConnectorHowButton}</button>}
       </div>
     </section>
@@ -363,8 +369,8 @@ export function ConnectionsPanel({
       {runtime.state === "offline" && <p className="ai-conn-detail">{copy.runtimeOfflineBody}</p>}
       {runtime.state === "offline" && runtimePort === "7861" && <p className="ai-conn-warning"><AlertTriangle size={13} /><span>{copy.connPortClash}</span></p>}
       <div className="ai-conn-row">
-        <EndpointField copy={copy} value={runtime.endpoint} placeholder="http://127.0.0.1:7861" onCommit={runtime.onEndpoint} />
-        <button onClick={runtime.onRetry}><RefreshCw size={13} />{copy.connRetry}</button>
+        <EndpointField copy={copy} value={runtime.endpoint} placeholder="http://127.0.0.1:7861" onCommit={runtime.onEndpoint} onValidityChange={setRuntimeAddressValid} />
+        <button disabled={!runtimeAddressValid} onClick={runtime.onRetry}><RefreshCw size={13} />{copy.connRetry}</button>
         {runtime.state === "offline" && <button className="primary" onClick={onShowRuntimeInstall}>{copy.connRuntimeHowButton}</button>}
       </div>
     </section>
