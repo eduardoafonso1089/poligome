@@ -30,11 +30,20 @@ See [Raster import and export](docs/RASTER_WORKFLOW.md) for supported formats, s
 
 ## Local AI and Poligome Runtime
 
-Poligome is designed so AI-assisted annotation can run on the same computer as the dataset. The browser can communicate with a model service bound to loopback (`127.0.0.1`), receive inference results and use them as pre-annotations without sending the source images to a Poligome cloud service.
+Poligome is designed so AI-assisted annotation can run on the same computer as the dataset. The browser talks to model services bound to loopback (`127.0.0.1`), receives inference results and uses them as pre-annotations without sending the source images to a Poligome cloud service. Docker is not required to install or run the Poligome web interface.
 
-This model-service direction is called **Poligome Runtime**. The goal is to provide a plug-and-play local runtime with standard models and an extension path for users to connect their own models. Models may run in a local Python environment or a container; **Docker is not required to install or run the Poligome web interface**.
+The editor organizes AI by how you use it, not by how it runs. Everything sits behind one **AI** button in the top bar:
 
-The repository already includes the Local SAM connector as an AI-oriented local helper. The broader Poligome Runtime for arbitrary user models is under development and is not presented as a completed feature.
+| Area | What it does | Runs on |
+| --- | --- | --- |
+| **Assisted** | You point at an object — click, box or, with SAM 3, text — and the AI cuts out just that object. Available as the SAM tool (`S`). | Local SAM connector |
+| **Automatic · Native** | A model built for Poligome annotates the whole image on its own. It splits large images into parts, draws results as they arrive, accepts just a selected region and exposes on-screen settings declared by the model. | Poligome Runtime |
+| **Automatic · Container** | Your own model in a Docker container with the SageMaker contract (BYOM). Quick to plug in and portable, but it receives the whole image at once and returns results at the end. | Local connector → your container |
+| **Connections** | Shows the connector, the runtime and the containers, with their addresses and status. | — |
+
+**Pre-annotate**, next to the AI button, runs any Automatic model on the open image, a selected region (Native only) or every image in the project. Options a model cannot honour are disabled with the reason written next to them. Each run ends with a summary that offers to undo everything that run added in one step.
+
+Poligome Runtime is a separate local program that serves one Native model at a time and describes it through a manifest. The editor looks for it at `http://127.0.0.1:7861` by default; that is also the local COG converter's default port, so if both run on the same machine change one of them and the address under **Connections**.
 
 ## Local helpers
 
@@ -122,7 +131,7 @@ The packaging mirrors Amazon SageMaker, so a container prepared for it runs here
 - the identifier must begin with `byom-`, and the endpoint may only be `127.0.0.1` or `localhost`: a remote address would move images off the user's machine;
 - `segmentation` becomes a polygon, `bbox` becomes a box, and `keypoints` becomes a point, with `categories[].name` defining the class.
 
-The connector exposes `GET /byom/models`, which lists registered containers and their state; `POST /byom/register`, which imports or edits a registration; `DELETE /byom/models/{id}`, which removes one; and `POST /byom/annotate`, which runs one against an image. A container may implement `GET /metadata` to declare its classes; when it does not, the connector retains a summary of the last run and the interface explains the model from that. In the interface, the AI-model button at the top shows what is in use — `SAM 2.1`, `MedSAM2`, or `BYOM` with the container name, and both together when both are active because they are independent paths whose masks do not interfere — and **Bring my model** gathers the contract, guide, downloadable files, and registered containers. The complete guide is in [docs/byom.md](docs/byom.md), starting with **What requires manual action**: BYOM depends on the connector and container, and containers are created without a restart policy, so restarting the machine or Docker leaves them stopped — the registration survives, but the process does not.
+The connector exposes `GET /byom/models`, which lists registered containers and their state; `POST /byom/register`, which imports or edits a registration; `DELETE /byom/models/{id}`, which removes one; and `POST /byom/annotate`, which runs one against an image. A container may implement `GET /metadata` to declare its classes; when it does not, the connector retains a summary of the last run and the interface explains the model from that. In the interface, BYOM models live under the **AI** button, **Automatic** tab, as **Container** models next to the **Native** ones served by Poligome Runtime; **Add my model** gathers the contract, guide, downloadable files and import form, and **Pre-annotate** runs a model on the open image or on every image in the project, ending with a summary that can undo the whole run at once. The complete guide is in [docs/byom.md](docs/byom.md), starting with **What requires manual action**: BYOM depends on the connector and container, and containers are created without a restart policy, so restarting the machine or Docker leaves them stopped — the registration survives, but the process does not.
 
 SAM 2.1 checkpoints come from Meta's official downloads; SAM 3 requires requesting access at https://huggingface.co/facebook/sam3, waiting for manual approval, and running `hf auth login` locally. The flow was verified end to end with an approved account: downloading the 3.45 GB checkpoint, loading on CUDA, point and box prompts, and text prompts returning multiple concept instances. The installers invoke the Hugging Face CLI through its console script when usable and, when its shebang points to an interpreter that no longer exists — which happens if the app folder is renamed — fall back to the entry point resolved by the package itself.
 

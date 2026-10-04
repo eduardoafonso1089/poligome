@@ -2,22 +2,31 @@
 
 import { useEffect, useState } from "react";
 import {
-  AlertTriangle, Boxes, Check, Cpu, Download, ExternalLink, Gauge, HardDrive,
-  KeyRound, Laptop, Link2, Network, Pencil, Plus, PowerOff, Server, ShieldCheck, Sparkles, Terminal, Trash2, X,
+  AlertTriangle, Check, Cpu, Download, ExternalLink, Gauge, HardDrive,
+  KeyRound, Laptop, Layers, Link2, Network, Plus, PowerOff, ScanSearch, Server, ShieldCheck, Sparkles, Terminal, WandSparkles, X,
 } from "lucide-react";
-import { getCopy, type Language } from "../lib/i18n";
-import { LocalConnectionExplainer } from "./LocalConnectionExplainer";
+import { type Language } from "../lib/i18n";
+import { getAiCopy } from "../lib/ai-copy";
 import { SAM_MODELS, getSamModel } from "../lib/sam-models";
-import { BYOM_MODEL_ID_PATTERN, describeByomModel } from "../lib/sam-models";
+import { BYOM_MODEL_ID_PATTERN } from "../lib/sam-models";
 import type { ByomModel, SamModelDefinition } from "../lib/sam-models";
+import type { RuntimeManifest } from "../lib/runtime-client";
+import {
+  AutomaticGuidePanel, ConnectionsPanel, ContainerModelPanel, HowItWorksPanel, RuntimeModelPanel,
+} from "./AiHubPanels";
 
 type ConnectionState = "idle" | "checking" | "loading" | "ready" | "error" | "offline";
 
 type ByomWriteOutcome = { ok: true } | { ok: false; detail: string };
 
+/** As três abas da central: como a pessoa usa a IA, e não como ela roda. */
+export type AiHubTab = "assisted" | "automatic" | "connections";
+
 type Props = {
-  /** O painel é escrito em português; o idioma vale para o que vem do i18n. */
   language?: Language;
+  /** A aba aberta; quem abre a central decide por onde ela começa. */
+  tab: AiHubTab;
+  onTabChange: (tab: AiHubTab) => void;
   selectedModelId: string;
   loadedModelId: string | null;
   connectionState: ConnectionState;
@@ -33,19 +42,19 @@ type Props = {
   endpoint: string;
   /** Modelos BYOM anunciados pelo conector; vazio quando não há contêiner registrado. */
   byomModels: readonly ByomModel[];
-  /** Modelo BYOM escolhido para anotar, ou null quando o SAM é quem está em uso. */
-  byomModelId: string | null;
   byomBusy: boolean;
+  /** O Poligome Runtime: onde atende, se respondeu e o modelo que serve. */
+  runtime: { state: "checking" | "ready" | "offline"; endpoint: string; manifest: RuntimeManifest | null; setEndpoint: (value: string) => void; refresh: () => void };
   onSelectModel: (modelId: string) => void;
-  onSelectByomModel: (modelId: string | null) => void;
-  onRunByomModel: (modelId: string) => void;
+  /** Abre o diálogo de pré-anotação já com este modelo: "runtime" ou o id de um contêiner. */
+  onPreannotate: (modelKey: string) => void;
   /** Devolve o desfecho para que o formulário possa manter o que foi digitado e mostrar o motivo. */
   onRegisterByomModel: (entry: { modelId: string; name: string; port: number; notes?: string }) => Promise<ByomWriteOutcome>;
   onRemoveByomModel: (modelId: string) => void;
-  /** Desliga SAM e BYOM de uma vez, para voltar às ferramentas manuais. */
+  /** Deixa de usar o SAM para anotar, para voltar às ferramentas manuais. */
   onUnselectAll: () => void;
-  anyModelSelected: boolean;
   onEndpointChange: (endpoint: string) => void;
+  onRecheckConnector: () => void;
   onConnect: () => void;
   onClose: () => void;
 };
@@ -132,154 +141,6 @@ const BYOM_STEPS = [
     command: "bash poligome-byom-macos-linux.sh start --model-id byom-meu-modelo",
   },
 ] as const;
-
-/**
- * A aba "Como funciona" existe porque a pergunta que ela responde — para onde vai
- * a minha imagem — vem antes de escolher modelo, e estava repetida em duas telas.
- * Num lugar só, e primeiro na lista, ela é achável sem atrapalhar quem já sabe.
- */
-function HowItWorks({ language }: { language: Language }) {
-  return <div className="byom-panel">
-    <section className="sam-model-hero">
-      <div><span className="family byom">Local</span></div>
-      <h3>Como funciona</h3>
-      <p>
-        O Poligome não manda imagem para servidor nenhum. Quem carrega o modelo e roda a inferência é um programa que
-        fica na sua máquina, e a página só conversa com ele. O desenho abaixo é o caminho inteiro.
-      </p>
-    </section>
-
-    <LocalConnectionExplainer copy={getCopy(language)} />
-
-    <section className="byom-steps">
-      <h4>O que o Poligome faz e o que fica com você</h4>
-      <article>
-        <b>A página encontra, nunca liga</b>
-        <p>
-          Ao abrir o editor e a cada volta de foco, a página procura o conector em 127.0.0.1:7860 e adota o que já
-          estiver carregado. Nenhuma página web pode criar processo nem subir contêiner — é regra do navegador. Por
-          isso o terminal do instalador precisa ficar aberto, ou, no Linux, o serviço de usuário faz esse papel.
-        </p>
-      </article>
-      <article>
-        <b>Trocar de modelo não reinstala nada</b>
-        <p>
-          Escolher outro SAM na lista ao lado e confirmar recarrega o conector no ambiente da família pedida. O que
-          não estiver instalado é recusado com o motivo, em vez de falhar no meio. A escolha fica gravada, então o
-          próximo arranque sobe o mesmo modelo.
-        </p>
-      </article>
-      <article>
-        <b>SAM e BYOM convivem</b>
-        <p>
-          Os dois podem ficar ativos ao mesmo tempo, e o botão do topo mostra os dois. São caminhos independentes: o
-          SAM segmenta o objeto que você aponta — por clique, por caixa, ou por texto no SAM 3 — o BYOM anota a
-          imagem inteira de uma vez, e as máscaras de um não alteram nem
-          substituem as do outro. Desselecionar todos apenas deixa de usá-los para anotar — nada é desinstalado e o
-          conector segue conectado.
-        </p>
-      </article>
-    </section>
-
-    <section className="sam-privacy">
-      <ShieldCheck size={16} />
-      <div>
-        <b>Inferência local</b>
-        <p>
-          Imagens e prompts ficam no computador. O contêiner do BYOM só é aceito em 127.0.0.1 ou localhost: um
-          endereço remoto tiraria as imagens da sua máquina, que é justamente o que o Poligome evita.
-        </p>
-      </div>
-    </section>
-  </div>;
-}
-
-function ByomEntry({
-  model,
-  busy,
-  onRun,
-  onRemove,
-  onSave,
-}: {
-  model: ByomModel;
-  busy: boolean;
-  onRun: (modelId: string) => void;
-  onRemove: (modelId: string) => void;
-  onSave: (entry: { modelId: string; name: string; port: number; notes: string }) => Promise<ByomWriteOutcome>;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(model.name);
-  const [port, setPort] = useState(String(Number(model.endpoint.split(":").at(-1)) || 8080));
-  const [notes, setNotes] = useState(model.notes);
-  // Fechar a edição antes de saber se o registro foi gravado descartava a
-  // correção e não dizia o motivo; agora a ficha só fecha quando deu certo.
-  const [saveError, setSaveError] = useState("");
-  const portNumber = Number(port);
-  const canSave = Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535 && name.trim().length > 0;
-
-  return <div className="byom-detail">
-    <section className="sam-model-hero">
-      <div>
-        <span className="family byom">BYOM</span>
-        <span className={model.ready ? "byom-state up" : "byom-state down"}>{model.ready ? "contêiner no ar" : "contêiner parado"}</span>
-      </div>
-      <h3>{model.name}</h3>
-      <p>{model.model_id} · {model.endpoint}{model.image ? ` · imagem ${model.image}` : ""}</p>
-    </section>
-
-    {!model.ready && model.unavailable_reason && <p className="byom-reason">{model.unavailable_reason}</p>}
-
-    {/* Explicação montada a partir do que o contêiner declara ou já devolveu. */}
-    <p className="byom-summary">{describeByomModel(model)}</p>
-
-    {model.metadata?.limitations && <section className="byom-limits">
-      <AlertTriangle size={15} />
-      <div><b>Limitações declaradas pelo modelo</b><p>{model.metadata.limitations}</p></div>
-    </section>}
-
-    {(model.metadata?.categories.length || Object.keys(model.metadata?.parameters ?? {}).length || Object.keys(model.env).length) ? <section className="byom-facts">
-      {model.metadata?.categories.length ? <article><b>Classes exportadas</b><p>{model.metadata.categories.join(", ")}</p></article> : null}
-      {Object.entries(model.metadata?.parameters ?? {}).length ? <article><b>Parâmetros do modelo</b><p>{Object.entries(model.metadata!.parameters).map(([key, value]) => `${key}=${value}`).join(" · ")}</p></article> : null}
-      {Object.entries(model.env).length ? <article><b>Ambiente do contêiner</b><p>{Object.entries(model.env).map(([key, value]) => `${key}=${value}`).join(" · ")}</p></article> : null}
-      {model.last_run ? <article><b>Última execução</b><p>{model.last_run.annotations} {model.last_run.annotations === 1 ? "anotação" : "anotações"}{model.last_run.categories.length ? ` · ${model.last_run.categories.join(", ")}` : ""}</p></article> : null}
-    </section> : null}
-
-    {model.notes && !editing && <p className="byom-note">{model.notes}</p>}
-
-    {editing ? <div className="byom-edit">
-      <label>Nome<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-      <label>Porta<input type="number" min={1} max={65535} value={port} onChange={(event) => setPort(event.target.value)} /></label>
-      <label className="byom-edit-notes">Anotação<textarea rows={3} value={notes} placeholder="Para que serve, em que dados foi treinado, o que revisar com atenção." onChange={(event) => setNotes(event.target.value)} /></label>
-      <div className="byom-edit-actions">
-        <button onClick={() => { setName(model.name); setNotes(model.notes); setEditing(false); }}>Cancelar</button>
-        <button
-          className="primary"
-          disabled={!canSave}
-          onClick={async () => {
-            setSaveError("");
-            const outcome = await onSave({ modelId: model.model_id, name: name.trim(), port: portNumber, notes: notes.trim() });
-            if (outcome.ok) setEditing(false);
-            else setSaveError(outcome.detail);
-          }}
-        >
-          <Check size={13} />Salvar
-        </button>
-      </div>
-      {saveError && <p className="byom-reason">Não foi possível salvar: {saveError}</p>}
-    </div> : <div className="byom-entry-actions">
-      <button className="byom-run" disabled={!model.ready || busy} onClick={() => onRun(model.model_id)}>
-        {busy ? <Gauge className="spin" size={14} /> : <Sparkles size={14} />}
-        {busy ? "Anotando…" : "Anotar a imagem atual"}
-      </button>
-      <button className="byom-icon" title="Editar nome, porta e anotação" onClick={() => setEditing(true)}>
-        <Pencil size={14} />
-      </button>
-      <button className="byom-icon danger" title="Remover o registro; a imagem e o contêiner continuam no Docker" onClick={() => onRemove(model.model_id)}>
-        <Trash2 size={14} />
-      </button>
-    </div>}
-  </div>;
-}
 
 function ByomPanel({
   models,
@@ -498,6 +359,8 @@ function ByomPanel({
 
 export default function SamSetupModal({
   language = "pt",
+  tab,
+  onTabChange,
   selectedModelId,
   loadedModelId,
   connectionState,
@@ -508,22 +371,25 @@ export default function SamSetupModal({
   connectorHost,
   endpoint,
   byomModels,
-  byomModelId,
   byomBusy,
+  runtime,
   onSelectModel,
-  onSelectByomModel,
-  onRunByomModel,
+  onPreannotate,
   onRegisterByomModel,
   onRemoveByomModel,
   onUnselectAll,
-  anyModelSelected,
   onEndpointChange,
+  onRecheckConnector,
   onConnect,
   onClose,
 }: Props) {
-  // O painel BYOM ocupa a área de detalhe no lugar da ficha do modelo, porque o
-  // que interessa ali é a documentação do contrato e não um card comparável.
-  const [byomView, setByomView] = useState<"docs" | "model" | "how" | null>(null);
+  const ai = getAiCopy(language);
+  // O que a área de detalhe mostra em cada aba. No Assistido, "model" é a ficha
+  // do SAM escolhido à esquerda; no Automático, o guia vem primeiro porque a
+  // primeira pergunta ali é qual dos dois tipos serve.
+  const [assistedView, setAssistedView] = useState<"how" | "model">("model");
+  const [automaticView, setAutomaticView] = useState<"guide" | "runtime" | "container" | "docs">("guide");
+  const [viewedContainerId, setViewedContainerId] = useState<string | null>(null);
   // Forçar CPU era só uma variável de ambiente citada no meio de um parágrafo. A
   // página não roda o instalador, mas pode escrever o comando certo por sistema —
   // que é a única parte difícil para quem não mexe com terminal.
@@ -549,10 +415,11 @@ export default function SamSetupModal({
     return () => window.removeEventListener("keydown", onKeydown, true);
   }, [onClose]);
 
-  const selectedByomModel = byomModels.find((candidate) => candidate.model_id === byomModelId) ?? null;
-  // Só o tutorial não tem o que confirmar: é texto. Um modelo, BYOM ou SAM,
-  // sempre oferece o botão de usar no canto do rodapé.
-  const showFooterAction = byomView !== "docs" && byomView !== "how";
+  const viewedContainer = byomModels.find((candidate) => candidate.model_id === viewedContainerId) ?? null;
+  const samInUse = samActive && connectionState === "ready";
+  // Só a ficha de um SAM tem o que confirmar no rodapé; o resto é texto, e as
+  // fichas do Automático trazem o próprio botão.
+  const showFooterAction = tab === "assisted" && assistedView === "model";
   const model = getSamModel(selectedModelId) ?? SAM_MODELS[0];
   const installedIds = new Set(availability.filter((entry) => entry.installed).map((entry) => entry.model_id));
   // Só vale dizer "ainda não instalado" quando o conector respondeu: sem ele a
@@ -648,82 +515,140 @@ export default function SamSetupModal({
   >
     <section className="sam-catalog-modal" role="dialog" aria-modal="true" aria-labelledby="sam-catalog-title">
       <header>
-        <div><span><Sparkles size={21} /></span><div><h2 id="sam-catalog-title">Modelos Segment Anything</h2><p>Escolha o modelo conforme recursos, hardware e licença.</p></div></div>
-        <button onClick={onClose} aria-label="Fechar"><X size={21} /></button>
+        <div><span><Sparkles size={21} /></span><div><h2 id="sam-catalog-title">{ai.hubTitle}</h2><p>{ai.hubSubtitle}</p></div></div>
+        <button onClick={onClose} aria-label={ai.close}><X size={21} /></button>
       </header>
 
-      <div className="sam-catalog-body">
-        <aside className="sam-model-list" aria-label="Modelos disponíveis">
+      {/* As abas dizem como a pessoa usa a IA, e não como ela roda: o runtime e
+          o conector moram em Conexões, que só abre quem quer saber. */}
+      <nav className="ai-hub-tabs" role="tablist" aria-label={ai.hubTitle}>
+        {([
+          ["assisted", WandSparkles, ai.tabAssisted, ai.tabAssistedHint],
+          ["automatic", ScanSearch, ai.tabAutomatic, ai.tabAutomaticHint],
+          ["connections", Network, ai.tabConnections, ai.tabConnectionsHint],
+        ] as const).map(([key, Icon, label, hint]) => <button
+          key={key}
+          role="tab"
+          aria-selected={tab === key}
+          className={tab === key ? "active" : ""}
+          onClick={() => onTabChange(key)}
+        ><Icon size={16} /><span><b>{label}</b><small>{hint}</small></span></button>)}
+      </nav>
+
+      <div className={`sam-catalog-body${tab === "connections" ? " single" : ""}`}>
+        {tab === "assisted" && <aside className="sam-model-list" aria-label={ai.modelsList}>
           <section>
-            <h3>Comece por aqui</h3>
+            <h3>{ai.listStartHere}</h3>
             <button
-              className={byomView === "how" ? "active" : ""}
-              aria-pressed={byomView === "how"}
-              onClick={() => setByomView("how")}
+              className={assistedView === "how" ? "active" : ""}
+              aria-pressed={assistedView === "how"}
+              onClick={() => setAssistedView("how")}
             >
-              <span><b>Como funciona</b><small>O conector local, o SAM e o BYOM num desenho</small></span>
+              <span><b>{ai.howTitle}</b><small>{ai.howHint}</small></span>
               <em><Network size={13} /></em>
             </button>
           </section>
 
           {(["sam2", "medsam2", "sam3"] as const).map((family) => <section key={family}>
-            <h3>{family === "sam2" ? "SAM 2.1 · recomendado" : family === "medsam2" ? "Domínio · imagem médica" : "SAM 3 · conceitos"}</h3>
+            <h3>{family === "sam2" ? ai.familySam2 : family === "medsam2" ? ai.familyMedsam2 : ai.familySam3}</h3>
             {SAM_MODELS.filter((candidate) => candidate.family === family).map((candidate) => <button
               key={candidate.id}
-              className={candidate.id === model.id && byomView === null ? "active" : ""}
-              aria-pressed={candidate.id === model.id && byomView === null}
-              onClick={() => { setByomView(null); onSelectModel(candidate.id); }}
+              className={candidate.id === model.id && assistedView === "model" ? "active" : ""}
+              aria-pressed={candidate.id === model.id && assistedView === "model"}
+              onClick={() => { setAssistedView("model"); onSelectModel(candidate.id); }}
             >
               <span><b>{candidate.name}</b><small>{candidate.parameters.label} · {candidate.checkpoint.approximateSizeLabel}</small></span>
-              {/* "Em uso" é o que está carregado agora, e não o que você está olhando:
-                  sem essa distinção não dá para ver que SAM e BYOM estão ativos juntos.
+              {/* "Em uso" é o que está carregado agora, e não o que você está olhando.
                   "Instalado" vem do conector e evita escolher um modelo que ainda
                   precisa ser baixado sem saber disso antes de clicar. */}
-              {candidate.id === loadedModelId && connectionState === "ready" && samActive
-                ? <em className="in-use">em uso</em>
+              {candidate.id === loadedModelId && samInUse
+                ? <em className="in-use">{ai.inUse}</em>
                 : installedIds.has(candidate.id)
-                  ? <em className="installed"><Check size={11} />instalado</em>
-                  : <em>{candidate.recommended ? "Recomendado" : candidate.experimental ? "Experimental" : candidate.version}</em>}
+                  ? <em className="installed"><Check size={11} />{ai.installed}</em>
+                  : <em>{candidate.recommended ? ai.recommended : candidate.experimental ? ai.experimental : candidate.version}</em>}
             </button>)}
           </section>)}
+        </aside>}
 
+        {tab === "automatic" && <aside className="sam-model-list" aria-label={ai.modelsList}>
           <section>
-            <h3>BYOM · seu modelo</h3>
-            {byomModels.map((candidate) => <button
-              key={candidate.model_id}
-              className={byomView === "model" && candidate.model_id === byomModelId ? "active" : ""}
-              aria-pressed={byomView === "model" && candidate.model_id === byomModelId}
-              onClick={() => { setByomView("model"); onSelectByomModel(candidate.model_id); }}
-            >
-              <span><b>{candidate.name}</b><small>{candidate.model_id}</small></span>
-              {candidate.model_id === byomModelId && candidate.ready
-                ? <em className="in-use">em uso</em>
-                : <em className={candidate.ready ? "byom-up" : "byom-down"}>{candidate.ready ? "no ar" : "parado"}</em>}
-            </button>)}
-            <button
-              className={byomView === "docs" ? "active" : ""}
-              aria-pressed={byomView === "docs"}
-              onClick={() => setByomView("docs")}
-            >
-              <span><b>Trazer meu modelo</b><small>Contêiner Docker · contrato e passo a passo</small></span>
-              <em><Boxes size={13} /></em>
+            <h3>{ai.listStartHere}</h3>
+            <button className={automaticView === "guide" ? "active" : ""} aria-pressed={automaticView === "guide"} onClick={() => setAutomaticView("guide")}>
+              <span><b>{ai.autoGuideTitle}</b><small>{ai.autoGuideHint}</small></span>
+              <em><Sparkles size={13} /></em>
             </button>
           </section>
-        </aside>
+
+          <section>
+            <h3>{ai.autoNativeSection}</h3>
+            <button className={automaticView === "runtime" ? "active" : ""} aria-pressed={automaticView === "runtime"} onClick={() => setAutomaticView("runtime")}>
+              {runtime.state === "ready" && runtime.manifest
+                ? <><span><b>{runtime.manifest.name}</b><small>{runtime.manifest.id} · {runtime.manifest.version}</small></span><em className="byom-up">{ai.stateUp}</em></>
+                : <><span><b>{ai.autoNativeOffline}</b><small>{ai.autoNativeOfflineHint}</small></span><em><Layers size={13} /></em></>}
+            </button>
+          </section>
+
+          <section>
+            <h3>{ai.autoMineSection}</h3>
+            {byomModels.map((candidate) => <button
+              key={candidate.model_id}
+              className={automaticView === "container" && candidate.model_id === viewedContainerId ? "active" : ""}
+              aria-pressed={automaticView === "container" && candidate.model_id === viewedContainerId}
+              onClick={() => { setAutomaticView("container"); setViewedContainerId(candidate.model_id); }}
+            >
+              <span><b>{candidate.name}</b><small>{candidate.model_id}</small></span>
+              <em className={candidate.ready ? "byom-up" : "byom-down"}>{candidate.ready ? ai.stateUp : ai.stateDown}</em>
+            </button>)}
+            <button className={automaticView === "docs" ? "active" : ""} aria-pressed={automaticView === "docs"} onClick={() => setAutomaticView("docs")}>
+              <span><b>{ai.autoAddModel}</b><small>{ai.autoAddModelHint}</small></span>
+              <em><Plus size={13} /></em>
+            </button>
+          </section>
+        </aside>}
 
         <div className="sam-model-detail">
-          {byomView === "how" ? <HowItWorks language={language} />
-          : byomView === "docs" ? <ByomPanel models={byomModels} onRegister={onRegisterByomModel} />
-          : byomView === "model" && selectedByomModel ? <ByomEntry
-            model={selectedByomModel}
-            busy={byomBusy}
-            // Fechar junto: o resultado do BYOM são as anotações sobre a imagem, e
-            // a mensagem que conta quantas vieram fica na barra de estado — tudo
-            // atrás deste painel. Sem isso o botão parecia não ter feito nada.
-            onRun={(modelId) => { onRunByomModel(modelId); onClose(); }}
-            onRemove={(modelId) => { setByomView(null); onRemoveByomModel(modelId); }}
-            onSave={onRegisterByomModel}
-          /> : <>
+          {tab === "connections" ? <ConnectionsPanel
+            copy={ai}
+            connector={{
+              state: connectionState === "ready" || connectionState === "loading" || connectionState === "error" ? "ready" : connectionState === "offline" ? "offline" : "checking",
+              endpoint,
+              host: connectorHost?.host ?? null,
+              serving: runtimeLabel || loadedModelId || "—",
+              onEndpoint: onEndpointChange,
+              onRetry: onRecheckConnector,
+            }}
+            runtime={{
+              state: runtime.state,
+              endpoint: runtime.endpoint,
+              serving: runtime.manifest ? `${runtime.manifest.name} ${runtime.manifest.version}` : "",
+              onEndpoint: runtime.setEndpoint,
+              onRetry: runtime.refresh,
+            }}
+            containers={byomModels}
+            onShowInstall={() => { onTabChange("assisted"); setAssistedView("model"); }}
+            onShowAddModel={() => { onTabChange("automatic"); setAutomaticView("docs"); }}
+          />
+          : tab === "automatic" ? (
+            automaticView === "runtime" ? <RuntimeModelPanel
+              copy={ai}
+              manifest={runtime.state === "ready" ? runtime.manifest : null}
+              endpoint={runtime.endpoint}
+              onPreannotate={() => onPreannotate("runtime")}
+              onOpenConnections={() => onTabChange("connections")}
+            />
+            : automaticView === "container" && viewedContainer ? <ContainerModelPanel
+              copy={ai}
+              model={viewedContainer}
+              busy={byomBusy}
+              onPreannotate={onPreannotate}
+              onRemove={(modelId) => { setAutomaticView("guide"); onRemoveByomModel(modelId); }}
+              onSave={onRegisterByomModel}
+            />
+            : automaticView === "docs" ? <ByomPanel models={byomModels} onRegister={onRegisterByomModel} />
+            : <AutomaticGuidePanel copy={ai} />
+          )
+          : assistedView === "how" ? <HowItWorksPanel language={language} />
+          : <>
           <section className="sam-model-hero">
             <div><span className={`family ${model.family}`}>{model.family === "sam2" ? "SAM 2.1" : model.family === "medsam2" ? "MedSAM2" : model.family.toUpperCase()}</span>{model.experimental && <span className="experimental">Experimental</span>}</div>
             <h3>{model.name}</h3>
@@ -922,7 +847,6 @@ ${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`}</code>
 
           <details className="sam-advanced">
             <summary>Configuração avançada</summary>
-            <label>Endereço local<input type="url" value={endpoint} placeholder="http://127.0.0.1:7860/predict" onChange={(event) => onEndpointChange(event.target.value)} /></label>
             <div className="sam-official-links"><a href={model.officialSources.repository} target="_blank" rel="noreferrer"><ExternalLink size={12} />Repositório oficial</a><a href={model.officialSources.checkpoint} target="_blank" rel="noreferrer"><ExternalLink size={12} />Checkpoint oficial</a></div>
           </details>
 
@@ -932,37 +856,25 @@ ${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`}</code>
       </div>
 
       <footer>
-        {/* O bloco de estado detalhado mora no fim da ficha do modelo, fora da
-            tela na primeira abertura, e some nas abas do BYOM. Sem este resumo,
-            apertar o botão principal com o conector parado não mudava nada que o
-            usuário pudesse ver. */}
-        <span className={`sam-footer-status ${loadError ? "error" : connectionState}`} aria-live="polite">
+        {/* O estado do conector só diz respeito ao Assistido; nas outras abas o
+            que importa está na própria ficha, e em Conexões. */}
+        {tab === "assisted" && <span className={`sam-footer-status ${loadError ? "error" : connectionState}`} aria-live="polite">
           <em />
           <span>
             <b>{loadError ? "A troca de modelo não foi aceita" : statusLabel(connectionState, modelMatches)}</b>
             {loadError ? <small>{loadError}</small> : runtimeLabel ? <small>{runtimeLabel}</small> : null}
             {!loadError && connectionState === "offline" && <small>Instale ou inicie o conector; o painel de instalação está nesta tela, em “Instalar o modelo selecionado”.</small>}
           </span>
-        </span>
-        <button onClick={onClose}>Fechar</button>
-        {anyModelSelected && <button
+        </span>}
+        <button onClick={onClose}>{ai.close}</button>
+        {tab === "assisted" && samInUse && <button
           className="unselect-all"
-          title="Deixa de usar SAM e BYOM para anotar. Nada é desinstalado nem sai da lista."
-          onClick={() => { setByomView(null); onUnselectAll(); }}
+          title="Deixa de usar o SAM para anotar. Nada é desinstalado nem desconectado."
+          onClick={onUnselectAll}
         >
           <PowerOff size={14} />Desselecionar todos
         </button>}
-        {showFooterAction && (byomView === "model" && selectedByomModel
-          ? <button
-              className="connect"
-              disabled={!selectedByomModel.ready}
-              title={selectedByomModel.ready ? undefined : "O contêiner deste BYOM está parado."}
-              onClick={() => { onSelectByomModel(selectedByomModel.model_id); onClose(); }}
-            >
-              <Boxes size={15} />
-              {byomModelId === selectedByomModel.model_id ? "Usar este modelo" : "Selecionar este modelo"}
-            </button>
-          : <button className="connect" disabled={connectionState === "checking" || connectionState === "loading"} onClick={onConnect}>
+        {showFooterAction && <button className="connect" disabled={connectionState === "checking" || connectionState === "loading"} onClick={onConnect}>
           {connectionState === "checking" || connectionState === "loading" ? <Gauge className="spin" size={15} /> : <Link2 size={15} />}
           {connectionState === "loading"
             ? "Carregando modelo…"
@@ -971,7 +883,7 @@ ${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`}</code>
               : connectionState === "ready"
                 ? "Carregar este modelo"
                 : "Verificar e usar"}
-        </button>)}
+        </button>}
       </footer>
     </section>
   </div>;

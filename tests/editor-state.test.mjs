@@ -133,3 +133,37 @@ test('inserting and immediately dragging a vertex is one undoable gesture', () =
   state=editorReducer(state,{type:'undo'});
   assert.deepEqual(state.annotations[0].vertices.map(vertex=>vertex.id),['p:v0','p:v1','p:v2']);
 });
+
+test('settle-drafts decides on the state the action lands on, not on a stale copy', async () => {
+  // The last partial and the final result arrive back to back, before any
+  // render. Reconciling against the caller's snapshot saw no drafts at all and
+  // left every one of them on the canvas next to the final set.
+  const { reconcileDrafts, withoutEdited } = await import('../app/lib/runtime-annotations.ts');
+  const box = (id, x) => ({ id, asset: 'img', label: 'l-1', type: 'box', x, y: 0, width: 50, height: 50 });
+  const drafts = new Map([['d-1', box('d-1', 10)], ['d-2', box('d-2', 300)]]);
+  let state = createEditorState([box('manual', 900)]);
+  state = editorReducer(state, { type: 'append-annotations', annotations: [...drafts.values()] });
+  // The person moved one draft while the stream was still running.
+  state = editorReducer(state, { type: 'replace-annotation', annotation: box('d-2', 320) });
+
+  const final = [box('f-1', 11), box('f-2', 301)];
+  state = editorReducer(state, {
+    type: 'settle-drafts',
+    plan: (onCanvas) => {
+      const { discard, keptOriginals } = reconcileDrafts(drafts, onCanvas);
+      return { remove: discard, add: withoutEdited(final, keptOriginals) };
+    },
+  });
+
+  assert.deepEqual(state.annotations.map((annotation) => annotation.id).sort(), ['d-2', 'f-1', 'manual']);
+  assert.equal(state.annotations.find((annotation) => annotation.id === 'd-2').x, 320, 'the edited draft keeps the edit');
+});
+
+test('settle-drafts with nothing to add only clears untouched drafts', () => {
+  const box = (id, x) => ({ id, asset: 'img', label: 'l-1', type: 'box', x, y: 0, width: 50, height: 50 });
+  let state = createEditorState([box('d-1', 10), box('keep', 99)]);
+  const before = state.history.length;
+  state = editorReducer(state, { type: 'settle-drafts', plan: () => ({ remove: ['d-1'], add: [] }) });
+  assert.deepEqual(state.annotations.map((annotation) => annotation.id), ['keep']);
+  assert.equal(state.history.length, before, 'a stream settling is not an undo step of its own');
+});

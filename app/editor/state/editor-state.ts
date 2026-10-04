@@ -48,6 +48,15 @@ export type EditorAction =
   | { type: "translate-annotations"; ids: string[]; dx: number; dy: number }
   | { type: "replace-annotation"; annotation: EditorAnnotation }
   | { type: "replace-annotations-by-id"; annotations: EditorAnnotation[] }
+  /**
+   * Troca rascunhos por resultado, decidindo sobre o estado de agora.
+   *
+   * Quem chama não tem como saber o que está no canvas no instante em que a
+   * troca acontece: o último rascunho e o resultado final chegam quase juntos,
+   * antes de qualquer render. Por isso a decisão é uma função pura que o
+   * reducer aplica ao estado em que a ação de fato cai.
+   */
+  | { type: "settle-drafts"; plan: (annotations: readonly EditorAnnotation[]) => { remove: string[]; add: EditorAnnotation[] } }
   | { type: "undo" }
   | { type: "redo" }
   | { type: "mark-saved" };
@@ -143,6 +152,26 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         };
       }
       return { ...state, annotations: [...state.annotations, ...additions], saved: action.markSaved ?? false };
+    }
+
+    case "settle-drafts": {
+      const { remove, add } = action.plan(state.annotations);
+      const removeIds = new Set(remove);
+      const surviving = (items: readonly EditorAnnotation[]) => items.filter((annotation) => !removeIds.has(annotation.id));
+      const kept = surviving(state.annotations);
+      const keptIds = new Set(kept.map((annotation) => annotation.id));
+      const additions = add.filter((annotation) => !keptIds.has(annotation.id));
+      if (kept.length === state.annotations.length && !additions.length) return state;
+      // Como no append: a chegada de um resultado não abre passo de desfazer nem
+      // interrompe o gesto em curso — a execução inteira se desfaz de uma vez.
+      const annotations = [...kept, ...additions];
+      return {
+        ...state,
+        annotations,
+        gesture: state.gesture ? { ...state.gesture, annotations: [...surviving(state.gesture.annotations), ...additions] } : null,
+        ...keepExistingSelection(state, annotations),
+        saved: false,
+      };
     }
 
     case "add-annotation": {

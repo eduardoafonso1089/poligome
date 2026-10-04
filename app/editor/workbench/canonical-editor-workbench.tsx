@@ -1,14 +1,10 @@
 "use client";
 
-/** Onde o runtime atende. Mesma convenção do endpoint do conector SAM. */
-const RUNTIME_ENDPOINT_KEY = "poligome-runtime-endpoint";
-
-
-
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { Asset, Label } from "../../lib/types";
-import { getCopy, storedLanguage, storedTheme, type Language } from "../../lib/i18n";
+import { fill, getCopy, storedLanguage, storedTheme, type Language } from "../../lib/i18n";
+import { countAnnotations, getAiCopy } from "../../lib/ai-copy";
 import { translateErrorCode } from "../../lib/error-message";
 import type { EditorAnnotation } from "../models/annotation-model";
 import type { BoxCorner } from "../layers/box-layer";
@@ -34,12 +30,18 @@ import { importCocoDocument, type CocoDocumentInput } from "../import/coco-docum
 import { assetAsDataUrl } from "../../lib/sam";
 import { connectorBaseUrl, fetchHealth, DEFAULT_SAM_ENDPOINT } from "../../lib/sam-connector";
 import {
-  DEFAULT_RUNTIME_ENDPOINT,
   registerRuntimeImage,
   runtimeInfer,
   RuntimeError,
 } from "../../lib/runtime-client";
-import { RuntimeProgressBar, type RuntimeProgress } from "../presentation/runtime-progress-bar";
+import {
+  PreannotateProgressBar,
+  PreannotateSummaryCard,
+  type PreannotateProgress,
+  type PreannotateSummary,
+} from "../presentation/preannotate-progress";
+import { PREANNOTATE_EVENT, type PreannotateRequest, type RuntimeParams } from "../presentation/pre-annotate-dialog";
+import { storedRuntimeEndpoint } from "../presentation/use-runtime-status";
 import {
   ensureLabels,
   reconcileDrafts,
@@ -81,6 +83,9 @@ const EMPTY_ANNOTATIONS: EditorAnnotation[] = [];
 
 type MousePanState = { pointerId: number; x: number; y: number } | null;
 
+/** Uma falha com texto já pronto para a tela, vindo do conector ou do contêiner. */
+class PreannotateError extends Error {}
+
 function labelsMatch(current: Label[], next: Label[]) {
   return current === next || (current.length === next.length && current.every((label, index) => {
     const candidate = next[index];
@@ -120,7 +125,10 @@ export function CanonicalEditorWorkbench() {
   const [cursorPoint, setCursorPoint] = useState<{ x: number; y: number } | null>(null);
   const [mousePanning, setMousePanning] = useState(false);
   const [current, setCurrent] = useState("");
-  const [projectName, setProjectName] = useState(() => getCopy(storedLanguage()).newProject);
+  // O servidor renderiza em português, então o primeiro render do cliente
+  // também: ler o idioma salvo aqui quebrava a hidratação em en/fr/es. O nome
+  // padrão acompanha o idioma salvo no efeito de montagem, junto com o resto.
+  const [projectName, setProjectName] = useState(() => getCopy("pt").newProject);
   const [language, setLanguage] = useState<Language>("pt");
   const [strokePx, setStrokePx] = useState(1);
   const [hiddenAnnotationIds, setHiddenAnnotationIds] = useState<Set<string>>(() => new Set());
@@ -131,8 +139,8 @@ export function CanonicalEditorWorkbench() {
   const [demoTutorialStep, setDemoTutorialStep] = useState<DemoTutorialStep | null>(null);
   const [demoTutorialToolPrompt, setDemoTutorialToolPrompt] = useState<DemoTutorialToolPrompt>(null);
   const objectUrls = useRef<string[]>([]);
-  // A execução em curso, para cancelá-la ao trocar de imagem ou recomeçar.
-  const runtimeRunRef = useRef<AbortController | null>(null);
+  // A pré-anotação em curso, para cancelá-la pelo botão da barra ou ao sair do editor.
+  const preannotateRunRef = useRef<AbortController | null>(null);
   /**
    * As classes como estão agora, não como estavam quando este callback nasceu.
    *
@@ -144,7 +152,8 @@ export function CanonicalEditorWorkbench() {
    */
   const labelsRef = useRef(labels);
   useEffect(() => { labelsRef.current = labels; }, [labels]);
-  const [runtimeProgress, setRuntimeProgress] = useState<RuntimeProgress | null>(null);
+  const [preannotateProgress, setPreannotateProgress] = useState<PreannotateProgress | null>(null);
+  const [preannotateSummary, setPreannotateSummary] = useState<PreannotateSummary | null>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const annotationImportRef = useRef<CocoImportHandle>(null);
@@ -156,6 +165,7 @@ export function CanonicalEditorWorkbench() {
   const editor = useEditorState();
   const annotationIndex = useAnnotationIndex(editor.annotations);
   const copy = getCopy(language);
+  const aiCopy = getAiCopy(language);
   const asset = assets.find((item) => item.id === current) ?? assets[0] ?? null;
   // A fresh object here would invalidate every interaction callback that lists
   // imageSize as a dependency, which in turn defeats the memo on AnnotationLayer.
@@ -277,6 +287,7 @@ export function CanonicalEditorWorkbench() {
   useEffect(() => {
     const stored = storedLanguage();
     setLanguage(stored);
+    setProjectName((current) => current === getCopy("pt").newProject ? getCopy(stored).newProject : current);
     setMessage(getCopy(stored).ready);
     document.documentElement.dataset.theme = storedTheme();
   }, []);
@@ -408,11 +419,10 @@ export function CanonicalEditorWorkbench() {
   }
 
   /**
-   * Roda um contêiner BYOM sobre a imagem aberta e ingere o COCO devolvido.
+   * Roda um contêiner BYOM sobre uma imagem e ingere o COCO devolvido.
    *
-   * O pedido sai daqui, e não do modal, porque é aqui que a imagem existe: o
-   * catálogo só sabe qual modelo você escolheu. O resultado entra pelo mesmo
-   * caminho de um COCO importado à mão.
+   * O pedido sai daqui, e não da central de modelos, porque é aqui que a imagem
+   * existe. O resultado entra pelo mesmo caminho de um COCO importado à mão.
    *
    * Reexecutar o mesmo modelo na mesma imagem **substitui** o resultado
    * anterior em vez de empilhar máscaras idênticas: sem isso, rodar duas vezes
@@ -421,86 +431,68 @@ export function CanonicalEditorWorkbench() {
    * que é o único campo que já sobrevive a salvar e reabrir — então o que foi
    * feito à mão, o que veio de outro modelo e o que este mesmo modelo produziu
    * em outra imagem ficam intactos.
+   *
+   * As classes vêm de `labelsRef` pelo mesmo motivo do runtime: num lote, a
+   * segunda imagem precisa ver as classes que a primeira criou.
    */
-  const runByomModel = useCallback(async (modelId: string) => {
-    if (!asset) { setMessage(copy.imageNotLoaded); return; }
-    // Mesmo motivo do acceptSamMask: o tutorial da demo removeria a primeira
-    // anotação devolvida pelo contêiner.
-    leaveDemoTutorial();
+  const inferAssetWithContainer = useCallback(async (
+    target: Asset,
+    modelId: string,
+    modelName: string,
+    signal: AbortSignal,
+  ): Promise<{ ids: string[]; replaced: number }> => {
     const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
     const base = connectorBaseUrl(stored || DEFAULT_SAM_ENDPOINT);
-    if (!base) { setMessage(copy.errSamUnreachable); return; }
-    setMessage(`${modelId}: anotando…`);
+    if (!base) throw new PreannotateError(aiCopy.runConnectorUnreachable);
+    const { url } = await assetAsDataUrl(target, copy);
+    let response: Response;
     try {
-      const { url } = await assetAsDataUrl(asset, copy);
-      const response = await fetch(`${base}/byom/annotate`, {
+      response = await fetch(`${base}/byom/annotate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model_id: modelId, image: url, file_name: asset.name }),
-        signal: AbortSignal.timeout(300_000),
+        body: JSON.stringify({ model_id: modelId, image: url, file_name: target.name }),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(300_000)]),
       });
-      if (!response.ok) {
-        // O conector escreve estes detalhes para quem está anotando; passam como estão.
-        const body = await response.json().catch(() => null) as { detail?: unknown } | null;
-        setMessage(typeof body?.detail === "string" ? body.detail : `${modelId}: HTTP ${response.status}`);
-        return;
-      }
-      const body = await response.json() as { coco?: CocoDocumentInput };
-      if (!body.coco) { setMessage(`${modelId}: resposta sem documento COCO.`); return; }
-      // Só o id da anotação leva a marca; classes e keypoints continuam com os
-      // prefixos de sempre, porque são compartilhados com o resto do editor.
-      const origin = `byom:${modelId}`;
-      const result = importCocoDocument(
-        body.coco, assets, labels,
-        (prefix) => makeId(prefix === "annotation" ? origin : prefix),
-        // O contrato do BYOM diz que a caixa vale quando o modelo não segmenta;
-        // sem isto, um objeto com os dois campos vira polígono e caixa soltos.
-        { unlabeledName: copy.unlabeled, boxAsFallback: true },
-      );
-      if (!result.annotations.length) { setMessage(`${modelId}: nenhuma anotação devolvida.`); return; }
-
-      const superseded = editor.annotations
-        .filter((annotation) => annotation.asset === asset.id && annotation.id.startsWith(`${origin}-`))
-        .map((annotation) => annotation.id);
-      if (superseded.length) editor.deleteAnnotations(superseded);
-
-      const count = result.annotations.length;
-      const replaced = superseded.length
-        ? ` ${superseded.length} ${superseded.length === 1 ? "anterior substituída" : "anteriores substituídas"}.`
-        : "";
-      applyCocoImport({
-        labels: result.labels,
-        annotations: result.annotations,
-        append: true,
-        message: `${modelId}: ${count} ${count === 1 ? "anotação" : "anotações"}.${replaced}`,
-      });
-    } catch {
-      setMessage(copy.errSamUnreachable);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      throw new PreannotateError(aiCopy.runConnectorUnreachable);
     }
-  }, [applyCocoImport, asset, assets, copy, editor, labels, makeId]);
+    if (!response.ok) {
+      // O conector escreve estes detalhes para quem está anotando; passam como estão.
+      const body = await response.json().catch(() => null) as { detail?: unknown } | null;
+      throw new PreannotateError(typeof body?.detail === "string"
+        ? body.detail
+        : fill(aiCopy.runHttp, { model: modelName, status: response.status }));
+    }
+    const body = await response.json() as { coco?: CocoDocumentInput };
+    if (!body.coco) throw new PreannotateError(fill(aiCopy.runNoCoco, { model: modelName }));
 
-  useEffect(() => {
-    const run = (event: Event) => {
-      const modelId = (event as CustomEvent<{ modelId?: string }>).detail?.modelId;
-      if (typeof modelId === "string") void runByomModel(modelId);
-    };
-    window.addEventListener("poligome:run-byom", run);
-    return () => window.removeEventListener("poligome:run-byom", run);
-  }, [runByomModel]);
+    // Só o id da anotação leva a marca; classes e keypoints continuam com os
+    // prefixos de sempre, porque são compartilhados com o resto do editor.
+    const origin = `byom:${modelId}`;
+    const result = importCocoDocument(
+      body.coco, assets, labelsRef.current,
+      (prefix) => makeId(prefix === "annotation" ? origin : prefix),
+      // O contrato do BYOM diz que a caixa vale quando o modelo não segmenta;
+      // sem isto, um objeto com os dois campos vira polígono e caixa soltos.
+      { unlabeledName: copy.unlabeled, boxAsFallback: true },
+    );
+    if (!result.annotations.length) return { ids: [], replaced: 0 };
 
-  /**
-   * Roda o poligome-runtime sobre a imagem aberta, desenhando conforme chega.
-   *
-   * Fica ao lado do BYOM em vez de substituí-lo: são transportes diferentes
-   * para a mesma ideia, e vê-los lado a lado é o que diz se o streaming paga o
-   * que custa. O BYOM devolve um documento COCO inteiro no fim; aqui cada tile
-   * que o runtime termina vira anotação no canvas na hora.
-   *
-   * Um resultado parcial é rascunho. As anotações dele entram marcadas por esta
-   * execução e saem quando o resultado final, já passado pela junção entre
-   * tiles, chega no lugar delas — senão o objeto que aparece em dois tiles
-   * vizinhos ficaria duplicado na tela.
-   */
+    const superseded = editor.annotations
+      .filter((annotation) => annotation.asset === target.id && annotation.id.startsWith(`${origin}-`))
+      .map((annotation) => annotation.id);
+    if (superseded.length) editor.deleteAnnotations(superseded);
+
+    if (!labelsMatch(labelsRef.current, result.labels)) {
+      labelsRef.current = result.labels;
+      setLabels(result.labels);
+    }
+    editor.appendAnnotations(result.annotations, false);
+    setSessionDirty(true);
+    return { ids: result.annotations.map((annotation) => annotation.id), replaced: superseded.length };
+  }, [aiCopy, assets, copy, editor, makeId]);
+
   /**
    * Roda o poligome-runtime sobre uma imagem, desenhando conforme chega.
    *
@@ -509,15 +501,19 @@ export function CanonicalEditorWorkbench() {
    * vezes. Só que o streaming existe justamente para a pessoa começar antes do
    * fim — então o que ela editou no meio do caminho fica, e o que o modelo
    * diria sobre aquele mesmo objeto sai do conjunto final.
+   *
+   * Devolve os ids que o modelo deixou no projeto. Os rascunhos que a pessoa
+   * editou não entram: desfazer a pré-anotação não pode levar o trabalho dela.
+   * Cancelar no meio descarta os rascunhos da imagem em curso, como uma falha.
    */
   const inferAsset = useCallback(async (
     target: Asset,
     asked: { x: number; y: number; width: number; height: number } | undefined,
     controller: AbortController,
     note: (done: number, total: number) => void,
-  ) => {
-    const stored = (() => { try { return localStorage.getItem(RUNTIME_ENDPOINT_KEY); } catch { return null; } })();
-    const endpoint = stored || DEFAULT_RUNTIME_ENDPOINT;
+    params: RuntimeParams,
+  ): Promise<string[]> => {
+    const endpoint = storedRuntimeEndpoint();
 
     // Os bytes sobem uma vez; a inferência cita a imagem pelo id depois.
     const fetched = await fetch(target.src, { signal: controller.signal });
@@ -550,13 +546,29 @@ export function CanonicalEditorWorkbench() {
     const drafted = new Map<string, EditorAnnotation>();
     const fallbackLabelId = labelsRef.current.find((label) => label.id === activeLabel)?.id
       ?? labelsRef.current[0]?.id ?? EMPTY_LABELS[0].id;
-    let produced = 0;
+    let produced: string[] = [];
+    // A decisão roda no reducer, sobre o canvas de agora: o fechamento deste
+    // callback ainda vê o canvas de antes da execução, sem rascunho nenhum, e
+    // concluiria que a pessoa apagou todos.
+    const settle = (final: EditorAnnotation[]) => {
+      const drafts = new Map(drafted);
+      drafted.clear();
+      editor.dispatch({
+        type: "settle-drafts",
+        plan: (onCanvas) => {
+          const { discard, keptOriginals } = reconcileDrafts(drafts, onCanvas);
+          return { remove: discard, add: withoutEdited(final, keptOriginals) };
+        },
+      });
+    };
+    const discardDrafts = () => settle([]);
 
     try {
       for await (const event of runtimeInfer({
         endpoint, imageId: target.id, region, signal: controller.signal,
+        params: Object.keys(params).length ? params : undefined,
       })) {
-        if (controller.signal.aborted) return 0;
+        if (controller.signal.aborted) break;
 
         if (event.type === "progress") { note(event.done, event.total); continue; }
         if (event.type === "error") { throw new RuntimeError(event.error.code, event.error.message); }
@@ -589,116 +601,123 @@ export function CanonicalEditorWorkbench() {
           continue;
         }
 
-        const { discard, keptOriginals } = reconcileDrafts(drafted, editor.annotations);
-        if (discard.length) editor.deleteAnnotations(discard);
-        const settled = withoutEdited(converted, keptOriginals);
-        if (settled.length) editor.appendAnnotations(settled, false);
+        settle(converted);
         setSessionDirty(true);
-        produced = settled.length + keptOriginals.length;
+        // O que o reducer deixar de fora por já haver uma versão editada não
+        // existe no canvas, e desfazer só remove o que encontrar.
+        produced = converted.map((annotation) => annotation.id);
       }
     } catch (error) {
       // O que a pessoa editou sobrevive a uma falha; o resto era rascunho.
-      const { discard } = reconcileDrafts(drafted, editor.annotations);
-      if (discard.length) editor.deleteAnnotations(discard);
+      discardDrafts();
       throw error;
     }
+    if (controller.signal.aborted) { discardDrafts(); return []; }
     return produced;
   }, [activeLabel, editor, makeId]);
 
   // O runtime e o conector SAM são serviços distintos, em endpoints distintos.
   // Mandar verificar o SAM quando quem não respondeu foi o runtime manda a
   // pessoa mexer no serviço errado.
-  const describeFailure = useCallback((error: unknown) =>
-    error instanceof RuntimeError ? `runtime: ${error.message}` : copy.errRuntimeUnreachable, [copy]);
-
-  /** A imagem aberta, restrita à caixa selecionada quando houver uma. */
-  const runRuntimeModel = useCallback(async () => {
-    if (!asset) { setMessage(copy.imageNotLoaded); return; }
-    leaveDemoTutorial();
-
-    const selected = editor.selectedAnnotation?.asset === asset.id ? editor.selectedAnnotation : null;
-    const asked = selected?.type === "box"
-      ? { x: selected.x, y: selected.y, width: selected.width, height: selected.height }
-      : undefined;
-
-    const controller = new AbortController();
-    runtimeRunRef.current?.abort();
-    runtimeRunRef.current = controller;
-
-    setRuntimeProgress({ imageName: asset.name, imageIndex: 1, imageCount: 1, tilesDone: 0, tilesTotal: 0 });
-    try {
-      if (asked) setMessage(`runtime: região ${Math.round(asked.width)}x${Math.round(asked.height)}…`);
-      const count = await inferAsset(asset, asked, controller, (done, total) =>
-        setRuntimeProgress({ imageName: asset.name, imageIndex: 1, imageCount: 1, tilesDone: done, tilesTotal: total }));
-      if (!controller.signal.aborted) {
-        setMessage(`runtime: ${count} ${count === 1 ? "anotação" : "anotações"}.`);
-      }
-    } catch (error) {
-      if (!controller.signal.aborted) setMessage(describeFailure(error));
-    } finally {
-      if (runtimeRunRef.current === controller) { runtimeRunRef.current = null; setRuntimeProgress(null); }
-    }
-  }, [asset, copy, describeFailure, editor, inferAsset]);
+  const describeFailure = useCallback((error: unknown, source: PreannotateRequest["source"]) =>
+    error instanceof RuntimeError ? fill(aiCopy.runRuntimeError, { detail: error.message })
+      : error instanceof PreannotateError ? error.message
+        : source === "runtime" ? aiCopy.runRuntimeUnreachable : aiCopy.runConnectorUnreachable, [aiCopy]);
 
   /**
-   * Todas as imagens do projeto, uma depois da outra.
+   * Uma pré-anotação: um modelo, sobre a imagem aberta, uma região dela ou o
+   * projeto inteiro.
    *
    * Sequencial e não em paralelo: do outro lado há um modelo só, e disparar
-   * tudo de uma vez apenas enfileiraria no runtime enquanto ocupa memória aqui.
-   * Uma imagem que falha não interrompe as demais — anotar trinta e perder a
+   * tudo de uma vez apenas enfileiraria lá enquanto ocupa memória aqui. Uma
+   * imagem que falha não interrompe as demais — anotar trinta e perder a
    * trigésima primeira é melhor do que parar na primeira que der errado.
+   *
+   * O fim de cada execução vira um resumo com "Desfazer": os ids que ela deixou
+   * são guardados justamente para isso.
    */
-  const runRuntimeBatch = useCallback(async () => {
-    if (!assets.length) { setMessage(copy.imageNotLoaded); return; }
+  const runPreannotate = useCallback(async (request: PreannotateRequest) => {
+    if (!asset) { setMessage(aiCopy.paNoImage); return; }
+    if (preannotateRunRef.current) { setMessage(aiCopy.paBusy); return; }
     leaveDemoTutorial();
+    setPreannotateSummary(null);
 
     const controller = new AbortController();
-    runtimeRunRef.current?.abort();
-    runtimeRunRef.current = controller;
+    preannotateRunRef.current = controller;
+    const targets = request.scope === "all" ? assets : [asset];
+    const selected = editor.selectedAnnotation?.asset === asset.id ? editor.selectedAnnotation : null;
+    const asked = request.source === "runtime" && request.scope === "region" && selected?.type === "box"
+      ? { x: selected.x, y: selected.y, width: selected.width, height: selected.height }
+      : undefined;
+    if (asked) setMessage(fill(aiCopy.runRegion, { model: request.modelName, w: Math.round(asked.width), h: Math.round(asked.height) }));
 
-    let total = 0;
+    const ids: string[] = [];
     const failed: string[] = [];
+    let replaced = 0;
+    let lastError = "";
     try {
-      for (const [index, target] of assets.entries()) {
-        if (controller.signal.aborted) return;
-        const position = `${index + 1}/${assets.length}`;
-        const at = (tilesDone: number, tilesTotal: number) => setRuntimeProgress({
-          imageName: target.name, imageIndex: index + 1, imageCount: assets.length, tilesDone, tilesTotal,
+      for (const [index, target] of targets.entries()) {
+        if (controller.signal.aborted) break;
+        const at = (tilesDone: number, tilesTotal: number) => setPreannotateProgress({
+          model: request.modelName, imageName: target.name, imageIndex: index + 1, imageCount: targets.length, tilesDone, tilesTotal,
         });
         at(0, 0);
         try {
-          total += await inferAsset(target, undefined, controller, at);
+          if (request.source === "runtime") {
+            ids.push(...await inferAsset(target, asked, controller, at, request.params));
+          } else {
+            const outcome = await inferAssetWithContainer(target, request.modelId, request.modelName, controller.signal);
+            ids.push(...outcome.ids);
+            replaced += outcome.replaced;
+          }
         } catch (error) {
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted) break;
           failed.push(target.name);
-          setMessage(`runtime: ${position} ${target.name} · ${describeFailure(error)}`);
+          lastError = describeFailure(error, request.source);
         }
       }
-      if (controller.signal.aborted) return;
-      setMessage(failed.length
-        ? `runtime: ${total} anotações em ${assets.length - failed.length} de ${assets.length} imagens; falhou em ${failed.join(", ")}.`
-        : `runtime: ${total} ${total === 1 ? "anotação" : "anotações"} em ${assets.length} imagens.`);
     } finally {
-      if (runtimeRunRef.current === controller) { runtimeRunRef.current = null; setRuntimeProgress(null); }
+      if (preannotateRunRef.current === controller) preannotateRunRef.current = null;
+      setPreannotateProgress(null);
     }
-  }, [assets, copy, describeFailure, inferAsset]);
 
+    const canceled = controller.signal.aborted;
+    // Quando nada deu certo, o motivo vale mais que um resumo vazio.
+    if (!canceled && failed.length === targets.length) { setMessage(lastError); return; }
+    if (lastError) setMessage(lastError);
+    setPreannotateSummary({
+      model: request.modelName,
+      ids,
+      images: targets.length - failed.length,
+      failed: targets.length > 1 ? failed : [],
+      canceled,
+      replaced,
+    });
+  }, [aiCopy, asset, assets, describeFailure, editor, inferAsset, inferAssetWithContainer]);
+
+  const undoPreannotation = useCallback(() => {
+    if (!preannotateSummary) return;
+    const wanted = new Set(preannotateSummary.ids);
+    const present = editor.annotations.filter((annotation) => wanted.has(annotation.id)).map((annotation) => annotation.id);
+    if (present.length) editor.deleteAnnotations(present);
+    setSessionDirty(true);
+    setMessage(fill(aiCopy.sumUndone, { count: countAnnotations(aiCopy, present.length) }));
+    setPreannotateSummary(null);
+  }, [aiCopy, editor, preannotateSummary]);
 
   useEffect(() => {
-    const run = () => { void runRuntimeModel(); };
-    const runAll = () => { void runRuntimeBatch(); };
-    window.addEventListener("poligome:run-runtime", run);
-    window.addEventListener("poligome:run-runtime-all", runAll);
-    return () => {
-      window.removeEventListener("poligome:run-runtime", run);
-      window.removeEventListener("poligome:run-runtime-all", runAll);
+    const run = (event: Event) => {
+      const request = (event as CustomEvent<PreannotateRequest>).detail;
+      if (request && (request.source === "runtime" || request.source === "byom")) void runPreannotate(request);
     };
-  }, [runRuntimeModel, runRuntimeBatch]);
+    window.addEventListener(PREANNOTATE_EVENT, run);
+    return () => window.removeEventListener(PREANNOTATE_EVENT, run);
+  }, [runPreannotate]);
 
   // Fechar o editor cancela o que estiver correndo. Trocar de imagem não:
   // no lote, passar por todas é justamente o ponto, e a anotação carrega o
   // asset a que pertence, então ela chega na imagem certa de qualquer forma.
-  useEffect(() => () => runtimeRunRef.current?.abort(), []);
+  useEffect(() => () => preannotateRunRef.current?.abort(), []);
 
   /**
    * Pergunta ao conector o que o modelo carregado aceita.
@@ -1481,6 +1500,9 @@ export function CanonicalEditorWorkbench() {
     canUndo: editor.history.length > 0,
     canRedo: editor.redoHistory.length > 0,
     hasSelection: selectedIds.length > 0,
+    selectionIsBox: editor.selectedAnnotation?.type === "box" && editor.selectedAnnotation.asset === asset?.id,
+    imagePixels: (asset?.width ?? 0) * (asset?.height ?? 0),
+    preannotating: preannotateProgress !== null,
     strokePx,
     statusMessage: asset ? (message || `${activeAssetAnnotations.length} ${copy.imageAnnotations}`) : copy.emptyProjectTitle,
     onHome: () => { if (!projectDirty || window.confirm(copy.confirmLeaveHome)) window.location.assign("/"); },
@@ -1519,7 +1541,9 @@ export function CanonicalEditorWorkbench() {
   } satisfies PreRefactorChromeProps;
 
   return <main className="shell" aria-label={`${copy.appTitle}: ${projectName}`}>
-    {runtimeProgress && <RuntimeProgressBar progress={runtimeProgress} copy={copy} />}
+    {preannotateProgress
+      ? <PreannotateProgressBar progress={preannotateProgress} language={language} onCancel={() => preannotateRunRef.current?.abort()} />
+      : preannotateSummary && <PreannotateSummaryCard summary={preannotateSummary} language={language} onKeep={() => setPreannotateSummary(null)} onUndo={undoPreannotation} />}
     <input ref={projectInputRef} type="file" accept=".plgm,application/vnd.poligome.project+zip" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file && (!projectDirty || window.confirm(copy.replaceUnsavedProject))) void openProject(file); event.currentTarget.value = ""; }} />
     <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/bmp,image/gif" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />
     <input ref={relinkInputRef} type="file" accept="image/*,.tif,.tiff" multiple hidden onChange={(event) => { void relinkProjectImages(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />

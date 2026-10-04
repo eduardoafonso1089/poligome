@@ -66,7 +66,10 @@ function describeHost(health: ConnectorHealth | null): { host: string; appDir: s
  * saúde e atualiza a lista de contêineres.
  */
 export function useSamCatalog(active: boolean) {
-  const [endpoint, setEndpointState] = useState(DEFAULT_SAM_ENDPOINT);
+  // Lido já na criação, e não num efeito depois: começar no padrão e trocar em
+  // seguida disparava duas sondagens, e a do endereço velho, recusada por
+  // último, apagava o que a do endereço salvo tinha encontrado.
+  const [endpoint, setEndpointState] = useState(() => readStored(ENDPOINT_KEY) || DEFAULT_SAM_ENDPOINT);
   const [selectedModelId, setSelectedModelIdState] = useState<string>(DEFAULT_SAM_MODEL_ID);
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
@@ -91,8 +94,6 @@ export function useSamCatalog(active: boolean) {
   const switching = useRef(false);
 
   useEffect(() => {
-    const storedEndpoint = readStored(ENDPOINT_KEY);
-    if (storedEndpoint) setEndpointState(storedEndpoint);
     const storedModel = readStored(MODEL_KEY);
     if (isSamModelId(storedModel)) setSelectedModelIdState(storedModel);
     const storedByom = readStored(BYOM_KEY);
@@ -263,7 +264,14 @@ export function useSamCatalog(active: boolean) {
 
   const activeByomModel = byomModels.find((candidate) => candidate.model_id === byomModelId) ?? null;
 
+  /** O "Verificar de novo" de Conexões: relê saúde e contêineres sem readotar nada. */
+  const recheck = useCallback(() => {
+    setConnectionState((current) => (current === "idle" || current === "offline" ? "checking" : current));
+    void refresh(false);
+  }, [refresh]);
+
   return {
+    recheck,
     endpoint, setEndpoint,
     selectedModelId, setSelectedModelId,
     loadedModelId, connectionState, runtimeLabel, availability, loadError, connectorHost,
