@@ -1026,6 +1026,7 @@ export function CanonicalEditorWorkbench() {
 
   function selectAsset(id: string) {
     if (!assets.some((item) => item.id === id)) return;
+    clearSamPrompts();
     drawing.cancelDraft();
     advanced.cancel();
     setVectorTool(null);
