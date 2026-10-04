@@ -134,9 +134,9 @@ function ByomPanel({
   const [importError, setImportError] = useState("");
   const [importing, setImporting] = useState(false);
   const portNumber = Number(draftPort);
-  const canRegister =
-    BYOM_MODEL_ID_PATTERN.test(draftId.trim().toLowerCase())
-    && Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535;
+  const validId = BYOM_MODEL_ID_PATTERN.test(draftId.trim().toLowerCase());
+  const validPort = Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535;
+  const canRegister = validId && validPort;
   const steps = [
     { title: sc.byomStep1Title, body: sc.byomStep1Body, command: `cd ~/Downloads   ${sc.byomStep1Comment}` },
     { title: sc.byomStep2Title, body: sc.byomStep2Body, command: "docker build -t meu-modelo ." },
@@ -256,8 +256,9 @@ function ByomPanel({
           {importing ? <Gauge className="spin" size={14} /> : <Plus size={14} />}{importing ? sc.byomImporting : sc.byomImport}
         </button>
       </div>
-      {!canRegister && draftId.trim() !== "byom-" && <p className="byom-reason"><Rich text={sc.byomIdRule} /></p>}
-      {importError && <p className="byom-reason">{fill(sc.byomImportFailed, { detail: importError })}</p>}
+      {!validId && draftId.trim() !== "byom-" && <p className="byom-reason"><Rich text={sc.byomIdRule} /></p>}
+      {!validPort && <p className="byom-reason" role="alert">{sc.byomPortRule}</p>}
+      {importError && <p className="byom-reason" role="alert">{fill(sc.byomImportFailed, { detail: importError })}</p>}
 
       <p className="byom-import-hint">{models.length === 0
         ? <Rich text={sc.byomNoneRegistered} />

@@ -92,7 +92,7 @@ export async function fetchModels(base: string, timeoutMs = 6_000): Promise<Mode
 export async function fetchByomModels(base: string, timeoutMs = 8_000): Promise<readonly ByomModel[]> {
   if (!base) return [];
   const payload = await getJson<{ models?: ByomModel[] }>(`${base}/byom/models`, timeoutMs);
-  return (payload?.models ?? []).filter((entry) => typeof entry.model_id === "string");
+  return Array.isArray(payload?.models) ? payload.models.filter((entry) => entry && typeof entry.model_id === "string") : [];
 }
 
 /** Detalhe de erro do conector, que é escrito para o usuário e sai como está. */

@@ -105,7 +105,7 @@ export async function fetchRuntimeHealth(
     const response = await fetch(`${base(endpoint)}/health`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) return null;
     const body = await response.json() as RuntimeHealth;
-    return body?.service === "poligome-runtime" ? body : null;
+    return body?.service === "poligome-runtime" && body.status === "ready" && body.protocol === "1.0" ? body : null;
   } catch {
     return null;
   }
@@ -118,7 +118,9 @@ export async function fetchRuntimeManifest(
   try {
     const response = await fetch(`${base(endpoint)}/describe`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) return null;
-    return await response.json() as RuntimeManifest;
+    const body = await response.json() as RuntimeManifest;
+    return body && body.protocol === "1.0" && typeof body.id === "string" && typeof body.name === "string"
+      && Array.isArray(body.produces) && Array.isArray(body.accepts) ? body : null;
   } catch {
     return null;
   }
@@ -164,24 +166,36 @@ export async function* parseEventStream(
 ): AsyncGenerator<RuntimeEvent> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
-  let buffer = "";
+  let line = "";
+  let data: string[] = [];
+  let afterCr = false;
+  const cancel = () => { void reader.cancel().catch(() => undefined); };
+  signal?.addEventListener("abort", cancel, { once: true });
   try {
-    while (true) {
-      if (signal?.aborted) return;
+    while (!signal?.aborted) {
       const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let split = buffer.indexOf("\n\n");
-      while (split !== -1) {
-        const frame = buffer.slice(0, split);
-        buffer = buffer.slice(split + 2);
-        const line = frame.split("\n").find((candidate) => candidate.startsWith("data: "));
-        if (line) yield JSON.parse(line.slice(6)) as RuntimeEvent;
-        split = buffer.indexOf("\n\n");
+      if (done || signal?.aborted) break;
+      for (const char of decoder.decode(value, { stream: true })) {
+        if (afterCr && char === "\n") { afterCr = false; continue; }
+        afterCr = char === "\r";
+        if (char !== "\r" && char !== "\n") { line += char; continue; }
+        if (!line) {
+          if (data.length) {
+            const payload = data.join("\n");
+            data = [];
+            if (payload) yield JSON.parse(payload) as RuntimeEvent;
+          }
+        } else if (line === "data" || line.startsWith("data:")) {
+          let value = line === "data" ? "" : line.slice(5);
+          if (value.startsWith(" ")) value = value.slice(1);
+          data.push(value);
+        }
+        line = "";
       }
     }
   } finally {
+    signal?.removeEventListener("abort", cancel);
+    await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }
@@ -218,7 +232,13 @@ export async function* runtimeInfer(options: InferOptions): AsyncGenerator<Runti
   if (!response.ok) throw await detailOf(response);
   if (!response.body) throw new RuntimeError("internal", "o runtime respondeu sem corpo");
 
-  yield* parseEventStream(response.body, options.signal);
+  let completed = false;
+  for await (const event of parseEventStream(response.body, options.signal)) {
+    if (event.type === "result" && !event.partial) completed = true;
+    if (event.type === "error") throw new RuntimeError(event.error.code, event.error.message);
+    yield event;
+  }
+  if (!completed && !options.signal?.aborted) throw new RuntimeError("incomplete_stream", "A resposta terminou antes do resultado final. Tente novamente.");
 }
 
 /** Decodifica o RLE do contrato: runs alternando fundo e frente, fundo primeiro. */

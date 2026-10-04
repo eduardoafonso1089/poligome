@@ -447,7 +447,7 @@ export function CanonicalEditorWorkbench() {
     const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
     const base = connectorBaseUrl(stored || DEFAULT_SAM_ENDPOINT);
     if (!base) throw new PreannotateError(aiCopy.runConnectorUnreachable);
-    const { url } = await assetAsDataUrl(target, copy);
+    const { url } = await assetAsDataUrl(target, copy, signal);
     let response: Response;
     try {
       response = await fetch(`${base}/byom/annotate`, {
@@ -468,6 +468,7 @@ export function CanonicalEditorWorkbench() {
         : fill(aiCopy.runHttp, { model: modelName, status: response.status }));
     }
     const body = await response.json() as { coco?: CocoDocumentInput };
+    signal.throwIfAborted();
     if (!body.coco) throw new PreannotateError(fill(aiCopy.runNoCoco, { model: modelName }));
 
     // Só o id da anotação leva a marca; classes e keypoints continuam com os
@@ -480,7 +481,6 @@ export function CanonicalEditorWorkbench() {
       // sem isto, um objeto com os dois campos vira polígono e caixa soltos.
       { unlabeledName: copy.unlabeled, boxAsFallback: true },
     );
-    if (!result.annotations.length) return { ids: [], replaced: 0, previous: [] };
 
     const previous = annotationsRef.current
       .filter((annotation) => annotation.asset === target.id && annotation.id.startsWith(`${origin}-`));

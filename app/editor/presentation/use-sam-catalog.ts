@@ -92,6 +92,7 @@ export function useSamCatalog(active: boolean) {
   // Uma troca em andamento não pode ser atropelada por uma sondagem de rotina,
   // que veria a porta fora do ar e declararia offline no meio do caminho.
   const switching = useRef(false);
+  const latest = useRef(0);
 
   useEffect(() => {
     const storedModel = readStored(MODEL_KEY);
@@ -101,6 +102,14 @@ export function useSamCatalog(active: boolean) {
   }, []);
 
   const setEndpoint = useCallback((value: string) => {
+    latest.current += 1;
+    switching.current = false;
+    setLoadedModelId(null);
+    setRuntimeLabel("");
+    setLoadError(null);
+    setAvailability([]);
+    setByomModels([]);
+    setConnectionState("checking");
     setEndpointState(value);
     writeStored(ENDPOINT_KEY, value);
   }, []);
@@ -117,8 +126,10 @@ export function useSamCatalog(active: boolean) {
 
   const refresh = useCallback(async (adopt: boolean) => {
     if (switching.current) return;
+    const mine = ++latest.current;
     const base = connectorBaseUrl(endpoint);
     const health = await fetchHealth(base);
+    if (mine !== latest.current) return;
     if (!health) {
       setConnectionState("offline");
       setLoadedModelId(null);
@@ -140,6 +151,7 @@ export function useSamCatalog(active: boolean) {
     }
 
     const [catalog, containers] = await Promise.all([fetchModels(base), fetchByomModels(base)]);
+    if (mine !== latest.current) return;
     setAvailability(catalog?.models ?? []);
     setByomModels(containers);
     if (adopt) {
@@ -177,16 +189,22 @@ export function useSamCatalog(active: boolean) {
    * feito nada — que é exatamente o que o botão promete ter feito.
    */
   const connect = useCallback(async (): Promise<boolean> => {
+    if (switching.current) return false;
+    switching.current = true;
+    const mine = ++latest.current;
     const base = connectorBaseUrl(endpoint);
     setLoadError(null);
     setConnectionState("checking");
     const health = await fetchHealth(base);
+    if (mine !== latest.current) return false;
     if (!health) {
+      switching.current = false;
       setConnectionState("offline");
       setRuntimeLabel("");
       return false;
     }
     if (health.model_id === selectedModelId && health.status === "ready") {
+      switching.current = false;
       setLoadedModelId(health.model_id ?? null);
       setRuntimeLabel(describeRuntime(health));
       setConnectionState("ready");
@@ -198,6 +216,7 @@ export function useSamCatalog(active: boolean) {
     setConnectionState("loading");
     setRuntimeLabel(`carregando ${selectedModelId}…`);
     const outcome = await requestModelLoad(base, selectedModelId);
+    if (mine !== latest.current) return false;
     if (!outcome.ok) {
       switching.current = false;
       setLoadError(outcome.detail);
@@ -207,8 +226,9 @@ export function useSamCatalog(active: boolean) {
       return false;
     }
     const settled = await waitForModel(base, selectedModelId, {
-      onTick: (tick) => { if (tick) setRuntimeLabel(describeRuntime(tick)); },
+      onTick: (tick) => { if (mine === latest.current && tick) setRuntimeLabel(describeRuntime(tick)); },
     });
+    if (mine !== latest.current) return false;
     switching.current = false;
     if (!settled.ok) {
       setLoadError(settled.detail);
@@ -233,8 +253,7 @@ export function useSamCatalog(active: boolean) {
     const outcome = await registerByomModel(base, entry);
     setByomBusy(false);
     if (!outcome.ok) {
-      setConnectionState("error");
-      setRuntimeLabel(outcome.detail);
+      await refresh(false);
       return outcome;
     }
     await refresh(false);
@@ -247,8 +266,7 @@ export function useSamCatalog(active: boolean) {
     const outcome = await removeByomModel(base, modelId);
     setByomBusy(false);
     if (!outcome.ok) {
-      setConnectionState("error");
-      setRuntimeLabel(outcome.detail);
+      await refresh(false);
       return outcome;
     }
     if (byomModelId === modelId) setByomModelId(null);
