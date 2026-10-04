@@ -12,6 +12,7 @@ import type { Language } from "./i18n";
  * com `fill`.
  */
 const pt = {
+  samTechDetails: "Detalhes técnicos",
   capImage: "Imagem",
   capVideo: "Vídeo",
   capPoints: "Pontos",
@@ -215,6 +216,7 @@ const pt = {
 export type SamCopy = Record<keyof typeof pt, string>;
 
 const en: SamCopy = {
+  samTechDetails: "Technical details",
   capImage: "Image",
   capVideo: "Video",
   capPoints: "Points",
@@ -416,6 +418,7 @@ const en: SamCopy = {
 };
 
 const fr: SamCopy = {
+  samTechDetails: "Détails techniques",
   capImage: "Image",
   capVideo: "Vidéo",
   capPoints: "Points",
@@ -617,6 +620,7 @@ const fr: SamCopy = {
 };
 
 const es: SamCopy = {
+  samTechDetails: "Detalles técnicos",
   capImage: "Imagen",
   capVideo: "Vídeo",
   capPoints: "Puntos",

@@ -43,7 +43,18 @@ The editor organizes AI by how you use it, not by how it runs. Everything sits b
 
 **Pre-annotate**, next to the AI button, runs any Automatic model on the open image, a selected region (Native only) or every image in the project. Options a model cannot honour are disabled with the reason written next to them. Each run ends with a summary that offers to undo everything that run added in one step.
 
-Poligome Runtime is a separate local program that serves one Native model at a time and describes it through a manifest. The editor looks for it at `http://127.0.0.1:7861` by default; that is also the local COG converter's default port, so if both run on the same machine change one of them and the address under **Connections**.
+Poligome Runtime is a separate local program that serves one Native model at a time and describes it through a manifest. To try it with the example Faster R-CNN detector (Python 3.12+; on Windows, inside WSL2):
+
+```bash
+git clone https://github.com/eduardoafonso1089/poligome-runtime.git
+cd poligome-runtime
+python3 -m venv .venv
+.venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+.venv/bin/pip install -e ".[server]" -e adapters/fasterrcnn
+.venv/bin/python examples/serve_runtime.py --adapter fasterrcnn
+```
+
+The same steps appear in the editor under **AI › Automatic** while no runtime is running. The editor looks for it at `http://127.0.0.1:7861` by default; that is also the local COG converter's default port, so if both run on the same machine change one of them and the address under **Connections**.
 
 ## Local helpers
 

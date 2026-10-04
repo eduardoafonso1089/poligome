@@ -141,6 +141,7 @@ export function PreannotateDialog({
             <label className={scope === "all" ? "active" : ""}><input type="radio" name="pa-scope" disabled={assetsCount < 2} checked={scope === "all"} onChange={() => setScope("all")} /><Images size={15} />{fill(copy.paScopeAll, { n: assetsCount })}</label>
           </div>
           {regionReason && chosen && <p className="pa-note">{regionReason}</p>}
+          {scope === "region" && <p className="pa-note">{copy.paRegionBoxStays}</p>}
         </fieldset>
 
         {native && manifest?.params?.length ? <fieldset className="pa-group">

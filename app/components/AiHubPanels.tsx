@@ -4,17 +4,50 @@ import { useEffect, useState } from "react";
 import {
   AlertTriangle, Boxes, Check, Cpu, Gauge, Layers, Pencil, RefreshCw, Server, ShieldCheck, Sparkles, Trash2, ScanSearch,
 } from "lucide-react";
-import { getCopy, fill, type Language } from "../lib/i18n";
+import { fill, type Language } from "../lib/i18n";
 import { countAnnotations, getAiCopy, joinList, type AiCopy } from "../lib/ai-copy";
 import type { ByomModel } from "../lib/sam-models";
 import type { RuntimeManifest } from "../lib/runtime-client";
-import { LocalConnectionExplainer } from "./LocalConnectionExplainer";
 
 type ByomWriteOutcome = { ok: true } | { ok: false; detail: string };
 
 /** As duas etiquetas que separam os modelos automáticos, iguais em todas as telas. */
 export function KindBadge({ kind, copy }: { kind: "native" | "container"; copy: AiCopy }) {
   return <span className={`ai-badge kind-${kind}`}>{kind === "native" ? <Layers size={11} /> : <Boxes size={11} />}{kind === "native" ? copy.badgeNative : copy.badgeContainer}</span>;
+}
+
+/**
+ * O caminho da imagem num desenho só, com os três jeitos de usar a IA.
+ *
+ * A moldura é o argumento: tudo acontece dentro do computador da pessoa, e
+ * nenhuma seta sai dela. Cada caixa da direita é um dos modos, com o mesmo nome
+ * que ele tem nas abas, para quem lê ligar o desenho à tela.
+ */
+function ConnectionDiagram({ copy }: { copy: AiCopy }) {
+  const box = (x: number, y: number, w: number, h: number, title: string, sub: string, strong = false) => <g>
+    <rect x={x} y={y} width={w} height={h} rx="9" fill="var(--surface)" stroke={strong ? "var(--green)" : "var(--line)"} strokeWidth={strong ? 1.5 : 1} />
+    <text x={x + w / 2} y={y + h / 2 - 2} fontSize="11" fontWeight="700" fill="var(--ink)" textAnchor="middle">{title}</text>
+    <text x={x + w / 2} y={y + h / 2 + 12} fontSize="9" fill="var(--muted)" textAnchor="middle">{sub}</text>
+  </g>;
+  const arrow = (d: string) => <path d={d} fill="none" stroke="var(--muted)" strokeWidth="1.2" markerEnd="url(#poligome-how-arrow)" />;
+  return <svg className="ai-how-diagram" viewBox="0 0 560 230" role="img" aria-label={`${copy.howBoxBrowser} → ${copy.howBoxConnector} → ${copy.howBoxSam}, ${copy.howBoxContainer}; ${copy.howBoxBrowser} → ${copy.howBoxRuntime} → ${copy.howBoxNative}`}>
+    <defs>
+      <marker id="poligome-how-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--muted)" /></marker>
+    </defs>
+    <rect x="8" y="22" width="544" height="200" rx="12" fill="none" stroke="var(--line)" strokeDasharray="5 4" />
+    <text x="22" y="16" fontSize="10" fill="var(--muted)">{copy.howDiagram}</text>
+    {box(22, 96, 116, 50, copy.howBoxBrowser, "poligome.com")}
+    {box(200, 42, 140, 50, copy.howBoxConnector, "127.0.0.1:7860", true)}
+    {box(200, 152, 140, 50, copy.howBoxRuntime, "127.0.0.1:7861", true)}
+    {box(400, 34, 136, 40, copy.howBoxSam, copy.tabAssisted)}
+    {box(400, 84, 136, 40, copy.howBoxContainer, `${copy.tabAutomatic} · ${copy.badgeContainer}`)}
+    {box(400, 157, 136, 40, copy.howBoxNative, `${copy.tabAutomatic} · ${copy.badgeNative}`)}
+    {arrow("M138 112 L198 70")}
+    {arrow("M138 130 L198 174")}
+    {arrow("M340 60 L398 54")}
+    {arrow("M340 74 L398 102")}
+    {arrow("M340 177 L398 177")}
+  </svg>;
 }
 
 export function HowItWorksPanel({ language }: { language: Language }) {
@@ -24,13 +57,52 @@ export function HowItWorksPanel({ language }: { language: Language }) {
       <h3>{copy.howTitle}</h3>
       <p>{copy.howIntro}</p>
     </section>
-    <LocalConnectionExplainer copy={getCopy(language)} />
+    <section className="local-connection">
+      <ConnectionDiagram copy={copy} />
+      <ul className="ai-how-rows">
+        <li>{copy.howRowAssisted}</li>
+        <li>{copy.howRowContainer}</li>
+        <li>{copy.howRowNative}</li>
+      </ul>
+    </section>
     <section className="byom-steps">
       <article><b>{copy.howFindsTitle}</b><p>{copy.howFindsBody}</p></article>
-      <article><b>{copy.howModesTitle}</b><p>{copy.howModesBody}</p></article>
     </section>
     <section className="sam-privacy"><ShieldCheck size={16} /><div><b>{copy.howPrivacyTitle}</b><p>{copy.howPrivacyBody}</p></div></section>
   </div>;
+}
+
+const RUNTIME_REPO = "https://github.com/eduardoafonso1089/poligome-runtime";
+
+/**
+ * Como pôr um modelo nativo para rodar, do zero.
+ *
+ * São os comandos exatos que levam do nada ao Faster R-CNN de exemplo servindo
+ * na porta padrão: sem eles, "inicie o Poligome Runtime" deixava a pessoa sem
+ * saber o que é nem onde conseguir.
+ */
+export function RuntimeInstallPanel({ copy }: { copy: AiCopy }) {
+  const steps = [
+    { title: copy.rtStepClone, body: "", command: `git clone ${RUNTIME_REPO}.git\ncd poligome-runtime` },
+    {
+      title: copy.rtStepInstall,
+      body: copy.rtStepInstallBody,
+      command: "python3 -m venv .venv\n.venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu\n.venv/bin/pip install -e \".[server]\" -e adapters/fasterrcnn",
+    },
+    { title: copy.rtStepRun, body: copy.rtStepRunBody, command: ".venv/bin/python examples/serve_runtime.py --adapter fasterrcnn" },
+  ];
+  return <section className="sam-install-panel">
+    <div><b>{copy.rtInstallTitle}</b><p>{copy.rtInstallIntro}</p></div>
+    <p className="sam-manual-note">{copy.rtWindowsNote}</p>
+    <ol className="sam-steps">
+      {steps.map((step) => <li key={step.title}>
+        <b>{step.title}</b>
+        {step.body && <p>{step.body}</p>}
+        <code>{step.command}</code>
+      </li>)}
+    </ol>
+    <a className="sam-step-download" href={RUNTIME_REPO} target="_blank" rel="noreferrer">{copy.rtRepo}</a>
+  </section>;
 }
 
 /**
@@ -96,12 +168,14 @@ export function RuntimeModelPanel({
   if (!manifest) {
     return <div className="byom-panel">
       <section className="sam-model-hero">
-        <div><KindBadge kind="native" copy={copy} /><span className="byom-state down">{copy.autoNativeOffline}</span></div>
+        <div><KindBadge kind="native" copy={copy} /></div>
         <h3>{copy.runtimeOfflineTitle}</h3>
         <p>{copy.runtimeOfflineBody}</p>
-        <p>{fill(copy.runtimeOfflineAddress, { endpoint })}</p>
       </section>
-      <div className="byom-entry-actions"><button className="byom-run" onClick={onOpenConnections}><Server size={14} />{copy.openConnections}</button></div>
+      <RuntimeInstallPanel copy={copy} />
+      <p className="byom-import-hint">{fill(copy.runtimeOfflineAddress, { endpoint })}{" "}
+        <button className="ai-link" onClick={onOpenConnections}><Server size={12} />{copy.openConnections}</button>
+      </p>
     </div>;
   }
   const tiled = manifest.tiling && manifest.tiling !== "none" && manifest.maxEdge > 0;
@@ -113,7 +187,7 @@ export function RuntimeModelPanel({
     </section>
     <section className="byom-facts">
       <article><b>{copy.nativeProduces}</b><p>{describeTerms(copy, manifest.produces, GEOMETRY_KEYS)}</p></article>
-      <article><b>{copy.nativeAccepts}</b><p>{describeTerms(copy, manifest.accepts, PROMPT_KEYS)}</p></article>
+      {manifest.accepts.length > 0 && <article><b>{copy.nativeAccepts}</b><p>{describeTerms(copy, manifest.accepts, PROMPT_KEYS)}</p></article>}
       <article><b>{copy.nativeLarge}</b><p>{tiled ? fill(copy.nativeLargeValue, { px: manifest.maxEdge }) : copy.nativeLargeWhole}</p></article>
       <article><b>{copy.nativeVersion}</b><p>{manifest.version}{manifest.license ? ` · ${copy.nativeLicense}: ${manifest.license}` : ""}</p></article>
       <article><b>{copy.nativeParams}</b><p>{manifest.params?.length ? manifest.params.map((param) => param.label).join(" · ") : copy.nativeNoParams}</p></article>
@@ -175,7 +249,16 @@ export function ContainerModelPanel({
       <p>{model.model_id} · {model.endpoint}{model.image ? ` · ${fill(copy.containerImage, { name: model.image })}` : ""}</p>
     </section>
 
-    {!model.ready && <p className="byom-reason">{model.unavailable_reason || copy.containerStoppedHint}</p>}
+    {/* Parado, o que a pessoa precisa é o comando para ligar este modelo; o erro
+        técnico do conector fica recolhido para quem quiser investigar. */}
+    {!model.ready && <section className="byom-limits ai-stopped">
+      <AlertTriangle size={15} />
+      <div>
+        <b>{copy.containerStoppedHint}</b>
+        <code>{`bash poligome-byom-macos-linux.sh start --model-id ${model.model_id}`}</code>
+        {model.unavailable_reason && <details><summary>{copy.containerErrorDetail}</summary><p>{model.unavailable_reason}</p></details>}
+      </div>
+    </section>}
     <p className="byom-summary">{describeContainer(copy, model)}</p>
 
     {model.metadata?.limitations && <section className="byom-limits">
@@ -245,7 +328,7 @@ function StatusPill({ copy, state }: { copy: AiCopy; state: ServiceState }) {
 }
 
 export function ConnectionsPanel({
-  copy, connector, runtime, containers, onShowInstall, onShowAddModel,
+  copy, connector, runtime, containers, onShowInstall, onShowAddModel, onShowRuntimeInstall,
 }: {
   copy: AiCopy;
   connector: { state: ServiceState; endpoint: string; host: string | null; serving: string; onEndpoint: (value: string) => void; onRetry: () => void };
@@ -253,6 +336,7 @@ export function ConnectionsPanel({
   containers: readonly ByomModel[];
   onShowInstall: () => void;
   onShowAddModel: () => void;
+  onShowRuntimeInstall: () => void;
 }) {
   const up = containers.filter((model) => model.ready).length;
   const runtimePort = (() => { try { return new URL(runtime.endpoint).port; } catch { return ""; } })();
@@ -281,6 +365,7 @@ export function ConnectionsPanel({
       <div className="ai-conn-row">
         <EndpointField copy={copy} value={runtime.endpoint} placeholder="http://127.0.0.1:7861" onCommit={runtime.onEndpoint} />
         <button onClick={runtime.onRetry}><RefreshCw size={13} />{copy.connRetry}</button>
+        {runtime.state === "offline" && <button className="primary" onClick={onShowRuntimeInstall}>{copy.connRuntimeHowButton}</button>}
       </div>
     </section>
 

@@ -1730,7 +1730,10 @@ export function CanonicalEditorWorkbench() {
                   ? <><LoaderCircle className="spin" size={13} />{copy.samSegmenting}</>
                   : samPreviews.length
                     ? `${samPreviews.length} ${copy.samProposals}`
-                    : activeSamMode === "points" ? `${samPrompts.length} ${copy.samPoints}` : ""}
+                    : activeSamMode === "points"
+                      // Sem nenhum ponto, a contagem "0 ponto(s)" não diz o que fazer.
+                      ? samPrompts.length ? `${samPrompts.length} ${copy.samPoints}` : aiCopy.samClickHint
+                      : ""}
               </span>
             </div>
             <div className="sam-actions">

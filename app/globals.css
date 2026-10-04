@@ -642,3 +642,18 @@ html[data-theme="light"]{--ink:#29262F;--muted:#6E6A75;--line:#DEDCE4;--green:#7
 
 /* Código dentro de uma frase fica na linha; só o comando solto do cartão é bloco. */
 .byom-steps article p code,.sam-steps li p code{display:inline;padding:1px 5px;border:0;background:var(--surface-soft);white-space:normal}
+
+/* "Como funciona": o desenho e as três linhas que ligam cada caixa ao modo de mesmo nome. */
+.local-connection .ai-how-diagram{margin-bottom:12px}
+.ai-how-rows{margin:0;padding-left:18px;font-size:11.5px;line-height:1.6;color:var(--ink)}
+/* Um link de texto dentro de uma frase, com o peso de um botão secundário. */
+.ai-link{display:inline-flex;align-items:center;gap:4px;padding:0;border:0;background:none;color:var(--btn-accent-ink);font:inherit;font-weight:650;text-decoration:underline;cursor:pointer}
+/* A ficha técnica recolhida: aberta, ela mantém o espaçamento das seções. */
+.sam-tech-details[open]>*:not(summary){margin-top:10px}
+/* Contêiner parado: o comando para ligar em destaque, o erro do conector recolhido. */
+.ai-stopped code{display:block;margin:7px 0 4px;padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:var(--surface);font-size:10.5px;white-space:pre-wrap;word-break:break-word}
+.ai-stopped details{margin-top:4px;font-size:10.5px;color:var(--muted)}
+.ai-stopped summary{cursor:pointer}
+/* Comandos longos (URLs, pip) quebram a linha em vez de alargar a ficha no celular. */
+.sam-model-detail{min-width:0}
+.sam-steps li code,.sam-relaunch code{white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere}
