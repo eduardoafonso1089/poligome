@@ -15,6 +15,7 @@ import { IMPORT_COLORS } from "../editor/import/coco-document-import";
 import type { Label } from "./types";
 import {
   createBox,
+  createPolygon,
   createPoint,
   createPolygonFromFlat,
   createPolylineFromFlat,
@@ -112,25 +113,19 @@ function area(points: number[]): number {
  * recorte, então os vértices são escalados de volta ao tamanho que a máscara
  * ocupa na imagem original. Sem isso a máscara sairia encolhida no canto.
  */
-export function maskToPolygon(mask: RuntimeMask): number[] | null {
-  if (!mask.width || !mask.height || !mask.rle.length) return null;
-
+export function maskToPolygons(mask: RuntimeMask): number[][][] {
+  if (!mask.width || !mask.height || !mask.rle.length) return [];
   const grid = decodeRle(mask.rle, mask.width, mask.height);
-  const geometry = contours().size([mask.width, mask.height]).thresholds([0.5])(Array.from(grid))[0];
-  if (!geometry?.coordinates.length) return null;
+  const geometry = contours().size([mask.width, mask.height]).contour(grid as unknown as number[], .5);
+  const scaleX = mask.bounds.width / mask.width, scaleY = mask.bounds.height / mask.height;
+  return geometry.coordinates.map((polygon) => polygon.map((ring) =>
+    ring.slice(0, -1).flatMap(([x, y]) => [mask.bounds.x + x * scaleX, mask.bounds.y + y * scaleY]),
+  ));
+}
 
-  const rings = geometry.coordinates.flatMap((polygon) => polygon);
-  const flattened = rings.map((ring) => ring.flatMap(([x, y]) => [x, y]));
-  const largest = flattened.sort((a, b) => area(b) - area(a))[0];
-  if (!largest || largest.length < MIN_POLYGON_POINTS * 2) return null;
-
-  const scaleX = mask.bounds.width / mask.width;
-  const scaleY = mask.bounds.height / mask.height;
-  return largest.map((value, index) =>
-    index % 2 === 0
-      ? mask.bounds.x + value * scaleX
-      : mask.bounds.y + value * scaleY,
-  );
+/** Compatibility helper for consumers that explicitly request one outer ring. */
+export function maskToPolygon(mask: RuntimeMask): number[] | null {
+  return maskToPolygons(mask).map((rings) => rings[0]).sort((a, b) => area(b) - area(a))[0] ?? null;
 }
 
 /**
@@ -217,6 +212,10 @@ export function sameGeometry(a: EditorAnnotation, b: EditorAnnotation): boolean 
     }
     default: {
       const other = b as { vertices: ReadonlyArray<{ x: number; y: number }> };
+      if (a.type === "polygon") {
+        const holes = (b as typeof a).holes;
+        if (a.holes.length !== holes.length || a.holes.some((ring, i) => ring.length !== holes[i].length || ring.some((v, j) => v.x !== holes[i][j].x || v.y !== holes[i][j].y))) return false;
+      }
       if (a.vertices.length !== other.vertices.length) return false;
       return a.vertices.every((v, i) => v.x === other.vertices[i].x && v.y === other.vertices[i].y);
     }
@@ -346,11 +345,23 @@ export function toEditorAnnotations(
     const scaled = options.clipTo ? clipToRegion(positioned, options.clipTo) : positioned;
     if (!scaled) continue;
     const named = annotation.label ? options.labelByName?.get(annotation.label.trim()) : undefined;
-    const editorAnnotation = toEditorAnnotation(scaled, {
+    const annotationBase = {
       id: options.makeId(),
       asset: options.asset,
       label: named?.id ?? options.fallbackLabelId,
-    });
+    };
+    if (scaled.kind === "mask") {
+      const coordinateRing = (points: number[]): Array<[number, number]> => {
+        const result: Array<[number, number]> = [];
+        for (let i = 0; i < points.length; i += 2) result.push([points[i], points[i + 1]]);
+        return result;
+      };
+      for (const [index, rings] of maskToPolygons(scaled.mask).entries()) {
+        converted.push(createPolygon({ ...annotationBase, id: index ? options.makeId() : annotationBase.id }, coordinateRing(rings[0]), rings.slice(1).map(coordinateRing)));
+      }
+      continue;
+    }
+    const editorAnnotation = toEditorAnnotation(scaled, annotationBase);
     if (editorAnnotation) converted.push(editorAnnotation);
   }
   return converted;

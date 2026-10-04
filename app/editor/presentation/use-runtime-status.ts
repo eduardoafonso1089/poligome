@@ -54,7 +54,7 @@ export function useRuntimeStatus(active: boolean) {
     const described = await fetchRuntimeManifest(endpoint);
     if (mine !== latest.current) return;
     setManifest(described);
-    setState("ready");
+    setState(described ? "ready" : "offline");
   }, [endpoint]);
 
   useEffect(() => {

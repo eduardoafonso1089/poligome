@@ -82,7 +82,9 @@ export function PreannotateDialog({
     setChoice(usable(initialModel) ?? usable(stored) ?? options.find((option) => option.ready)?.key ?? null);
   }, [choice, initialModel, options]);
 
-  useEffect(() => { setParams(defaultParams(manifest?.params)); }, [manifest?.id, manifest?.params]);
+  // Rechecks return a new manifest object; equal specs must retain user adjustments.
+  const paramSpecsKey = JSON.stringify(manifest?.params ?? []);
+  useEffect(() => { setParams(defaultParams(JSON.parse(paramSpecsKey))); }, [manifest?.id, paramSpecsKey]);
 
   useEffect(() => {
     const onKeydown = (event: KeyboardEvent) => {

@@ -151,7 +151,7 @@ function pointPolygon(value: unknown): number[] | null {
     const polygon = value.map(Number);
     return polygon.length >= 6 && polygon.length % 2 === 0 ? polygon : null;
   }
-  if (value.every((point) => Array.isArray(point) && point.length >= 2 && Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1])))) {
+  if (value.every((point) => Array.isArray(point) && point.length === 2 && Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1])))) {
     return value.flatMap((point) => [Number(point[0]), Number(point[1])]);
   }
   if (value.every((point) => point && typeof point === "object" && Number.isFinite(Number((point as { x?: unknown }).x)) && Number.isFinite(Number((point as { y?: unknown }).y)))) {
