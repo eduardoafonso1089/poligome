@@ -47,6 +47,7 @@ else
 fi
 `);
     await executable(join(bin, "sha256sum"), `#!/usr/bin/env bash
+cat >/dev/null
 printf 'verified\\n' > "$CHECKSUM_MARKER"
 `);
     await executable(join(bin, "uname"), `#!/usr/bin/env bash

@@ -1,6 +1,7 @@
 "use client";
 
 import type { ByomModel } from "./sam-models";
+import { localEndpointError } from "./local-endpoint";
 
 /**
  * Cliente do conector local. Tudo aqui fala com 127.0.0.1 e com mais nada: o
@@ -52,7 +53,7 @@ export type ModelsResponse = {
  */
 export function connectorBaseUrl(endpoint: string): string {
   const trimmed = endpoint.trim();
-  if (!trimmed) return "";
+  if (localEndpointError(trimmed)) return "";
   try {
     const url = new URL(trimmed);
     url.pathname = "";

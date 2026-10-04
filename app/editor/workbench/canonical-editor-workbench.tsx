@@ -5,6 +5,7 @@ import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent }
 import type { Asset, Label } from "../../lib/types";
 import { fill, getCopy, storedLanguage, storedTheme, type Language } from "../../lib/i18n";
 import { countAnnotations, getAiCopy } from "../../lib/ai-copy";
+import { preannotationUndoPlan } from "../../lib/preannotation-undo";
 import { translateErrorCode } from "../../lib/error-message";
 import type { EditorAnnotation } from "../models/annotation-model";
 import type { BoxCorner } from "../layers/box-layer";
@@ -163,6 +164,8 @@ export function CanonicalEditorWorkbench() {
   const demoAnnotationsRef = useRef<EditorAnnotation[]>([]);
   const mousePanRef = useRef<MousePanState>(null);
   const editor = useEditorState();
+  const annotationsRef = useRef(editor.annotations);
+  useEffect(() => { annotationsRef.current = editor.annotations; }, [editor.annotations]);
   const annotationIndex = useAnnotationIndex(editor.annotations);
   const copy = getCopy(language);
   const aiCopy = getAiCopy(language);
@@ -440,7 +443,7 @@ export function CanonicalEditorWorkbench() {
     modelId: string,
     modelName: string,
     signal: AbortSignal,
-  ): Promise<{ ids: string[]; replaced: number }> => {
+  ): Promise<{ ids: string[]; replaced: number; previous: EditorAnnotation[] }> => {
     const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
     const base = connectorBaseUrl(stored || DEFAULT_SAM_ENDPOINT);
     if (!base) throw new PreannotateError(aiCopy.runConnectorUnreachable);
@@ -477,20 +480,23 @@ export function CanonicalEditorWorkbench() {
       // sem isto, um objeto com os dois campos vira polígono e caixa soltos.
       { unlabeledName: copy.unlabeled, boxAsFallback: true },
     );
-    if (!result.annotations.length) return { ids: [], replaced: 0 };
+    if (!result.annotations.length) return { ids: [], replaced: 0, previous: [] };
 
-    const superseded = editor.annotations
-      .filter((annotation) => annotation.asset === target.id && annotation.id.startsWith(`${origin}-`))
-      .map((annotation) => annotation.id);
-    if (superseded.length) editor.deleteAnnotations(superseded);
+    const previous = annotationsRef.current
+      .filter((annotation) => annotation.asset === target.id && annotation.id.startsWith(`${origin}-`));
 
     if (!labelsMatch(labelsRef.current, result.labels)) {
       labelsRef.current = result.labels;
       setLabels(result.labels);
     }
-    editor.appendAnnotations(result.annotations, false);
+    editor.dispatch({
+      type: "replace-annotations-batch",
+      removeIds: previous.map((annotation) => annotation.id),
+      annotations: result.annotations,
+      selectIds: [],
+    });
     setSessionDirty(true);
-    return { ids: result.annotations.map((annotation) => annotation.id), replaced: superseded.length };
+    return { ids: result.annotations.map((annotation) => annotation.id), replaced: previous.length, previous };
   }, [aiCopy, assets, copy, editor, makeId]);
 
   /**
@@ -653,6 +659,8 @@ export function CanonicalEditorWorkbench() {
 
     const ids: string[] = [];
     const failed: string[] = [];
+    const previous: EditorAnnotation[] = [];
+    let completedImages = 0;
     let replaced = 0;
     let lastError = "";
     try {
@@ -669,7 +677,9 @@ export function CanonicalEditorWorkbench() {
             const outcome = await inferAssetWithContainer(target, request.modelId, request.modelName, controller.signal);
             ids.push(...outcome.ids);
             replaced += outcome.replaced;
+            previous.push(...outcome.previous);
           }
+          if (!controller.signal.aborted) completedImages += 1;
         } catch (error) {
           if (controller.signal.aborted) break;
           failed.push(target.name);
@@ -688,20 +698,25 @@ export function CanonicalEditorWorkbench() {
     setPreannotateSummary({
       model: request.modelName,
       ids,
-      images: targets.length - failed.length,
+      images: completedImages,
       failed: targets.length > 1 ? failed : [],
       canceled,
       replaced,
+      previous,
     });
   }, [aiCopy, asset, assets, describeFailure, editor, inferAsset, inferAssetWithContainer]);
 
   const undoPreannotation = useCallback(() => {
     if (!preannotateSummary) return;
-    const wanted = new Set(preannotateSummary.ids);
-    const present = editor.annotations.filter((annotation) => wanted.has(annotation.id)).map((annotation) => annotation.id);
-    if (present.length) editor.deleteAnnotations(present);
+    const plan = preannotationUndoPlan(editor.annotations, preannotateSummary.ids, preannotateSummary.previous);
+    if (plan.removeIds.length || plan.annotations.length) {
+      editor.dispatch({
+        type: "replace-annotations-batch",
+        ...plan,
+      });
+    }
     setSessionDirty(true);
-    setMessage(fill(aiCopy.sumUndone, { count: countAnnotations(aiCopy, present.length) }));
+    setMessage(fill(aiCopy.sumUndone, { count: countAnnotations(aiCopy, plan.removeIds.length) }));
     setPreannotateSummary(null);
   }, [aiCopy, editor, preannotateSummary]);
 

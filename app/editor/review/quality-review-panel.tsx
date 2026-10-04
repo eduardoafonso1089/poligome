@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import type { Asset, Label } from "../../lib/types";
-import type { Copy, Language } from "../../lib/i18n";
+import { fill, type Copy, type Language } from "../../lib/i18n";
 import type { EditorAnnotation } from "../models/annotation-model";
 import { buildQualitySummary } from "./quality-review-model";
 import ui from "../editor-interface.module.css";
@@ -11,17 +11,18 @@ function classes(...items: Array<string | false | null | undefined>) {
   return items.filter(Boolean).join(" ");
 }
 
-function ScoreButtons({ value, onChange, label }: { value?: number; onChange: (score: number) => void; label: string }) {
+function ScoreButtons({ value, onChange, label, copy, disabled = false }: { value?: number; onChange: (score: number) => void; label: string; copy: Copy; disabled?: boolean }) {
   return <div className={ui.scoreRow} aria-label={label}>
     {[1, 2, 3, 4, 5].map((score) => <button
       key={score}
       type="button"
-      aria-label={`${label}: ${score} de 5`}
+      aria-label={`${label}: ${fill(copy.reviewScoreNumber, { score })}`}
       aria-pressed={value === score}
+      disabled={disabled}
       onClick={() => onChange(score)}
       className={classes(ui.scoreButton, score > (value ?? 0) && ui.scoreOff)}
     >★</button>)}
-    <small className={ui.helperText}>{value ? `${value}/5` : "sem nota"}</small>
+    <small className={ui.helperText}>{value ? `${value}/5` : copy.reviewNoScore}</small>
   </div>;
 }
 
@@ -117,19 +118,19 @@ export function QualityReviewPanel({
       <section className={ui.reviewSection}>
         <b>{copy.reviewImage}</b>
         <small className={ui.helperText}>{activeAsset?.name ?? copy.reviewSelectImage}</small>
-        <ScoreButtons label={copy.reviewImageScore} value={activeAsset?.reviewScore} onChange={onAssetReview} />
+        <ScoreButtons copy={copy} label={copy.reviewImageScore} value={activeAsset?.reviewScore} onChange={onAssetReview} disabled={!activeAsset} />
       </section>
       <section className={ui.reviewSection}>
         <b>{copy.reviewAnnotation}</b>
         <small className={ui.helperText}>{activeAnnotation ? `${labels.find((label) => label.id === activeAnnotation.label)?.name ?? activeAnnotation.label} · ${activeAnnotation.type}` : copy.reviewSelectAnnotation}</small>
-        <ScoreButtons label={copy.reviewAnnotationScore} value={activeAnnotation?.reviewScore} onChange={onAnnotationReview} />
+        <ScoreButtons copy={copy} label={copy.reviewAnnotationScore} value={activeAnnotation?.reviewScore} onChange={onAnnotationReview} disabled={!activeAnnotation} />
       </section>
       <section className={ui.reviewSection}>
         <b>{copy.reviewClass}</b>
         <select aria-label={copy.reviewSelectClass} value={activeLabel?.id ?? ""} onChange={(event) => onActiveLabelChange(event.target.value)} disabled={!labels.length}>
           {labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}
         </select>
-        <ScoreButtons label={copy.reviewClassScore} value={activeLabel?.reviewScore} onChange={onLabelReview} />
+        <ScoreButtons copy={copy} label={copy.reviewClassScore} value={activeLabel?.reviewScore} onChange={onLabelReview} disabled={!activeLabel} />
       </section>
       <p className={ui.reviewHint}>{copy.reviewHint}</p>
     </div>}

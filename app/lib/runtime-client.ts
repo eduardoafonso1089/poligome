@@ -1,4 +1,5 @@
 "use client";
+import { localEndpointError } from "./local-endpoint";
 
 /**
  * Cliente do poligome-runtime.
@@ -79,6 +80,7 @@ export class RuntimeError extends Error {
 }
 
 function base(endpoint: string): string {
+  if (localEndpointError(endpoint)) throw new RuntimeError("invalid_endpoint", "Use a local HTTP address: http://127.0.0.1:7861");
   return endpoint.trim().replace(/\/+$/, "");
 }
 

@@ -3,6 +3,7 @@
 import { Check, LoaderCircle, ScanSearch, Undo2, X } from "lucide-react";
 import { fill, type Language } from "../../lib/i18n";
 import { countAnnotations, getAiCopy } from "../../lib/ai-copy";
+import type { EditorAnnotation } from "../models/annotation-model";
 
 export type PreannotateProgress = {
   model: string;
@@ -62,6 +63,8 @@ export type PreannotateSummary = {
   failed: string[];
   canceled: boolean;
   replaced: number;
+  /** Previous container results, so Undo restores the annotations it replaced. */
+  previous?: EditorAnnotation[];
 };
 
 /**
@@ -93,7 +96,7 @@ export function PreannotateSummaryCard({ summary, language, onKeep, onUndo }: { 
       <span><b>{title}</b>{notes && <small>{notes}</small>}</span>
     </div>
     <div className="ai-run-actions">
-      {summary.ids.length > 0 && <button onClick={onUndo}><Undo2 size={14} />{copy.sumUndo}</button>}
+      {(summary.ids.length > 0 || summary.previous?.length) ? <button onClick={onUndo}><Undo2 size={14} />{copy.sumUndo}</button> : null}
       <button className="primary" onClick={onKeep}><Check size={14} />{summary.ids.length ? copy.sumKeep : copy.close}</button>
     </div>
   </div>;

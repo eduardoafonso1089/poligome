@@ -800,3 +800,5 @@
     margin-left: 0;
   }
 }
+
+.scoreButton:disabled { cursor: not-allowed; opacity: .4; }

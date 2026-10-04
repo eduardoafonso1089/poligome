@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { containModalFocus } from "../../lib/modal-focus";
 import { AlertTriangle, Image as ImageIcon, Images, ScanSearch, SquareDashed, X } from "lucide-react";
 import { fill, type Language } from "../../lib/i18n";
 import { getAiCopy } from "../../lib/ai-copy";
@@ -59,6 +60,8 @@ export function PreannotateDialog({
   onOpenHub: () => void;
 }) {
   const copy = getAiCopy(language);
+  const dialogRef = useRef<HTMLElement>(null);
+  useEffect(() => dialogRef.current ? containModalFocus(dialogRef.current) : undefined, []);
 
   const options = useMemo<Option[]>(() => [
     ...(runtimeState === "ready" && manifest ? [{ key: RUNTIME_OPTION, kind: "native" as const, name: manifest.name, ready: true }] : []),
@@ -100,7 +103,7 @@ export function PreannotateDialog({
   useEffect(() => { if (scope === "region" && regionReason) setScope("image"); }, [regionReason, scope]);
 
   const largeForContainer = chosen?.kind === "container" && scope !== "all" && imagePixels > CONNECTOR_MAX_PIXELS;
-  const canRun = Boolean(chosen?.ready) && hasAsset && !busy && !(scope === "region" && regionReason);
+  const canRun = Boolean(chosen?.ready) && hasAsset && !busy && !largeForContainer && !(scope === "region" && regionReason);
 
   const run = () => {
     if (!chosen || !canRun) return;
@@ -110,7 +113,7 @@ export function PreannotateDialog({
   };
 
   return <div className="modal-backdrop preannotate-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className="sam-modal preannotate-modal" role="dialog" aria-modal="true" aria-labelledby="preannotate-title">
+    <section ref={dialogRef} tabIndex={-1} className="sam-modal preannotate-modal" role="dialog" aria-modal="true" aria-labelledby="preannotate-title">
       <header>
         <div><span><ScanSearch size={18} /></span><div><h2 id="preannotate-title">{copy.preAnnotate}</h2><p>{copy.paSubtitle}</p></div></div>
         <button onClick={onClose} aria-label={copy.close}><X size={19} /></button>
@@ -132,6 +135,8 @@ export function PreannotateDialog({
             <KindBadge kind={option.kind} copy={copy} />
           </label>)}
         </fieldset>
+
+        {chosen?.kind === "container" && <p className="pa-note">{copy.paReplacementNote}</p>}
 
         <fieldset className="pa-group">
           <legend>{copy.paWhere}</legend>
