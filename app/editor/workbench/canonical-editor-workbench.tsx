@@ -866,7 +866,12 @@ export function CanonicalEditorWorkbench() {
     // instalou o conector para ver. Quem chegou até aqui já passou do tutorial:
     // encerrá-lo sem repor as anotações da demo preserva a máscara.
     leaveDemoTutorial();
-    editor.appendAnnotations(samPreviews, true);
+    editor.dispatch({
+      type: "replace-annotations-batch",
+      removeIds: [],
+      annotations: samPreviews,
+      selectIds: samPreviews.map((preview) => preview.id),
+    });
     const total = samPreviews.length;
     clearSamPrompts();
     setSessionDirty(true);
