@@ -33,6 +33,7 @@ export async function requestSamAnnotations({
   text,
   threshold,
   copy,
+  signal,
 }: {
   makeId: (prefix: string) => string;
   asset: Asset;
@@ -43,6 +44,7 @@ export async function requestSamAnnotations({
   text?: string;
   threshold?: number;
   copy: Copy;
+  signal?: AbortSignal;
 }): Promise<PolygonAnnotation[]> {
   const query = text?.trim() ?? "";
   const result = await requestSamPredictions({
@@ -59,6 +61,7 @@ export async function requestSamAnnotations({
     // query means "every one of these", and asking for a single mask would throw
     // away the instances that make the query worth typing.
     multimaskOutput: Boolean(query),
+    signal,
   });
   // One annotation per prediction, carrying that prediction's largest contour.
   // A mask routinely comes back in pieces — a box around one roof answered with

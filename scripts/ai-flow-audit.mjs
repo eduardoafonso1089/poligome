@@ -40,14 +40,24 @@ const annotation = {kind:"box",box:{x:100,y:100,width:80,height:70},label:"QA re
 const json = (route, body, status=200) => route.fulfill({status,contentType:"application/json",headers:{"Access-Control-Allow-Origin":"*"},body:JSON.stringify(body)});
 
 async function fixture(options={}) {
-  const state={loaded:"sam2.1-hiera-small",containers:options.containers ?? [],runtime:options.runtime ?? true,mode:"normal",byomMode:"normal",calls:0,loads:0,registerFail:false,...options};
+  const state={loaded:"sam2.1-hiera-small",containers:options.containers ?? [],runtime:options.runtime ?? true,mode:"normal",byomMode:"normal",calls:0,loads:0,samCalls:0,samReplies:0,registerFail:false,...options};
   const context=await browser.newContext({viewport:{width:1440,height:900}});
   const page=await context.newPage();const errors=[];page.on("pageerror",e=>errors.push(e.message));
   await context.route("http://127.0.0.1:7860/**", async route=>{
     const request=route.request(), path=new URL(request.url()).pathname;
     if(request.method()==="OPTIONS")return json(route,{});
     if(state.connectorOffline)return route.abort("connectionrefused");
-    if(path==="/health")return json(route,{service:"Poligome SAM local",api_version:2,status:"ready",model_id:state.loaded,family:"sam2",device:"cpu"});
+    if(path==="/health")return json(route,{service:"Poligome SAM local",api_version:2,status:"ready",model_id:state.loaded,family:"sam2",device:"cpu",capabilities:state.capabilities??["point","box"]});
+    if(path==="/predict") {
+      state.samCalls++;state.lastSam=request.postDataJSON();
+      if(state.samSlow)await new Promise(resolve=>setTimeout(resolve,700));
+      state.samReplies++;
+      try {
+        if(state.samError)return await json(route,{detail:"Falha QA SAM"},503);
+        return await json(route,{width:1200,height:780,polygons:[[100,100,200,100,200,200,100,200]]});
+      } catch { /* A canceled browser request may have closed its route. */ }
+      return;
+    }
     if(path==="/models")return json(route,{models:[{model_id:"sam2.1-hiera-small",family:"sam2",installed:true},{model_id:"sam2.1-hiera-tiny",family:"sam2",installed:true}]});
     if(path==="/byom/models")return json(route,{models:state.containers});
     if(path==="/load") {state.loads++;if(state.loadFail)return json(route,{detail:"checkpoint QA indisponível"},400);state.loaded=request.postDataJSON().model_id;return json(route,{switching:true})}
@@ -74,7 +84,7 @@ async function fixture(options={}) {
       const body=state.mode==="error"?partial+'data:{"type":"error","error":{"code":"internal","message":"Falha SSE QA"}}\r\n\r\n'
         :state.mode==="truncated"?partial:state.mode==="empty"?frame([]):partial+frame([annotation]);
       if(state.mode==="slow")await new Promise(resolve=>setTimeout(resolve,2500));
-      return route.fulfill({status:200,contentType:"text/event-stream",headers:{"Access-Control-Allow-Origin":"*"},body});
+      try { return await route.fulfill({status:200,contentType:"text/event-stream",headers:{"Access-Control-Allow-Origin":"*"},body}); } catch { return; }
     }
     return json(route,{});
   });
@@ -95,8 +105,8 @@ async function preannotate(page,{byom=false,all=false,region=false}={}) {
   await page.getByRole("button",{name:"Pré-anotar",exact:true}).click();
   const dialog=page.getByRole("dialog",{name:"Pré-anotar",exact:true});
   await dialog.getByRole("radio",{name:byom?/QA Contêiner/:/QA Runtime/}).check();
-  if(all)await dialog.getByRole("radio",{name:/^Todas/}).check();
-  if(region)await dialog.getByRole("radio",{name:/Região/}).check();
+  if(all)await dialog.locator(".pa-scopes label").filter({has:dialog.getByRole("radio",{name:/^Todas/})}).click();
+  if(region)await dialog.locator(".pa-scopes label").filter({has:dialog.getByRole("radio",{name:/Região/})}).click();
   await dialog.getByRole("button",{name:"Pré-anotar",exact:true}).click();
 }
 const done=page=>page.locator(".ai-run-card.done");
@@ -107,7 +117,7 @@ try {
     await page.getByRole("button",{name:"Pré-anotar",exact:true}).click();await page.getByRole("dialog").getByRole("button",{name:/Ver como instalar/}).click();await expect(page.getByRole("dialog",{name:"Modelos de IA"})).toBeVisible();
   });
   await check("remote and malformed endpoints have accessible errors",{},async({page})=>{
-    const d=await hub(page);await d.getByRole("tab",{name:/Conexões/}).click();const fields=d.getByRole("textbox",{name:"Endereço",exact:true});
+    const d=await hub(page);await d.getByRole("tab",{name:/Conexões/}).click();const fields=d.getByRole("textbox",{name:/^Endereço/});
     await fields.nth(0).fill("https://example.com");await fields.nth(1).fill("abc");await expect(d.getByRole("alert")).toHaveCount(2);await expect(d.getByRole("button",{name:"Verificar",exact:true}).nth(0)).toBeDisabled();await expect(d.getByRole("button",{name:"Verificar",exact:true}).nth(1)).toBeDisabled();
     await fields.nth(1).press("Escape");await expect(fields.nth(1)).toHaveValue("http://127.0.0.1:7861");
   });
@@ -121,9 +131,21 @@ try {
     for(const os of ["Linux ou macOS","Windows (WSL2)","Windows"]){await d.getByRole("tab",{name:os,exact:true}).click();await expect(d.getByRole("link",{name:/Baixar poligome-sam/}).first()).toBeVisible()}
     await d.getByRole("tab",{name:"Linux ou macOS",exact:true}).click();await d.getByRole("checkbox",{name:/Usar só CPU/}).check();await expect(d.locator("code").filter({hasText:/POLIGOME_DEVICE=cpu/}).first()).toBeVisible();void cards;
   });
-  await check("already loaded SAM closes on Verify without reload",{},async({page,state})=>{const d=await hub(page);await d.getByRole("button",{name:"Verificar e usar",exact:true}).click();await expect(d).toBeHidden();expect(state.loads).toBe(0)});
-  await check("SAM model switch succeeds",{},async({page,state})=>{const d=await hub(page);await d.getByRole("button",{name:/SAM 2.1 Hiera Tiny/}).click();await d.getByRole("button",{name:"Verificar e usar",exact:true}).click();await expect(d).toBeHidden();expect(state.loaded).toBe("sam2.1-hiera-tiny")});
-  await check("failed switch keeps previous SAM connected",{loadFail:true},async({page})=>{const d=await hub(page);await d.getByRole("button",{name:/SAM 2.1 Hiera Tiny/}).click();await d.getByRole("button",{name:"Verificar e usar",exact:true}).click();await expect(d.getByText(/checkpoint QA indisponível/)).toBeVisible();await expect(page.getByRole("button",{name:/Modelos de IA:.*sam2.1-hiera-small/})).toBeVisible()});
+  await check("already loaded SAM closes on Verify without reload",{},async({page,state})=>{const d=await hub(page);await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d).toBeHidden();expect(state.loads).toBe(0)});
+  await check("SAM model switch succeeds",{},async({page,state})=>{const d=await hub(page);await d.getByRole("button",{name:/SAM 2.1 Hiera Tiny/}).click();await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d).toBeHidden();expect(state.loaded).toBe("sam2.1-hiera-tiny")});
+  await check("failed switch keeps previous SAM connected",{loadFail:true},async({page})=>{const d=await hub(page);await d.getByRole("button",{name:/SAM 2.1 Hiera Tiny/}).click();await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d.getByText(/checkpoint QA indisponível/)).toBeVisible();await expect(page.getByRole("button",{name:/Modelos de IA:.*sam2.1-hiera-small/})).toBeVisible()});
+  const activateSam=async page=>{await page.getByRole("button",{name:"Segmentar com SAM (S)",exact:true}).click();await expect(page.locator(".sam-controls").getByRole("button",{name:"Caixa",exact:true})).toBeVisible()};
+  const samPoint=async(page,dx=0)=>{const b=await page.locator(".stage svg").first().boundingBox();assert.ok(b);await page.mouse.click(b.x+b.width*.45+dx,b.y+b.height*.45)};
+  const saveSam=page=>page.locator(".sam-controls").getByRole("button",{name:/Salvar e editar/});
+  await check("SAM point proposal saves explicitly and Undo preserves manual work",{},async({page,state})=>{
+    const before=await count(page);await activateSam(page);await samPoint(page);await expect(saveSam(page)).toBeEnabled();expect(state.lastSam.point_labels).toEqual([1]);expect(await count(page)).toBe(before);
+    await saveSam(page).click();await expect.poll(()=>count(page)).toBe(before+1);await page.getByRole("button",{name:"Desfazer",exact:true}).click();await expect.poll(()=>count(page)).toBe(before);
+  });
+  await check("SAM negative point refines accumulated prompts",{},async({page,state})=>{await activateSam(page);await samPoint(page);await expect(saveSam(page)).toBeEnabled();await page.locator(".sam-controls").getByRole("button",{name:"Excluir",exact:true}).click();await samPoint(page,35);await expect(saveSam(page)).toBeEnabled();expect(state.lastSam.point_labels).toEqual([1,0])});
+  await check("SAM box prompt sends a bounded region",{},async({page,state})=>{await activateSam(page);await page.locator(".sam-controls").getByRole("button",{name:"Caixa",exact:true}).click();const b=await page.locator(".stage svg").first().boundingBox();assert.ok(b);await page.mouse.move(b.x+b.width*.35,b.y+b.height*.35);await page.mouse.down();await page.mouse.move(b.x+b.width*.55,b.y+b.height*.55,{steps:5});await page.mouse.up();await expect(saveSam(page)).toBeEnabled();expect(state.lastSam.box.length).toBe(4)});
+  await check("SAM text capability sends query and threshold",{capabilities:["point","box","text"]},async({page,state})=>{await activateSam(page);await page.locator(".sam-controls").getByRole("button",{name:"Texto",exact:true}).click();await page.getByRole("textbox",{name:"Conceito para segmentar"}).fill("todos os telhados");await page.locator(".sam-controls").getByRole("button",{name:"Segmentar",exact:true}).click();await expect(saveSam(page)).toBeEnabled();expect(state.lastSam.text).toBe("todos os telhados");expect(state.lastSam.multimask_output).toBe(true);expect(state.lastSam.threshold).toBe(.5)});
+  await check("SAM restart discards late predictions",{samSlow:true},async({page,state})=>{const before=await count(page);await activateSam(page);await samPoint(page);await expect.poll(()=>state.samCalls).toBe(1);await page.locator(".sam-controls").getByRole("button",{name:"Reiniciar",exact:true}).click();await expect.poll(()=>state.samReplies).toBe(1);await page.waitForTimeout(100);await expect(saveSam(page)).toBeDisabled();expect(await count(page)).toBe(before)});
+  await check("SAM failure explains the error without saving annotations",{samError:true},async({page})=>{const before=await count(page);await activateSam(page);await samPoint(page);await expect(page.locator("main")).toContainText("Falha QA SAM");await expect(saveSam(page)).toBeDisabled();expect(await count(page)).toBe(before)});
   await check("BYOM invalid port explains the port",{},async({page})=>{const d=await hub(page);await d.getByRole("tab",{name:/Conexões/}).click();await d.getByRole("button",{name:"Adicionar",exact:true}).click();await d.getByRole("textbox",{name:"Identificador"}).fill("byom-qa");await d.getByRole("spinbutton",{name:"Porta"}).fill("0");await expect(d.getByRole("alert")).toContainText("1 e 65535");await expect(d.getByRole("button",{name:"Importar",exact:true})).toBeDisabled()});
   await check("BYOM registration failure preserves fields and SAM connection",{registerFail:true},async({page})=>{const d=await hub(page);await d.getByRole("tab",{name:/Conexões/}).click();await d.getByRole("button",{name:"Adicionar",exact:true}).click();await d.getByRole("textbox",{name:"Identificador"}).fill("byom-qa");await d.getByRole("textbox",{name:"Nome",exact:true}).fill("QA nome");await d.getByRole("button",{name:"Importar",exact:true}).click();await expect(d.getByRole("alert")).toContainText("Porta QA ocupada");await expect(d.getByRole("textbox",{name:"Nome",exact:true})).toHaveValue("QA nome");await expect(page.getByRole("button",{name:/Modelos de IA:.*sam2.1-hiera-small/})).toBeVisible()});
   await check("invalid runtime manifest is not ready",{badManifest:true},async({page})=>{await page.getByRole("button",{name:"Pré-anotar",exact:true}).click();await expect(page.getByRole("dialog").getByText(/Nenhum modelo/)).toBeVisible()});

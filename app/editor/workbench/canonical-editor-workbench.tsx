@@ -140,6 +140,7 @@ export function CanonicalEditorWorkbench() {
   const [demoTutorialStep, setDemoTutorialStep] = useState<DemoTutorialStep | null>(null);
   const [demoTutorialToolPrompt, setDemoTutorialToolPrompt] = useState<DemoTutorialToolPrompt>(null);
   const objectUrls = useRef<string[]>([]);
+  const samRunRef = useRef<AbortController | null>(null);
   // A pré-anotação em curso, para cancelá-la pelo botão da barra ou ao sair do editor.
   const preannotateRunRef = useRef<AbortController | null>(null);
   /**
@@ -771,6 +772,8 @@ export function CanonicalEditorWorkbench() {
    * demais. A máscara fica como proposta até o usuário salvar, do mesmo jeito que
    * um rascunho de polígono — errar um clique não pode sujar a lista.
    */
+  useEffect(() => () => { samRunRef.current?.abort(); }, [asset?.id, tool]);
+
   const runSam = useCallback(async ({ prompts, box, text }: {
     prompts?: SamPrompt[];
     box?: SamBoxPrompt | null;
@@ -778,6 +781,9 @@ export function CanonicalEditorWorkbench() {
   }) => {
     if (!asset) return;
     if (!prompts?.length && !box && !text?.trim()) { setSamPreviews([]); return; }
+    samRunRef.current?.abort();
+    const controller = new AbortController();
+    samRunRef.current = controller;
     const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
     setSamLoading(true);
     try {
@@ -791,14 +797,20 @@ export function CanonicalEditorWorkbench() {
         text,
         threshold: samThreshold,
         copy,
+        signal: controller.signal,
       });
+      if (controller.signal.aborted || samRunRef.current !== controller) return;
       setSamPreviews(annotations);
       if (text?.trim() && !annotations.length) setMessage(copy.errSamNoPolygon);
     } catch (error) {
+      if (controller.signal.aborted || samRunRef.current !== controller) return;
       setSamPreviews([]);
       setMessage(error instanceof Error ? error.message : copy.errSamUnreachable);
     } finally {
-      setSamLoading(false);
+      if (samRunRef.current === controller) {
+        samRunRef.current = null;
+        setSamLoading(false);
+      }
     }
   }, [activeLabel, asset, copy, makeId, samThreshold]);
 
@@ -809,7 +821,14 @@ export function CanonicalEditorWorkbench() {
   }
 
   /** Limpa prompts e proposta sem tocar no modo nem no texto já digitado. */
+  function cancelSamRequest() {
+    samRunRef.current?.abort();
+    samRunRef.current = null;
+    setSamLoading(false);
+  }
+
   function clearSamPrompts() {
+    cancelSamRequest();
     setSamPrompts([]);
     setSamBoxStart(null);
     setSamBox(null);
@@ -1727,7 +1746,7 @@ export function CanonicalEditorWorkbench() {
                   aria-label={copy.samTextLabel}
                   placeholder={copy.samTextPlaceholder}
                   value={samText}
-                  onChange={(event) => { setSamPreviews([]); setSamText(event.target.value); }}
+                  onChange={(event) => { cancelSamRequest(); setSamPreviews([]); setSamText(event.target.value); }}
                 />
                 <button type="submit" disabled={!samText.trim() || samLoading}>{copy.samTextSubmit}</button>
                 <label title={copy.samThresholdLabel}>
@@ -1736,7 +1755,7 @@ export function CanonicalEditorWorkbench() {
                     aria-label={copy.samThresholdLabel}
                     type="range" min="0.1" max="0.95" step="0.05"
                     value={samThreshold}
-                    onChange={(event) => { setSamPreviews([]); setSamThreshold(Number(event.target.value)); }}
+                    onChange={(event) => { cancelSamRequest(); setSamPreviews([]); setSamThreshold(Number(event.target.value)); }}
                   />
                 </label>
               </form>}
