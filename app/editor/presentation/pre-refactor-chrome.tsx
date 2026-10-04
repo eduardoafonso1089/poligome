@@ -4,16 +4,19 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Check, ChevronDown, ChevronLeft, ChevronRight, CircleMinus, CodeXml, Combine, Copy,
   Crosshair, Focus, FolderUp, Hand, HardDriveDownload, House, ImagePlus,
-  Images, Keyboard, Languages, Link2, LoaderCircle, ListRestart, Magnet, Maximize2, Menu,
+  Images, Keyboard, Languages, LoaderCircle, ListRestart, Magnet, Maximize2, Menu,
   Monitor, Moon, MoreHorizontal, MousePointer2, PenLine, PenTool, Pencil, Pentagon, Plus,
-  Redo2, Save, Scissors, Settings2, ShieldCheck, Sparkles, Spline, Square, Sun,
+  Redo2, Save, ScanSearch, Scissors, Settings2, ShieldCheck, Sparkles, Spline, Square, Sun,
   Tags, Trash2, Undo2, WandSparkles, X, ZoomIn, ZoomOut,
 } from "lucide-react";
 import type { DrawingTool } from "../drawing/use-drawing-interactions";
 import type { VectorTool } from "../commands/editor-shortcuts";
-import { getCopy, storedTheme, type Language, type ThemeMode } from "../../lib/i18n";
-import SamSetupModal from "../../components/SamSetupModal";
+import { fill, getCopy, storedTheme, type Language, type ThemeMode } from "../../lib/i18n";
+import { getAiCopy } from "../../lib/ai-copy";
+import SamSetupModal, { type AiHubTab } from "../../components/SamSetupModal";
 import { useSamCatalog } from "./use-sam-catalog";
+import { useRuntimeStatus } from "./use-runtime-status";
+import { PREANNOTATE_EVENT, PreannotateDialog } from "./pre-annotate-dialog";
 
 const demoGuide = {
   pt: ["Selecione a ferramenta Caixa", "Clique na ferramenta destacada para começar."],
@@ -33,35 +36,43 @@ function ToolButton({ title, keyHint, active, disabled, onClick, children, class
 }
 
 export type PreRefactorChromeProps = {
-  projectName: string; assetsCount: number; annotationsCount: number; language: Language; loading: boolean; dirty: boolean; hasAsset: boolean; hasAssets: boolean; imageIndex: number; zoom: number; tool: DrawingTool; vectorTool: VectorTool; snapEnabled: boolean; touchMode: boolean; addToSelection: boolean; coordinatesGuide: boolean; canFinishDraft: boolean; canRemoveDraftPoint: boolean; hasDraft: boolean; canSimplify: boolean; canDuplicate: boolean; canMerge: boolean; canEditPolygon: boolean; canUndo: boolean; canRedo: boolean; hasSelection: boolean; strokePx: number; statusMessage: string; fileMenuExtras?: ReactNode;
+  projectName: string; assetsCount: number; annotationsCount: number; language: Language; loading: boolean; dirty: boolean; hasAsset: boolean; hasAssets: boolean; imageIndex: number; zoom: number; tool: DrawingTool; vectorTool: VectorTool; snapEnabled: boolean; touchMode: boolean; addToSelection: boolean; coordinatesGuide: boolean; canFinishDraft: boolean; canRemoveDraftPoint: boolean; hasDraft: boolean; canSimplify: boolean; canDuplicate: boolean; canMerge: boolean; canEditPolygon: boolean; canUndo: boolean; canRedo: boolean; hasSelection: boolean; selectionIsBox: boolean; imagePixels: number; preannotating: boolean; strokePx: number; statusMessage: string; fileMenuExtras?: ReactNode;
   onHome: () => void; onNewProject: () => void; onRenameProject: (name: string) => void; onDemo: () => void; onOpenProject: () => void; onImportImages: () => void; onSaveProject: () => void; onLanguageChange: (language: Language) => void; onSamSettings?: () => void; onTool: (tool: DrawingTool) => void; onVectorTool: (tool: VectorTool) => void; onSimplify: () => void; onDuplicate: () => void; onMerge: () => void; onToggleSnap: () => void; onToggleCoordinatesGuide: () => void; onToggleMultiSelect: () => void; onFinishDrawing: () => void; onRemoveLastPoint: () => void; onCancelDrawing: () => void; onUndo: () => void; onRedo: () => void; onDelete: () => void; onClearAnnotations: () => void; onSelectAllAnnotations: () => void; onStrokeChange: (value: number) => void; onZoomOut: () => void; onZoomIn: () => void; onFit: () => void; onPreviousImage: () => void; onNextImage: () => void; onOpenImagesPanel?: () => void; onOpenRightPanel?: () => void;
 };
 
 export function PreRefactorTopbar(props: PreRefactorChromeProps) {
   const copy = getCopy(props.language); const projectLabel = props.projectName.trim() || copy.defaultProjectName;
-  const [fileOpen, setFileOpen] = useState(false); const [editing, setEditing] = useState(false); const [draft, setDraft] = useState(projectLabel); const [renameNotice, setRenameNotice] = useState(""); const [preferencesOpen, setPreferencesOpen] = useState(false); const [preferencesTab, setPreferencesTab] = useState<"appearance" | "language">("appearance"); const [themeMode, setThemeModeState] = useState<ThemeMode>("system"); const [samOpen, setSamOpen] = useState(false); const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => setDraft(projectLabel), [projectLabel]); useEffect(() => setThemeModeState(storedTheme()), []); useEffect(() => { const open = () => setSamOpen(true); window.addEventListener("poligome:open-sam", open); return () => window.removeEventListener("poligome:open-sam", open); }, []); useEffect(() => { if (!renameNotice) return; const timeout = window.setTimeout(() => setRenameNotice(""), 2500); return () => window.clearTimeout(timeout); }, [renameNotice]); useEffect(() => { const close = (event: PointerEvent) => { if (menuRef.current && !menuRef.current.contains(event.target as Node)) setFileOpen(false); }; window.addEventListener("pointerdown", close); return () => window.removeEventListener("pointerdown", close); }, []);
+  const [fileOpen, setFileOpen] = useState(false); const [editing, setEditing] = useState(false); const [draft, setDraft] = useState(projectLabel); const [renameNotice, setRenameNotice] = useState(""); const [preferencesOpen, setPreferencesOpen] = useState(false); const [preferencesTab, setPreferencesTab] = useState<"appearance" | "language">("appearance"); const [themeMode, setThemeModeState] = useState<ThemeMode>("system"); const [hubTab, setHubTab] = useState<AiHubTab | null>(null); const [preannotate, setPreannotate] = useState<{ model: string | null } | null>(null); const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => setDraft(projectLabel), [projectLabel]); useEffect(() => setThemeModeState(storedTheme()), []); useEffect(() => { const open = () => setHubTab("assisted"); window.addEventListener("poligome:open-sam", open); return () => window.removeEventListener("poligome:open-sam", open); }, []); useEffect(() => { if (!renameNotice) return; const timeout = window.setTimeout(() => setRenameNotice(""), 2500); return () => window.clearTimeout(timeout); }, [renameNotice]); useEffect(() => { const close = (event: PointerEvent) => { if (menuRef.current && !menuRef.current.contains(event.target as Node)) setFileOpen(false); }; window.addEventListener("pointerdown", close); return () => window.removeEventListener("pointerdown", close); }, []);
   // Sondar sempre, e não só com o catálogo aberto: é o que a aba "Como funciona"
   // promete ("ao abrir o editor... a página procura o conector") e é a única
   // forma de o botão do topo dizer o que está em uso sem obrigar a abrir a tela.
   const catalog = useSamCatalog(true);
-  const byomInUse = catalog.activeByomModel;
+  const runtime = useRuntimeStatus(true);
+  const ai = getAiCopy(props.language);
   const samInUse = catalog.samActive && catalog.connectionState === "ready";
-  const connectionLabel = samInUse && byomInUse ? `${copy.aiModel}: SAM + BYOM`
-    : samInUse ? copy.samActive
-    : byomInUse ? `${copy.aiModel}: BYOM`
-    : copy.activateSam;
-  const connectionHint = [samInUse ? catalog.loadedModelId : null, byomInUse ? byomInUse.name : null]
-    .filter(Boolean).join(" · ") || copy.activateSam;
+  const containersUp = catalog.byomModels.filter((model) => model.ready).length;
+  const nativeReady = runtime.state === "ready" && runtime.manifest !== null;
+  // Um botão só para a IA, que diz pelo ponto se há algo pronto e, no título,
+  // exatamente o quê. Os nomes de infraestrutura ficam para Conexões.
+  const aiHint = [
+    samInUse && catalog.loadedModelId ? fill(ai.aiHintSam, { model: catalog.loadedModelId }) : null,
+    nativeReady ? fill(ai.aiHintRuntime, { model: runtime.manifest!.name }) : null,
+    containersUp ? fill(ai.aiHintContainers, { n: containersUp }) : null,
+  ].filter(Boolean).join(" · ") || ai.aiHintNone;
+  const aiReady = samInUse || nativeReady || containersUp > 0;
+  const openPreannotate = (model: string | null = null) => { setHubTab(null); setPreannotate({ model }); };
   const saveRename = () => { const next = draft.trim(); setEditing(false); if (next && next !== projectLabel) { props.onRenameProject(next); setRenameNotice(copy.toastProjectRenamed); } else setDraft(projectLabel); };
   function setTheme(mode: ThemeMode) { setThemeModeState(mode); localStorage.setItem("poligome-theme", mode); document.documentElement.dataset.theme = mode; }
   const demoProject = props.hasAssets && /^Demo\b/.test(projectLabel);
   return <>
-    <header className="topbar"><div className="topbar-main"><div className="brand-side"><button className="mobile" onClick={props.onOpenImagesPanel} aria-label={copy.openImages}><Menu size={19} /></button><span className="brand-static"><BrandLockup height={28} /></span><i /><button className="home-return" title={copy.homeHint} aria-label={copy.home} onClick={props.onHome}><House size={15} /><span>{copy.home}</span></button>{editing ? <input className="project-name-input" value={draft} aria-label={copy.renameProject} maxLength={80} autoFocus onChange={(event) => setDraft(event.target.value)} onBlur={saveRename} onKeyDown={(event) => { if (event.key === "Enter") saveRename(); if (event.key === "Escape") { setDraft(projectLabel); setEditing(false); } }} /> : <button className="project-name" title={renameNotice || copy.renameProject} onClick={() => { setDraft(projectLabel); setEditing(true); }}><em /><span>{projectLabel}</span><Pencil size={13} /></button>}</div><div className="head-actions"><button className="new-project-main" disabled={props.loading} title={copy.newProjectHint} onClick={props.onNewProject}><Plus size={15} /><span>{copy.newProject}</span></button><span className={`save ${props.dirty ? "" : "done"}`}>{props.loading ? <LoaderCircle className="spin" size={14} /> : <HardDriveDownload size={14} />}{props.dirty ? copy.saving : copy.saved}</span><button className={`sam-connection${samInUse || byomInUse ? " connected" : ""}`} title={connectionHint} onClick={() => setSamOpen(true)}><Link2 size={14} />{connectionLabel}</button><button className="sam-connection" title={copy.runtimeStreamHint} onClick={() => window.dispatchEvent(new CustomEvent("poligome:run-runtime"))}><Sparkles size={14} />{copy.runtimeStream}</button><button className="sam-connection" title={copy.runtimeStreamAllHint} onClick={() => window.dispatchEvent(new CustomEvent("poligome:run-runtime-all"))}><Images size={14} />{copy.runtimeStreamAll}</button><span className="local-mode" title={copy.localOnlyHint}><ShieldCheck size={14} />{copy.localOnly}</span><a className="source-link" href="https://github.com/eduardoafonso1089/poligome" target="_blank" rel="noreferrer" title={copy.sourceCode}><CodeXml size={14} /><span>{copy.sourceCode}</span></a><button className="mobile" onClick={props.onOpenRightPanel} aria-label={copy.classes}><MoreHorizontal size={19} /></button></div></div>
+    <header className="topbar"><div className="topbar-main"><div className="brand-side"><button className="mobile" onClick={props.onOpenImagesPanel} aria-label={copy.openImages}><Menu size={19} /></button><span className="brand-static"><BrandLockup height={28} /></span><i /><button className="home-return" title={copy.homeHint} aria-label={copy.home} onClick={props.onHome}><House size={15} /><span>{copy.home}</span></button>{editing ? <input className="project-name-input" value={draft} aria-label={copy.renameProject} maxLength={80} autoFocus onChange={(event) => setDraft(event.target.value)} onBlur={saveRename} onKeyDown={(event) => { if (event.key === "Enter") saveRename(); if (event.key === "Escape") { setDraft(projectLabel); setEditing(false); } }} /> : <button className="project-name" title={renameNotice || copy.renameProject} onClick={() => { setDraft(projectLabel); setEditing(true); }}><em /><span>{projectLabel}</span><Pencil size={13} /></button>}</div><div className="head-actions"><button className="new-project-main" disabled={props.loading} title={copy.newProjectHint} onClick={props.onNewProject}><Plus size={15} /><span>{copy.newProject}</span></button><span className={`save ${props.dirty ? "" : "done"}`}>{props.loading ? <LoaderCircle className="spin" size={14} /> : <HardDriveDownload size={14} />}{props.dirty ? copy.saving : copy.saved}</span><button className={`sam-connection ai-button${aiReady ? " connected" : ""}`} title={aiHint} aria-label={`${ai.hubTitle}: ${aiHint}`} onClick={() => setHubTab(samInUse || !(nativeReady || containersUp) ? "assisted" : "automatic")}><Sparkles size={14} /><span>{ai.aiButton}</span></button><button className="sam-connection preannotate-button" title={ai.preAnnotateHint} aria-label={ai.preAnnotate} disabled={!props.hasAsset || props.preannotating} onClick={() => openPreannotate()}>{props.preannotating ? <LoaderCircle className="spin" size={14} /> : <ScanSearch size={14} />}<span>{ai.preAnnotate}</span></button><span className="local-mode" title={copy.localOnlyHint}><ShieldCheck size={14} />{copy.localOnly}</span><a className="source-link" href="https://github.com/eduardoafonso1089/poligome" target="_blank" rel="noreferrer" title={copy.sourceCode}><CodeXml size={14} /><span>{copy.sourceCode}</span></a><button className="mobile" onClick={props.onOpenRightPanel} aria-label={copy.classes}><MoreHorizontal size={19} /></button></div></div>
       <nav className="menubar" aria-label={copy.fileMenu}><div className="menu" ref={menuRef}><button className={`menu-trigger ${fileOpen ? "open" : ""}`} aria-haspopup="menu" aria-expanded={fileOpen} onClick={() => setFileOpen((value) => !value)}>{copy.fileMenu}<ChevronDown size={13} /></button>{fileOpen && <div className="project-pop menu-pop" role="menu" aria-label={copy.fileMenu}><div className="project-summary" title={demoProject ? copy.demoReady : projectLabel}><span><em />{projectLabel}</span><small>{props.assetsCount} {copy.projectImages} · {props.annotationsCount} {copy.projectAnnotations}</small></div><button role="menuitem" disabled={props.loading} onClick={() => { setFileOpen(false); props.onNewProject(); }}><Plus size={14} /><span><b>{copy.newProject}</b><small>{copy.newProjectHint}</small></span></button><button role="menuitem" disabled={props.loading} onClick={() => { setFileOpen(false); props.onOpenProject(); }}><FolderUp size={14} /><span><b>{copy.openProject}</b><small>{copy.openProjectHint}</small></span></button><button role="menuitem" disabled={props.loading || !props.hasAssets} onClick={() => { setFileOpen(false); props.onSaveProject(); }}><Save size={14} /><span><b>{copy.saveProject}</b><small>{copy.saveProjectHint}</small></span></button><button role="menuitem" onClick={() => { setFileOpen(false); setEditing(true); }}><Pencil size={14} /><span><b>{copy.renameProject}</b><small>{projectLabel}</small></span></button><i className="menu-separator" /><p>{copy.exportFormat}</p>{props.fileMenuExtras}<i className="menu-separator" /><button role="menuitem" onClick={() => { setFileOpen(false); setPreferencesTab("appearance"); setPreferencesOpen(true); }}><Settings2 size={14} /><span><b>{copy.preferences}</b><small>{copy.appearance} · {copy.language}</small></span></button></div>}</div></nav></header>
     {preferencesOpen && <div className="modal-backdrop"><section className="sam-modal preferences-modal" role="dialog" aria-modal="true" aria-labelledby="preferences-title"><header><div><span><Settings2 size={18} /></span><div><h2 id="preferences-title">{copy.preferences}</h2><p>poligome.com</p></div></div><button onClick={() => setPreferencesOpen(false)} aria-label={copy.close}><X size={19} /></button></header><div className="preferences-tabs"><button className={preferencesTab === "appearance" ? "active" : ""} onClick={() => setPreferencesTab("appearance")}><Sun size={14} />{copy.appearance}</button><button className={preferencesTab === "language" ? "active" : ""} onClick={() => setPreferencesTab("language")}><Languages size={14} />{copy.language}</button></div>{preferencesTab === "appearance" ? <div className="preference-options"><button className={themeMode === "system" ? "active" : ""} onClick={() => setTheme("system")}><Monitor size={20} /><b>{copy.system}</b></button><button className={themeMode === "light" ? "active" : ""} onClick={() => setTheme("light")}><Sun size={20} /><b>{copy.light}</b></button><button className={themeMode === "dark" ? "active" : ""} onClick={() => setTheme("dark")}><Moon size={20} /><b>{copy.dark}</b></button></div> : <div className="language-options"><button className={props.language === "pt" ? "active" : ""} onClick={() => props.onLanguageChange("pt")}><b>Português</b><span>PT-BR</span></button><button className={props.language === "en" ? "active" : ""} onClick={() => props.onLanguageChange("en")}><b>English</b><span>EN</span></button><button className={props.language === "fr" ? "active" : ""} onClick={() => props.onLanguageChange("fr")}><b>Français</b><span>FR</span></button><button className={props.language === "es" ? "active" : ""} onClick={() => props.onLanguageChange("es")}><b>Español</b><span>ES</span></button></div>}<footer><button className="connect" onClick={() => setPreferencesOpen(false)}><Check size={15} />{copy.close}</button></footer></section></div>}
-    {samOpen && <SamSetupModal
+    {hubTab && <SamSetupModal
       language={props.language}
+      tab={hubTab}
+      onTabChange={setHubTab}
       selectedModelId={catalog.selectedModelId}
       loadedModelId={catalog.loadedModelId}
       connectionState={catalog.connectionState}
@@ -72,18 +83,32 @@ export function PreRefactorTopbar(props: PreRefactorChromeProps) {
       connectorHost={catalog.connectorHost}
       endpoint={catalog.endpoint}
       byomModels={catalog.byomModels}
-      byomModelId={catalog.byomModelId}
       byomBusy={catalog.byomBusy}
+      runtime={runtime}
       onSelectModel={catalog.setSelectedModelId}
-      onSelectByomModel={catalog.setByomModelId}
-      onRunByomModel={(modelId) => window.dispatchEvent(new CustomEvent("poligome:run-byom", { detail: { modelId } }))}
+      onPreannotate={(model) => openPreannotate(model)}
       onRegisterByomModel={(entry) => catalog.registerByom(entry)}
       onRemoveByomModel={(modelId) => void catalog.removeByom(modelId)}
       onUnselectAll={catalog.unselectAll}
-      anyModelSelected={catalog.anyModelSelected}
       onEndpointChange={catalog.setEndpoint}
-      onConnect={() => { void catalog.connect().then((ok) => { if (ok) setSamOpen(false); }); }}
-      onClose={() => setSamOpen(false)}
+      onRecheckConnector={catalog.recheck}
+      onConnect={() => { void catalog.connect().then((ok) => { if (ok) setHubTab(null); }); }}
+      onClose={() => setHubTab(null)}
+    />}
+    {preannotate && <PreannotateDialog
+      language={props.language}
+      runtimeState={runtime.state}
+      manifest={runtime.manifest}
+      containers={catalog.byomModels}
+      initialModel={preannotate.model}
+      hasAsset={props.hasAsset}
+      assetsCount={props.assetsCount}
+      selectionIsBox={props.selectionIsBox}
+      imagePixels={props.imagePixels}
+      busy={props.preannotating}
+      onRun={(request) => { setPreannotate(null); window.dispatchEvent(new CustomEvent(PREANNOTATE_EVENT, { detail: request })); }}
+      onClose={() => setPreannotate(null)}
+      onOpenHub={() => { setPreannotate(null); setHubTab("automatic"); }}
     />}
   </>;
 }

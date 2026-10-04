@@ -17,6 +17,9 @@
 
 export const DEFAULT_RUNTIME_ENDPOINT = "http://127.0.0.1:7861";
 
+/** Onde a escolha de endereço fica guardada. Mesma convenção do endpoint do conector SAM. */
+export const RUNTIME_ENDPOINT_KEY = "poligome-runtime-endpoint";
+
 export type RuntimePoint = { x: number; y: number };
 export type RuntimeRect = { x: number; y: number; width: number; height: number };
 

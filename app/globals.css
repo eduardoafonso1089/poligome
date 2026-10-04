@@ -506,34 +506,139 @@ html[data-theme="light"]{--ink:#29262F;--muted:#6E6A75;--line:#DEDCE4;--green:#7
 
 .demo-import{margin:0 13px 8px;width:calc(100% - 26px);height:31px;border:1px solid var(--tool-active-border);border-radius:8px;background:var(--tool-active-bg);color:var(--btn-accent-ink);display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;font-weight:700;cursor:pointer}.demo-import:disabled{opacity:.55;cursor:wait}.dataset-tabs{grid-template-columns:1fr 1fr 1fr}.dataset-tabs button{display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px}.quality-data{padding:12px}.quality-data section,.review-panel section{margin-bottom:12px;padding:11px;border:1px solid var(--line);border-radius:9px;background:var(--surface-soft)}.quality-data section>b,.review-panel section>b{display:block;font-size:11px;color:var(--btn-accent-ink)}.quality-data section>small,.review-panel section>small{display:block;margin:4px 0 9px;font-size:10px;color:var(--muted);line-height:1.4}.quality-bar{display:grid;grid-template-columns:minmax(0,1fr) 72px 24px;align-items:center;gap:6px;margin:7px 0;font-size:10px}.quality-bar span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.quality-bar i{height:6px;border-radius:6px;background:var(--theme-hover);overflow:hidden}.quality-bar em{display:block;height:100%;border-radius:6px;background:var(--green)}.quality-row{display:grid;grid-template-columns:9px minmax(0,1fr) auto;gap:6px;align-items:center;margin:7px 0;font-size:10px}.quality-row i{width:8px;height:8px;border-radius:2px}.quality-row span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.quality-row small{grid-column:2/-1;color:var(--muted)}.quality-suggestions p,.review-hint{margin:6px 0 0;font-size:10px;line-height:1.45;color:var(--muted)}.review-panel{padding:12px}.review-panel select{width:100%;height:30px;border:1px solid var(--line);border-radius:6px;background:var(--control-bg);color:var(--ink);padding:0 7px;font-size:11px}.review-score{display:flex;align-items:center;gap:2px}.review-score button{width:27px;height:27px;border:0;border-radius:5px;background:transparent;color:var(--tool-disabled-ink);font-size:18px;cursor:pointer}.review-score button.selected{color:var(--amber);background:var(--amber-bg)}.review-score small{margin-left:5px;font-size:10px;color:var(--muted)}
 
-/* Barra do runtime: fica acima de tudo porque um lote continua correndo
-   enquanto a pessoa olha outra imagem, e ela precisa ver isso de onde estiver. */
-.runtime-progress {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 22px;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  background: color-mix(in srgb, var(--panel, #1c1f1e) 92%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--accent, #6c8cff) 40%, transparent);
-  overflow: hidden;
-}
-.runtime-progress-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  background: color-mix(in srgb, var(--accent, #6c8cff) 28%, transparent);
-  transition: width 180ms ease-out;
-}
-.runtime-progress-text {
-  position: relative;
-  padding: 0 10px;
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  color: var(--text, #e7ece9);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* Área de IA: o botão do topo, a central em três abas, o diálogo de
+   pré-anotação e o cartão de execução. Tudo nos tokens do tema, para valer
+   igual no claro e no escuro. */
+.ai-button,.preannotate-button{font-weight:650}
+.ai-button span,.preannotate-button span{white-space:nowrap}
+.preannotate-button{color:var(--ink)}
+.preannotate-button:disabled{opacity:.45;cursor:default}
+@media(max-width:1180px){.ai-button span,.preannotate-button span{display:none}}
+
+.ai-hub-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--surface-soft)}
+.ai-hub-tabs button{min-width:0;display:flex;align-items:center;gap:9px;padding:8px 11px;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--muted);text-align:left;cursor:pointer}
+.ai-hub-tabs button:hover{background:var(--theme-hover);color:var(--ink)}
+.ai-hub-tabs button.active{border-color:color-mix(in srgb,var(--green) 55%,var(--line));background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(15,29,20,.08)}
+.ai-hub-tabs button.active svg{color:var(--green)}
+.ai-hub-tabs span{min-width:0}
+.ai-hub-tabs b,.ai-hub-tabs small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-hub-tabs b{font-size:12px}
+.ai-hub-tabs small{margin-top:2px;font-size:10px;color:var(--muted)}
+.sam-catalog-body.single{grid-template-columns:minmax(0,1fr)}
+.sam-catalog-body.single .sam-model-detail{width:100%;max-width:820px;margin:0 auto}
+@media(max-width:760px){.ai-hub-tabs{gap:4px;padding:6px}.ai-hub-tabs button{flex-direction:column;align-items:center;gap:3px;padding:7px 4px;text-align:center}.ai-hub-tabs small{display:none}.ai-hub-tabs b{font-size:11px}}
+
+.ai-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border-radius:999px;font-size:9px;font-weight:750;letter-spacing:.03em;white-space:nowrap}
+.ai-badge.kind-native{background:color-mix(in srgb,var(--info,#3c6fd1) 14%,var(--surface));color:color-mix(in srgb,var(--info,#3c6fd1) 85%,var(--ink));border:1px solid color-mix(in srgb,var(--info,#3c6fd1) 35%,var(--line))}
+.ai-badge.kind-container{background:color-mix(in srgb,var(--amber) 14%,var(--surface));color:color-mix(in srgb,var(--amber) 80%,var(--ink));border:1px solid color-mix(in srgb,var(--amber) 35%,var(--line))}
+.sam-model-hero>div:first-child .ai-badge{font-size:8px}
+
+/* O botão das fichas do BYOM pedia --accent, que o tema não define: o fundo
+   sumia e o texto branco ficava invisível no tema claro. */
+.byom-run{border-color:var(--green);background:var(--green);color:var(--on-brand,#fff)}
+.byom-facts b{color:var(--muted)}
+.byom-facts p{color:var(--ink)}
+
+.ai-guide-kinds{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.ai-guide-kinds article{padding:12px 13px;border:1px solid var(--line);border-radius:11px;background:var(--surface-soft)}
+.ai-guide-kinds b{display:block;font-size:13px}
+.ai-guide-kinds p{margin:5px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
+.ai-guide-table{margin-top:12px;overflow-x:auto}
+.ai-guide-table table{width:100%;border-collapse:collapse;font-size:11px}
+.ai-guide-table th,.ai-guide-table td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+.ai-guide-table thead th{color:var(--muted);font-size:10px;font-weight:650}
+.ai-guide-table tbody th{font-weight:600;color:var(--ink)}
+.ai-guide-table td.yes{color:var(--btn-accent-ink);font-weight:650}
+.ai-guide-table td.no{color:var(--muted)}
+.ai-guide-rule{display:flex;gap:8px;align-items:flex-start;margin:14px 0 0;padding:10px 12px;border:1px solid var(--tool-active-border);border-radius:10px;background:var(--tool-active-bg);color:var(--ink);font-size:11px;line-height:1.5}
+.ai-guide-rule svg{flex:none;margin-top:2px;color:var(--green)}
+@media(max-width:760px){.ai-guide-kinds{grid-template-columns:1fr}}
+
+.ai-conn-card{margin-top:12px;padding:12px 13px;border:1px solid var(--line);border-radius:12px;background:var(--surface-soft)}
+.ai-conn-card>header{display:flex;align-items:center;gap:10px}
+.ai-conn-card>header>.ai-conn-icon{width:32px;height:32px;flex:none;display:grid;place-items:center;border-radius:9px;background:var(--surface);border:1px solid var(--line);color:var(--muted)}
+.ai-conn-card>header>div{flex:1;min-width:0}
+.ai-conn-card>header b{display:block;font-size:12px}
+.ai-conn-card>header small{display:block;margin-top:2px;color:var(--muted);font-size:10.5px;line-height:1.4}
+.ai-conn-status{display:inline-flex;align-items:center;gap:6px;flex:none;padding:4px 9px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-size:10px;font-weight:650;white-space:nowrap}
+.ai-conn-status em{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.ai-conn-status.ready{color:var(--btn-accent-ink);border-color:color-mix(in srgb,var(--green) 45%,var(--line))}
+.ai-conn-status.ready em{background:var(--green)}
+.ai-conn-status.offline em{background:#c0623a}
+.ai-conn-status.checking em{background:var(--amber);animation:spin 1s linear infinite}
+.ai-conn-detail{margin:9px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
+.ai-conn-warning{display:flex;gap:7px;align-items:flex-start;margin:9px 0 0;padding:8px 10px;border-radius:8px;background:var(--amber-bg);border:1px solid var(--amber-border,var(--line));color:var(--ink);font-size:10.5px;line-height:1.45}
+.ai-conn-warning svg{flex:none;margin-top:1px;color:var(--amber)}
+.ai-conn-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:7px;margin-top:10px}
+.ai-conn-row>button{height:32px;display:inline-flex;align-items:center;gap:6px;padding:0 11px;border:1px solid var(--line);border-radius:8px;background:var(--control-bg);color:var(--ink);font-size:11px;cursor:pointer}
+.ai-conn-row>button:hover{background:var(--theme-hover)}
+.ai-conn-row>button.primary{border-color:var(--green);background:var(--green);color:var(--on-brand,#fff);font-weight:650}
+.ai-conn-address{flex:1;min-width:220px;display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:10px;font-weight:650}
+.ai-conn-address input{height:32px;padding:0 9px;border:1px solid var(--line);border-radius:8px;background:var(--control-bg);color:var(--ink);font-family:var(--mono,ui-monospace,monospace);font-size:11px;outline:0}
+.ai-conn-address input:focus{border-color:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 18%,transparent)}
+.ai-conn-list{margin:10px 0 0;padding:0;list-style:none}
+.ai-conn-list li{display:grid;grid-template-columns:9px minmax(0,auto) 1fr;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:11px}
+.ai-conn-list li:first-child{border-top:0}
+.ai-conn-list li>span{width:8px;height:8px;border-radius:50%;background:#c0623a}
+.ai-conn-list li>span.up{background:var(--green)}
+.ai-conn-list small{color:var(--muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.preannotate-modal{width:min(520px,100%);max-height:calc(100vh - 32px);overflow:auto}
+.preannotate-modal header p{max-width:360px;line-height:1.45}
+.pa-group{margin:0 0 14px;padding:0;border:0;min-width:0}
+.pa-group legend{margin-bottom:7px;padding:0;color:var(--muted);font-size:10px;font-weight:750;letter-spacing:.08em;text-transform:uppercase}
+.pa-model{display:flex;align-items:center;gap:10px;margin-top:6px;padding:10px 11px;border:1px solid var(--line);border-radius:10px;background:var(--surface);cursor:pointer}
+.pa-model:hover{background:var(--theme-hover)}
+.pa-model.active{border-color:color-mix(in srgb,var(--green) 60%,var(--line));background:color-mix(in srgb,var(--green) 9%,var(--surface))}
+.pa-model.disabled{opacity:.55;cursor:not-allowed}
+.pa-model input{width:auto;height:auto;margin:0;accent-color:var(--green)}
+.pa-model-text{flex:1;min-width:0}
+.preannotate-backdrop{z-index:126}
+.pa-model b,.pa-model small{display:block}
+.pa-model b{font-size:12.5px}
+.pa-model small{margin-top:2px;color:var(--muted);font-size:10.5px}
+.pa-scopes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.pa-scopes label{display:flex;align-items:center;gap:6px;min-height:40px;padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:var(--surface);font-size:11.5px;font-weight:600;cursor:pointer}
+.pa-scopes label:hover{background:var(--theme-hover)}
+.pa-scopes label.active{border-color:color-mix(in srgb,var(--green) 60%,var(--line));background:color-mix(in srgb,var(--green) 9%,var(--surface))}
+.pa-scopes label.disabled,.pa-scopes label:has(input:disabled){opacity:.5;cursor:not-allowed}
+.pa-scopes input{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
+.pa-scopes label:has(input:focus-visible){outline:2px solid var(--green);outline-offset:1px}
+.pa-scopes svg{flex:none;color:var(--muted)}
+.pa-scopes label.active svg{color:var(--green)}
+.pa-note{margin:7px 0 0;color:var(--muted);font-size:10.5px;line-height:1.45}
+.pa-warning{display:flex;gap:7px;align-items:flex-start;margin:0 0 4px;padding:9px 11px;border-radius:9px;background:var(--amber-bg);border:1px solid var(--amber-border,var(--line));color:var(--ink);font-size:11px;line-height:1.45}
+.pa-warning svg{flex:none;margin-top:2px;color:var(--amber)}
+.pa-param{display:grid;grid-template-columns:minmax(0,1fr) 160px 42px;align-items:center;gap:9px;margin-top:6px;font-size:11.5px}
+.pa-param input[type=range]{width:100%;height:auto;margin:0;padding:0;border:0;accent-color:var(--green)}
+.pa-param output{font-variant-numeric:tabular-nums;color:var(--muted);text-align:right}
+.pa-param select{grid-column:2/-1;height:30px;border:1px solid var(--line);border-radius:7px;background:var(--control-bg);color:var(--ink);padding:0 7px;font-size:11px}
+.pa-param-check{grid-template-columns:auto 1fr}
+.pa-param-check input{width:auto;height:auto;margin:0;accent-color:var(--green)}
+.pa-empty{padding:16px;border:1px dashed var(--line);border-radius:12px;text-align:center}
+.pa-empty b{display:block;font-size:13px}
+.pa-empty p{margin:6px 0 12px;color:var(--muted);font-size:11.5px;line-height:1.5}
+.pa-empty .connect{height:34px;padding:0 13px;border:1px solid var(--green);border-radius:8px;background:var(--green);color:var(--on-brand,#fff);font-size:12px;font-weight:650;cursor:pointer}
+.preannotate-modal footer button.connect:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:560px){.pa-scopes{grid-template-columns:1fr}.pa-param{grid-template-columns:1fr 48px}.pa-param>span{grid-column:1/-1}.pa-param select{grid-column:1/-1}.pa-param-check{grid-template-columns:auto 1fr}.pa-param-check>span{grid-column:auto}}
+
+/* O cartão da execução: flutua acima da barra de estado, de onde se vê a
+   imagem e o resultado chegando. Um lote continua correndo enquanto a pessoa
+   olha outra foto, e ela precisa ver isso de onde estiver. */
+.ai-run-card{position:fixed;left:50%;bottom:54px;transform:translateX(-50%);z-index:110;width:min(460px,calc(100vw - 24px));padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);box-shadow:0 14px 40px rgba(15,29,20,.22)}
+.ai-run-head{display:flex;align-items:center;gap:9px}
+.ai-run-head>svg{flex:none;color:var(--green)}
+.ai-run-head>span{flex:1;min-width:0}
+.ai-run-head b{display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-run-head small{display:block;margin-top:2px;color:var(--muted);font-size:10.5px;line-height:1.4}
+.ai-run-card:not(.done) .ai-run-head small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-run-card.done .ai-run-head b{white-space:normal}
+.ai-run-head>button,.ai-run-actions button{height:30px;display:inline-flex;align-items:center;gap:5px;flex:none;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--control-bg);color:var(--ink);font-size:11px;cursor:pointer}
+.ai-run-head>button:hover,.ai-run-actions button:hover{background:var(--theme-hover)}
+.ai-run-track{height:5px;margin-top:9px;border-radius:5px;background:var(--theme-hover);overflow:hidden}
+.ai-run-track i{display:block;height:100%;border-radius:5px;background:var(--green);transition:width 180ms ease-out}
+.ai-run-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:9px}
+.ai-run-actions button.primary{border-color:var(--green);background:var(--green);color:var(--on-brand,#fff);font-weight:650}
+
+/* Código dentro de uma frase fica na linha; só o comando solto do cartão é bloco. */
+.byom-steps article p code,.sam-steps li p code{display:inline;padding:1px 5px;border:0;background:var(--surface-soft);white-space:normal}

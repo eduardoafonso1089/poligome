@@ -261,7 +261,7 @@ byte, a partir de uma receita de poucos kilobytes.
 ### 1. Escreva o servidor de inferência
 
 Comece pelo exemplo, que já implementa o contrato inteiro. Ele é versionado em
-`public/byom`, e o painel **Trazer meu modelo** oferece os dois arquivos em
+`public/byom`, e o painel **Adicionar meu modelo** oferece os dois arquivos em
 botões de download. Quem estiver no repositório já os tem:
 
 ```bash
@@ -352,32 +352,39 @@ linhas do log aparecem na saída.
 
 ### 5. Use no editor
 
-Os modelos registrados aparecem na barra lateral do botão do modelo de IA, sob
-**BYOM · seu modelo**, com o estado de cada contêiner. Ao escolher um, a barra
-sobre a imagem ganha o botão **Rodar BYOM** — que vira **Rodar de novo** depois
-da primeira execução. É a mesma barra do SAM: as abas de pontos e caixas só
-aparecem com a ferramenta SAM ativa, porque o BYOM não recebe prompt, e o botão
-de rodar aparece sempre que houver um contêiner selecionado.
+A área de IA do editor tem dois modos, e o BYOM pertence ao segundo:
 
-SAM e BYOM podem ficar ativos ao mesmo tempo, e o botão do topo mostra os dois.
-**Desselecionar todos**, no rodapé da janela, apenas deixa de usá-los para
-anotar: nada é desinstalado, o conector segue conectado e as listas continuam
-iguais.
-São caminhos independentes: o SAM segmenta o que você clica, o BYOM anota a
-imagem inteira, e as máscaras de um não alteram nem substituem as do outro — as
-anotações do BYOM entram somadas às que já existem. A única exceção é reexecutar
-o mesmo modelo na mesma imagem, logo abaixo.
+- **Assistido** é o SAM: você aponta o objeto — clique, caixa ou, no SAM 3,
+  texto — e a IA recorta só ele.
+- **Automático** é o modelo que anota sozinho a imagem inteira. Há dois tipos:
+  **Nativo**, servido pelo Poligome Runtime, e **Contêiner**, que é o BYOM.
+
+Os contêineres registrados aparecem no botão **IA** do topo, aba
+**Automático**, sob **Meus modelos · Contêiner**, com o estado de cada um. A
+aba **Conexões** mostra o conector, o runtime e quantos contêineres estão no
+ar. Para rodar, use **Pré-anotar** — no topo ou na ficha do modelo: escolha o
+modelo, a imagem aberta ou todas as imagens do projeto, e confirme. Um Contêiner
+sempre recebe a imagem inteira, então a opção de região fica desabilitada para
+ele, com o motivo escrito, e imagens acima de 16 MP recebem um aviso antes de
+rodar.
+
+Assistido e Automático são caminhos independentes: o SAM segmenta o que você
+aponta, o BYOM anota a imagem inteira, e as máscaras de um não alteram nem
+substituem as do outro — as anotações do BYOM entram somadas às que já existem.
+A única exceção é reexecutar o mesmo modelo na mesma imagem, logo abaixo.
 
 O resultado entra direto na lista de anotações: não há etapa de proposta nem
 botão de **Salvar**. O que o contêiner devolveu já está desenhado sobre a
-imagem, com as classes que ele indicou, e a revisão é feita ali mesmo — apagando
-ou corrigindo o que não serve, como em qualquer anotação.
+imagem, com as classes que ele indicou. No fim de cada execução um cartão diz
+quantas anotações vieram, em quantas imagens e onde falhou, e oferece
+**Desfazer pré-anotação**, que remove de uma vez tudo o que aquela execução
+trouxe — sem tocar no que você fez à mão no meio do caminho.
 
 Reexecutar o mesmo modelo na mesma imagem **substitui** o resultado anterior, em
 vez de empilhar máscaras idênticas. A origem viaja no id de cada anotação
 (`byom:<model-id>`), então anotações feitas à mão, as de outro modelo e as do
-mesmo modelo em outras imagens ficam intactas. O aviso na tela diz quantas foram
-substituídas.
+mesmo modelo em outras imagens ficam intactas. O cartão do fim diz quantas
+foram substituídas.
 
 Clicar num modelo abre a ficha dele: explicação automática do que exporta,
 limitações que o próprio modelo declara, classes, parâmetros, variáveis do
@@ -386,11 +393,11 @@ contêiner e o resumo da última execução. A ficha também traz um campo de
 revisar com atenção. O lápis edita nome, porta e anotação; a lixeira remove o
 registro, sem tocar na imagem nem no contêiner do Docker.
 
-**Trazer meu modelo** é só a documentação — contrato, passo a passo, arquivos
-para baixar e o formulário de importação. Não há botão de usar modelo ali,
+**Adicionar meu modelo** é só a documentação — contrato, passo a passo, arquivos
+para baixar e o formulário de importação. Não há botão de pré-anotar ali,
 porque não é um modelo.
 
-Também dá para **importar sem terminal**: no painel **Trazer meu modelo** há um
+Também dá para **importar sem terminal**: no painel **Adicionar meu modelo** há um
 formulário com identificador, nome e porta. Ele apenas declara onde o contêiner
 está — subir o contêiner continua sendo trabalho da CLI ou do `docker run`,
 porque o Poligome não executa Docker por conta própria. As anotações aparecem

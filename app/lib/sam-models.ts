@@ -864,54 +864,6 @@ export type ByomModel = {
   unavailable_reason: string | null;
 };
 
-const GEOMETRY_LABELS: Record<string, string> = {
-  polygon: "máscaras",
-  bbox: "caixas",
-  keypoints: "pontos",
-};
-
-function describeList(items: readonly string[]): string {
-  if (items.length === 1) return items[0];
-  return `${items.slice(0, -1).join(", ")} e ${items[items.length - 1]}`;
-}
-
-/** Monta uma explicação legível do que o modelo faz.
- *
- * Prefere o que o contêiner declara em /metadata, porque vale antes da primeira
- * execução; sem isso, cai no que a última execução realmente devolveu. Quando
- * não há nem um nem outro, diz isso em vez de inventar.
- */
-export function describeByomModel(model: ByomModel): string {
-  const parts: string[] = [];
-  if (model.metadata?.task) parts.push(`${model.metadata.task}.`);
-  if (model.metadata?.description) parts.push(model.metadata.description);
-
-  const declared = model.metadata?.categories ?? [];
-  const observed = model.last_run?.categories ?? [];
-  const categories = declared.length ? declared : observed;
-  const source = declared.length ? "declara" : "na última execução devolveu";
-  if (categories.length) {
-    const plural = categories.length === 1 ? "classe" : "classes";
-    parts.push(`Segundo o COCO, ${source} ${categories.length} ${plural}: ${describeList(categories)}.`);
-  }
-
-  const geometry = (model.metadata?.geometry ?? model.last_run?.geometry ?? [])
-    .map((item) => GEOMETRY_LABELS[item] ?? item);
-  if (geometry.length) parts.push(`Exporta ${describeList(geometry)}.`);
-
-  if (model.last_run) {
-    const count = model.last_run.annotations;
-    parts.push(`Na última imagem produziu ${count} ${count === 1 ? "anotação" : "anotações"}.`);
-  }
-
-  if (!parts.length) {
-    return model.ready
-      ? "Este contêiner não implementa GET /metadata e ainda não foi executado, então não há o que descrever. Rode-o uma vez sobre uma imagem."
-      : "O contêiner está parado, então não dá para descrevê-lo. Suba-o para ver as classes que ele exporta.";
-  }
-  return parts.join(" ");
-}
-
 export type SamModel = (typeof SAM_MODELS)[number];
 export type SamModelId = SamModel["id"];
 

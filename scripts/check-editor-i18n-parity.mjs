@@ -39,6 +39,14 @@ const retiredKeys = {
     "samHardwareDetail", "samInstallerDetail", "samOffline", "samPrivacyDetail",
     "samPrivacyIntro", "samSubtitle", "samTitle", "unixInstaller", "windowsInstaller",
   ],
+  // The AI area was reorganized into Assisted (SAM), Automatic (Native runtime
+  // models and Container BYOM models) and Connections. The topbar's three AI
+  // buttons became one "AI" button and a "Pre-annotate" button, whose copy
+  // lives in app/lib/ai-copy.ts with the rest of that vocabulary.
+  "AI area reorganized into Assisted, Automatic and Connections": [
+    "activateSam", "aiModel", "errRuntimeUnreachable", "runtimeStream", "runtimeStreamAll",
+    "runtimeStreamAllHint", "runtimeStreamHint", "samActive",
+  ],
 };
 const retired = new Set(Object.values(retiredKeys).flat());
 
