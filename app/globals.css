@@ -541,7 +541,7 @@ html[data-theme="light"]{--ink:#29262F;--muted:#6E6A75;--line:#DEDCE4;--green:#7
 
 .ai-guide-kinds{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
 .ai-guide-kinds article{padding:12px 13px;border:1px solid var(--line);border-radius:11px;background:var(--surface-soft)}
-.ai-guide-kinds b{display:block;margin-top:8px;font-size:12px}
+.ai-guide-kinds b{display:block;font-size:13px}
 .ai-guide-kinds p{margin:5px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
 .ai-guide-table{margin-top:12px;overflow-x:auto}
 .ai-guide-table table{width:100%;border-collapse:collapse;font-size:11px}
@@ -640,3 +640,5 @@ html[data-theme="light"]{--ink:#29262F;--muted:#6E6A75;--line:#DEDCE4;--green:#7
 .ai-run-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:9px}
 .ai-run-actions button.primary{border-color:var(--green);background:var(--green);color:var(--on-brand,#fff);font-weight:650}
 
+/* Código dentro de uma frase fica na linha; só o comando solto do cartão é bloco. */
+.byom-steps article p code,.sam-steps li p code{display:inline;padding:1px 5px;border:0;background:var(--surface-soft);white-space:normal}

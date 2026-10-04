@@ -53,8 +53,8 @@ export function AutomaticGuidePanel({ copy }: { copy: AiCopy }) {
       <p>{copy.guideIntro}</p>
     </section>
     <section className="ai-guide-kinds">
-      <article><KindBadge kind="native" copy={copy} /><b>{copy.guideNativeTitle}</b><p>{copy.guideNativeBody}</p></article>
-      <article><KindBadge kind="container" copy={copy} /><b>{copy.guideContainerTitle}</b><p>{copy.guideContainerBody}</p></article>
+      <article><b>{copy.guideNativeTitle}</b><p>{copy.guideNativeBody}</p></article>
+      <article><b>{copy.guideContainerTitle}</b><p>{copy.guideContainerBody}</p></article>
     </section>
     <section className="ai-guide-table">
       <table>
