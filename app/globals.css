@@ -665,3 +665,5 @@ html[data-theme="light"]{--ink:#29262F;--muted:#6E6A75;--line:#DEDCE4;--green:#7
 /* Comandos longos (URLs, pip) quebram a linha em vez de alargar a ficha no celular. */
 .sam-model-detail{min-width:0}
 .sam-steps li code,.sam-relaunch code{white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere}
+
+.coco-import-modal header>div{display:block;min-width:0;overflow-wrap:anywhere}.coco-import-modal header{align-items:flex-start}.coco-import-modal header>button{flex-shrink:0}.coco-import-list b{font-size:14px}

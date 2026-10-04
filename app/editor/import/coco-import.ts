@@ -1,3 +1,4 @@
+import { parseCocoRle, rlePolygons } from "./coco-rle";
 import type { EditorAnnotation } from "../models/annotation-model";
 import { createBox, createPoint, createPolygon } from "../models/annotation-factory";
 
@@ -50,7 +51,8 @@ function arrays(value: unknown): unknown[][] {
 
 function coordinatesFromRing(value: unknown, sx: number, sy: number) {
   if (!Array.isArray(value) || value.length < 6 || value.length % 2 !== 0) return [];
-  const numbers = value.map(Number);
+  if (!value.every((item) => typeof item === "number")) return [];
+  const numbers = value;
   if (!numbers.every(Number.isFinite)) return [];
   const coordinates: Array<[number, number]> = [];
   for (let index = 0; index < numbers.length; index += 2) coordinates.push([numbers[index] * sx, numbers[index + 1] * sy]);
@@ -103,7 +105,15 @@ export function cocoAnnotationToEditor(input: CocoAnnotationInput, context: Coco
   const result: EditorAnnotation[] = [];
 
   let drewPolygon = false;
+  const rle = parseCocoRle(input.segmentation);
   if (context.geometryTypes.has("polygon")) {
+    if (rle && rle.size[1] === context.sourceWidth && rle.size[0] === context.sourceHeight) {
+      for (const rings of rlePolygons(rle)) {
+        const coordinates = rings.map((ring) => ring.slice(0, -1).map(([x, y]): [number, number] => [x * scale.x, y * scale.y]));
+        result.push(createPolygon({ id: context.annotationId(), asset: context.assetId, label: context.labelId }, coordinates[0], coordinates.slice(1)));
+        drewPolygon = true;
+      }
+    }
     for (const ring of arrays(input.segmentation)) {
       const coordinates = coordinatesFromRing(ring, scale.x, scale.y);
       if (coordinates.length < 3) continue;
@@ -126,9 +136,9 @@ export function cocoAnnotationToEditor(input: CocoAnnotationInput, context: Coco
   }
 
   const boxSuppressed = context.boxAsFallback === true && drewPolygon;
-  if (!boxSuppressed && context.geometryTypes.has("box") && Array.isArray(input.bbox) && input.bbox.length >= 4) {
+  if (!boxSuppressed && context.geometryTypes.has("box") && cocoGeometryTypes({ bbox: input.bbox }).includes("box") && Array.isArray(input.bbox)) {
     const [x, y, width, height] = input.bbox.slice(0, 4).map(Number);
-    if ([x, y, width, height].every(Number.isFinite)) {
+    if ([x, y, width, height].every(Number.isFinite) && width > 0 && height > 0) {
       result.push(createBox(
         { id: context.annotationId(), asset: context.assetId, label: context.labelId },
         { x: x * scale.x, y: y * scale.y, width: width * scale.x, height: height * scale.y },
@@ -141,8 +151,8 @@ export function cocoAnnotationToEditor(input: CocoAnnotationInput, context: Coco
 
 export function cocoGeometryTypes(input: CocoAnnotationInput): CocoGeometry[] {
   const result: CocoGeometry[] = [];
-  if (arrays(input.segmentation).some((ring) => coordinatesFromRing(ring, 1, 1).length >= 3)) result.push("polygon");
+  if (parseCocoRle(input.segmentation)?.counts.some((run, index) => index % 2 === 1 && run > 0) || arrays(input.segmentation).some((ring) => coordinatesFromRing(ring, 1, 1).length >= 3)) result.push("polygon");
   if (landmarkPoints(input.keypoints ?? input.landmarks).length) result.push("point");
-  if (Array.isArray(input.bbox) && input.bbox.length >= 4 && input.bbox.slice(0, 4).map(Number).every(Number.isFinite)) result.push("box");
+  if (Array.isArray(input.bbox) && input.bbox.length >= 4 && input.bbox.slice(0, 4).every((n) => typeof n === "number" && Number.isFinite(n)) && input.bbox[2] > 0 && input.bbox[3] > 0) result.push("box");
   return result;
 }

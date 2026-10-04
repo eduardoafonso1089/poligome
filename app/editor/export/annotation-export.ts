@@ -1,3 +1,4 @@
+import { polygonRle } from "../import/coco-rle";
 import type { Asset, Label } from "../../lib/types";
 import type { BoxAnnotation, EditorAnnotation } from "../models/annotation-model";
 import type { Vertex } from "../models/vertex-model";
@@ -60,12 +61,16 @@ export function annotationToCoco(
   const categoryIndex = indexes.categoryIndexById.get(annotation.label) ?? -1;
   const bounds = exportBounds(annotation);
   const segmentation = annotation.type === "polygon"
-    ? [annotation.vertices, ...annotation.holes].map(verticesToFlat)
+    ? annotation.holes.length
+      ? polygonRle([annotation.vertices, ...annotation.holes], Number(assets[imageIndex]?.width), Number(assets[imageIndex]?.height))
+      : [verticesToFlat(annotation.vertices)]
     : annotation.type === "box" && Math.abs(annotation.rotation ?? 0) > 0.0001
       ? [verticesToFlat(boxCorners(annotation))]
       : [];
   const line = annotation.type === "line" ? verticesToFlat(annotation.vertices) : [];
-  const area = annotation.type === "polygon"
+  const area = !Array.isArray(segmentation)
+    ? segmentation.counts.reduce((sum, run, index) => sum + (index % 2 ? run : 0), 0)
+    : annotation.type === "polygon"
     ? polygonArea(annotation.vertices) - annotation.holes.reduce((sum, hole) => sum + polygonArea(hole), 0)
     : annotation.type === "line"
       ? 0
