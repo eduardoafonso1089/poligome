@@ -219,16 +219,22 @@ function describeContainer(copy: AiCopy, model: ByomModel): string {
   return parts.join(" ");
 }
 
-export function ContainerModelPanel({
-  copy, model, busy, onPreannotate, onRemove, onSave,
-}: {
+type ContainerModelPanelProps = {
   copy: AiCopy;
   model: ByomModel;
   busy: boolean;
   onPreannotate: (modelId: string) => void;
   onRemove: (modelId: string) => void;
   onSave: (entry: { modelId: string; name: string; port: number; notes: string }) => Promise<ByomWriteOutcome>;
-}) {
+};
+
+export function ContainerModelPanel(props: ContainerModelPanelProps) {
+  // A newly saved model gets a fresh form; ordinary health checks keep its draft.
+  const formKey = JSON.stringify([props.model.model_id, props.model.name, props.model.notes]);
+  return <ContainerModelForm key={formKey} {...props} />;
+}
+
+function ContainerModelForm({ copy, model, busy, onPreannotate, onRemove, onSave }: ContainerModelPanelProps) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(model.name);
   const [port, setPort] = useState(String(Number(model.endpoint.split(":").at(-1)) || 8080));
@@ -236,7 +242,6 @@ export function ContainerModelPanel({
   // A ficha só fecha quando o registro foi gravado: fechar antes descartava a
   // correção e não dizia o motivo.
   const [saveError, setSaveError] = useState("");
-  useEffect(() => { setEditing(false); setName(model.name); setNotes(model.notes); setSaveError(""); }, [model.model_id, model.name, model.notes]);
   const portNumber = Number(port);
   const canSave = Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535 && name.trim().length > 0;
 
@@ -311,17 +316,18 @@ export function ContainerModelPanel({
  * segundos por uma porta que ainda está pela metade.
  */
 function EndpointField({ copy, value, placeholder, onCommit, onValidityChange }: { copy: AiCopy; value: string; placeholder: string; onCommit: (value: string) => void; onValidityChange: (valid: boolean) => void }) {
-  const [draft, setDraft] = useState(value);
+  const [draftState, setDraft] = useState({ source: value, text: value });
+  const draft = draftState.source === value ? draftState.text : value;
   const errorId = useId();
   const reason = localEndpointError(draft);
-  useEffect(() => { setDraft(value); onValidityChange(!localEndpointError(value)); }, [value, onValidityChange]);
+  useEffect(() => { onValidityChange(!localEndpointError(value)); }, [value, onValidityChange]);
   const commit = () => { const next = draft.trim(); if (!localEndpointError(next) && next !== value) onCommit(next); };
   return <label className="ai-conn-address">{copy.connAddress}<input
     type="url" value={draft} placeholder={placeholder} spellCheck={false}
     aria-invalid={Boolean(reason)} aria-describedby={reason ? errorId : undefined}
-    onChange={(event) => { setDraft(event.target.value); onValidityChange(!localEndpointError(event.target.value)); }}
+    onChange={(event) => { setDraft({ source: value, text: event.target.value }); onValidityChange(!localEndpointError(event.target.value)); }}
     onBlur={commit}
-    onKeyDown={(event) => { if (event.key === "Enter") commit(); if (event.key === "Escape") { event.stopPropagation(); setDraft(value); onValidityChange(!localEndpointError(value)); } }}
+    onKeyDown={(event) => { if (event.key === "Enter") commit(); if (event.key === "Escape") { event.stopPropagation(); setDraft({ source: value, text: value }); onValidityChange(!localEndpointError(value)); } }}
   />{reason && <span id={errorId} role="alert" className="byom-reason">{reason === "remote" ? copy.connLocalOnly : copy.connInvalidAddress}</span>}</label>;
 }
 
