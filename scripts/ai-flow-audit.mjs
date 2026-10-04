@@ -1,4 +1,30 @@
-import { expect } from "playwright";
+import assert from "node:assert/strict";
+
+async function retry(check) {
+  const deadline = Date.now() + 6000;
+  let failure;
+  do {
+    try { return await check(); } catch (error) { failure = error; }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  throw failure;
+}
+function expect(value) {
+  return {
+    toBe: (expected) => assert.equal(value, expected),
+    toEqual: (expected) => assert.deepEqual(value, expected),
+    toBeGreaterThan: (expected) => assert.ok(value > expected),
+    toBeGreaterThanOrEqual: (expected) => assert.ok(value >= expected),
+    toBeVisible: () => retry(async () => assert.equal(await value.isVisible(), true)),
+    toBeHidden: () => retry(async () => assert.equal(await value.isVisible(), false)),
+    toBeDisabled: () => retry(async () => assert.equal(await value.isDisabled(), true)),
+    toBeEnabled: () => retry(async () => assert.equal(await value.isEnabled(), true)),
+    toHaveValue: (expected) => retry(async () => assert.equal(await value.inputValue(), expected)),
+    toHaveCount: (expected) => retry(async () => assert.equal(await value.count(), expected)),
+    toContainText: (expected) => retry(async () => assert.ok((await value.innerText()).includes(expected))),
+  };
+}
+expect.poll = (read) => ({ toBe: (expected) => retry(async () => assert.equal(await read(), expected)) });
 import fs from "node:fs/promises";
 import { launchAuditBrowser } from "./audit-browser.mjs";
 import { openDemoDataset } from "./demo-audit-helpers.mjs";
