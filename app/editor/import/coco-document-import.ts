@@ -47,8 +47,8 @@ function names(value: unknown) {
 
 function documentParts(document: CocoDocumentInput) {
   return {
-    images: Array.isArray(document.images) ? document.images : [],
-    categories: Array.isArray(document.categories) ? document.categories : [],
+    images: Array.isArray(document.images) ? document.images.filter((item) => item && typeof item === "object") : [],
+    categories: Array.isArray(document.categories) ? document.categories.filter((item) => item && typeof item === "object") : [],
     annotations: Array.isArray(document.annotations) ? document.annotations : [],
   };
 }
@@ -70,7 +70,7 @@ export function planCocoDocument(document: CocoDocumentInput, assets: Asset[], o
   let unmatched = 0;
 
   annotations.forEach((annotation, index) => {
-    if (typeof annotation.image_id !== "number") { unmatched += 1; return; }
+    if (!annotation || typeof annotation.image_id !== "number") { unmatched += 1; return; }
     const imageEntry = imageById.get(annotation.image_id);
     if (!imageEntry) { unmatched += 1; return; }
     const geometries = cocoGeometryTypes(annotation);
@@ -82,7 +82,7 @@ export function planCocoDocument(document: CocoDocumentInput, assets: Asset[], o
       imageId: annotation.image_id,
       categoryId: typeof annotation.category_id === "number" ? annotation.category_id : undefined,
       imageName: imageEntry.image.file_name ?? imageEntry.asset.name,
-      labelName: category?.name?.trim() || (typeof annotation.category_id === "number" ? `#${annotation.category_id}` : options.unlabeledName ?? "Unlabeled"),
+      labelName: (typeof category?.name === "string" ? category.name.trim() : "") || (typeof annotation.category_id === "number" ? `#${annotation.category_id}` : options.unlabeledName ?? "Unlabeled"),
       geometries,
     });
   });
@@ -124,7 +124,7 @@ export function importCocoDocument(
 
   sourceAnnotations.forEach((input, index) => {
     if (selectedIndexes && !selectedIndexes.has(index)) return;
-    if (typeof input.image_id !== "number") { unmatched += 1; return; }
+    if (!input || typeof input.image_id !== "number") { unmatched += 1; return; }
     const imageEntry = imageById.get(input.image_id);
     if (!imageEntry) { unmatched += 1; return; }
 
@@ -135,7 +135,7 @@ export function importCocoDocument(
     const category = typeof input.category_id === "number" ? categoryById.get(input.category_id) : undefined;
     let label: Label;
     if (typeof input.category_id === "number") {
-      label = labelByCategory.get(input.category_id) ?? ensureLabel(category?.name?.trim() || `#${input.category_id}`);
+      label = labelByCategory.get(input.category_id) ?? ensureLabel((typeof category?.name === "string" ? category.name.trim() : "") || `#${input.category_id}`);
       labelByCategory.set(input.category_id, label);
     } else {
       label = ensureLabel(unlabeledName);
@@ -164,7 +164,7 @@ export function importCocoDocument(
       pointLabelId: (name) => ensureLabel(name, "keypoint").id,
       boxAsFallback: options.boxAsFallback,
     });
-    annotations.push(...converted);
+    for (const annotation of converted) annotations.push(annotation);
     if (!converted.length) unmatched += 1;
   });
 
