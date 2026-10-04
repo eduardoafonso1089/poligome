@@ -329,6 +329,8 @@ export default function SamSetupModal({
   useEffect(() => {
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      // These fields use Escape to restore the committed address first.
+      if (event.target instanceof HTMLElement && event.target.closest(".ai-conn-address")) return;
       event.stopPropagation();
       onClose();
     };

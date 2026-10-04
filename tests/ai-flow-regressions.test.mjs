@@ -76,3 +76,25 @@ test('runtime mask preserves disconnected components and holes in scaled coordin
  for(const p of shapes){const mask=polygonRle([p.vertices,...p.holes],width,height);let cursor=0;mask.counts.forEach((run,index)=>{for(let i=0;i<run;i++,cursor++)if(index%2)merged[(cursor%height)*width+Math.floor(cursor/height)]=1})}
  assert.deepEqual(merged,pixels);
 });
+
+
+test('SAM parses flat contour collections without mistaking contours for points', async(t)=>{
+ const {requestSamPredictions}=await import('../app/lib/sam.ts');
+ const {getCopy}=await import('../app/lib/i18n.ts');
+ const previous=globalThis.window;globalThis.window={setTimeout,clearTimeout};t.after(()=>{if(previous===undefined)delete globalThis.window;else globalThis.window=previous});
+ const contour=[10,10,30,10,30,30,10,30],other=[40,40,60,40,60,60,40,60];
+ for(const polygons of [[contour],[contour,other],[[10,10],[30,10],[30,30],[10,30]]]){
+   t.mock.method(globalThis,'fetch',async()=>Response.json({width:100,height:100,polygons}));
+   const result=await requestSamPredictions({endpoint:'http://localhost:7860/predict',asset:{id:'qa',src:'data:image/png;base64,eA==',width:100,height:100},copy:getCopy('pt'),prompts:[]});
+   assert.deepEqual(result.predictions[0].polygons,polygons.length===4?[contour]:polygons);t.mock.restoreAll();
+ }
+});
+test('SAM annotation boundary forwards cancellation before image preparation', async(t)=>{
+ const {requestSamAnnotations}=await import('../app/editor/models/model-output.ts');
+ const {getCopy}=await import('../app/lib/i18n.ts');
+ const previous=globalThis.window;globalThis.window={setTimeout,clearTimeout};t.after(()=>{if(previous===undefined)delete globalThis.window;else globalThis.window=previous});
+ let fetched=false;t.mock.method(globalThis,'fetch',async()=>{fetched=true;return Response.json({})});
+ const controller=new AbortController();controller.abort();
+ await assert.rejects(requestSamAnnotations({makeId:()=> 'qa',asset:{id:'qa',src:'data:image/png;base64,eA==',width:100,height:100},label:'qa',endpoint:'http://localhost:7860/predict',prompts:[{x:1,y:1,label:1}],copy:getCopy('pt'),signal:controller.signal}),{message:getCopy('pt').errSamCanceled});
+ assert.equal(fetched,false);
+});

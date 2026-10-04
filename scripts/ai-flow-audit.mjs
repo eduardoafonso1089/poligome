@@ -105,8 +105,8 @@ async function preannotate(page,{byom=false,all=false,region=false}={}) {
   await page.getByRole("button",{name:"Pré-anotar",exact:true}).click();
   const dialog=page.getByRole("dialog",{name:"Pré-anotar",exact:true});
   await dialog.getByRole("radio",{name:byom?/QA Contêiner/:/QA Runtime/}).check();
-  if(all)await dialog.locator(".pa-scopes label").filter({has:dialog.getByRole("radio",{name:/^Todas/})}).click();
-  if(region)await dialog.locator(".pa-scopes label").filter({has:dialog.getByRole("radio",{name:/Região/})}).click();
+  if(all)await dialog.locator(".pa-scopes label").filter({hasText:/^Todas/}).click();
+  if(region)await dialog.locator(".pa-scopes label").filter({hasText:/Região/}).click();
   await dialog.getByRole("button",{name:"Pré-anotar",exact:true}).click();
 }
 const done=page=>page.locator(".ai-run-card.done");
@@ -133,7 +133,7 @@ try {
   });
   await check("already loaded SAM closes on Verify without reload",{},async({page,state})=>{const d=await hub(page);await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d).toBeHidden();expect(state.loads).toBe(0)});
   await check("SAM model switch succeeds",{},async({page,state})=>{const d=await hub(page);await d.getByRole("button",{name:/SAM 2.1 Hiera Tiny/}).click();await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d).toBeHidden();expect(state.loaded).toBe("sam2.1-hiera-tiny")});
-  await check("failed switch keeps previous SAM connected",{loadFail:true},async({page})=>{const d=await hub(page);await d.getByRole("button",{name:/SAM 2.1 Hiera Tiny/}).click();await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d.getByText(/checkpoint QA indisponível/)).toBeVisible();await expect(page.getByRole("button",{name:/Modelos de IA:.*sam2.1-hiera-small/})).toBeVisible()});
+  await check("failed switch keeps previous SAM connected",{loadFail:true},async({page})=>{const d=await hub(page);await d.getByRole("button",{name:/SAM 2.1 Hiera Tiny/}).click();await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d.getByText(/checkpoint QA indisponível/).first()).toBeVisible();await expect(page.getByRole("button",{name:/Modelos de IA:.*sam2.1-hiera-small/})).toBeVisible()});
   const activateSam=async page=>{await page.getByRole("button",{name:"Segmentar com SAM (S)",exact:true}).click();await expect(page.locator(".sam-controls").getByRole("button",{name:"Caixa",exact:true})).toBeVisible()};
   const samPoint=async(page,dx=0)=>{const b=await page.locator(".stage svg").first().boundingBox();assert.ok(b);await page.mouse.click(b.x+b.width*.45+dx,b.y+b.height*.45)};
   const saveSam=page=>page.locator(".sam-controls").getByRole("button",{name:/Salvar e editar/});
