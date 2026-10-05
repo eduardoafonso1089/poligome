@@ -616,10 +616,10 @@ export default function SamSetupModal({
               {/* Escolher CPU deixou de ser folclore de variável de ambiente: o
                   controle fica aqui e reescreve os três comandos acima com a
                   sintaxe certa de cada sistema. */}
-              {model.family !== "sam3" && <label className="sam-device-choice">
+              <label className="sam-device-choice">
                 <input type="checkbox" checked={forceCpu} onChange={(event) => setForceCpu(event.target.checked)} />
                 <span><b>{sc.cpuTitle}</b><small>{sc.cpuBody}</small></span>
-              </label>}
+              </label>
               {/* Depois de instalado, o caminho de volta é outro e mais curto. Ele
                   muda por sistema como o de instalação, então acompanha a aba. */}
               <div className="sam-relaunch">
@@ -649,7 +649,7 @@ export default function SamSetupModal({
                   <code>{nativeWindowsCommand}</code>
                 </>}
               </div>
-              <p className="sam-manual-note">{model.family === "sam3" ? sc.sam3GpuOnly : sc.oldGpuNote}</p>
+              <p className="sam-manual-note">{model.family === "sam3" ? sc.sam3CpuSlow : sc.oldGpuNote}</p>
               <details className="sam-uninstall sam-platform-details">
                 <summary>{sc.platformDetails}</summary>
                 <p><b>Linux:</b> {model.platformSupport.linux.notes}</p>
@@ -780,10 +780,10 @@ export default function SamSetupModal({
               {/* Escolher CPU deixou de ser folclore de variável de ambiente: o
                   controle fica aqui e reescreve os três comandos acima com a
                   sintaxe certa de cada sistema. */}
-              {model.family !== "sam3" && <label className="sam-device-choice">
+              <label className="sam-device-choice">
                 <input type="checkbox" checked={forceCpu} onChange={(event) => setForceCpu(event.target.checked)} />
                 <span><b>{sc.cpuTitle}</b><small>{sc.cpuBody}</small></span>
-              </label>}
+              </label>
               {/* Depois de instalado, o caminho de volta é outro e mais curto. Ele
                   muda por sistema como o de instalação, então acompanha a aba. */}
               <div className="sam-relaunch">
@@ -813,7 +813,7 @@ export default function SamSetupModal({
                   <code>{nativeWindowsCommand}</code>
                 </>}
               </div>
-              <p className="sam-manual-note">{model.family === "sam3" ? sc.sam3GpuOnly : sc.oldGpuNote}</p>
+              <p className="sam-manual-note">{model.family === "sam3" ? sc.sam3CpuSlow : sc.oldGpuNote}</p>
               <details className="sam-uninstall sam-platform-details">
                 <summary>{sc.platformDetails}</summary>
                 <p><b>Linux:</b> {model.platformSupport.linux.notes}</p>

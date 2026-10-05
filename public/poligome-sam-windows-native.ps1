@@ -44,7 +44,7 @@ $POLIGOME_SAM_INSTALLER_API = 2
 
 $DefaultSiteUrl = 'https://poligome.com'
 $DefaultAssetBaseUrl = 'https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public'
-$DefaultConnectorSha256 = '867f643f424f203be91d1e0d964135b7f469fe9fe1a349efbb4ef36182208722'
+$DefaultConnectorSha256 = '27ddb1b6170fd2b8cbb2c4d1952c8100c1517ba4b0acc1e8fc0c2f19937cc50f'
 
 $SiteUrl = if ($env:POLIGOME_SITE_URL) { $env:POLIGOME_SITE_URL.TrimEnd('/') } else { $DefaultSiteUrl }
 $AssetBaseUrl = if ($env:POLIGOME_ASSET_BASE_URL) { $env:POLIGOME_ASSET_BASE_URL.TrimEnd('/') } else { $DefaultAssetBaseUrl }
@@ -69,9 +69,15 @@ $Sam3MinComputeMajor = 7
 # O mesmo corte vale para o torch das familias SAM 2.1/MedSAM2: abaixo disso a GPU
 # e enxergada, o modelo carrega, e a primeira inferencia morre sem kernel.
 $TorchMinCompute = 70
+# Medido no caminho de CPU do SAM 3: ~80 s por imagem num i5-9300H de 4 nucleos.
+$Sam3CpuImageTime = 'de 30 s a 2 min'
 # O conector sai com este codigo quando /load pede outra familia; ver
 # _exec_with_model em poligome-sam-local.py.
 $SwitchExitCode = 75
+# sam3.model.edt faz `import triton` no topo, e o torch de Windows nao traz o
+# triton: sem este substituto o teste de import do SAM 3 falha com tudo
+# instalado, em CPU ou GPU. E o mesmo que o conector faz antes de carregar.
+$Sam3TritonShim = 'import importlib.util, sys, types; importlib.util.find_spec(''triton'') or sys.modules.setdefault(''sam3.model.edt'', types.SimpleNamespace(edt_triton=None))'
 
 function Fail([string] $Message) {
   Write-Host ''
@@ -99,8 +105,9 @@ Modelos aceitos:
   medsam2-2411
   sam3-concepts              (alias aceito: sam3)
 
-Sem MODELO, o instalador abre um menu. O SAM 3 exige GPU NVIDIA, Python 3.12+ e
-acesso aprovado ao checkpoint gated da Meta no Hugging Face.
+Sem MODELO, o instalador abre um menu. O SAM 3 exige Python 3.12+ e acesso
+aprovado ao checkpoint gated da Meta no Hugging Face. Roda em GPU NVIDIA
+(capability 7.0+) ou, bem mais devagar, em CPU.
 
 Este instalador NAO usa WSL2. Para o caminho por WSL2, use
 poligome-sam-windows.bat; as duas instalacoes sao independentes.
@@ -199,7 +206,7 @@ function Select-ModelInteractively {
     'MedSAM2 lesao em RM       (figado)',
     'MedSAM2 ecocardiograma    (ultrassom)',
     'MedSAM2 2411              (versao anterior)',
-    'SAM 3 Concepts            (~3,45 GB; exige GPU NVIDIA)'
+    'SAM 3 Concepts            (~3,45 GB; lento em CPU)'
   )
   for ($i = 0; $i -lt $ids.Count; $i++) {
     Write-Host ('  {0,2}) {1}' -f ($i + 1), $labels[$i])
@@ -351,13 +358,18 @@ function Initialize-Venv([string] $Family, [string] $VenvDir, [string] $VenvPyth
 
 function Install-Runtime([string] $Family, [string] $VenvDir, [string] $VenvPython) {
   $revision = if ($Family -eq 'sam3') { $Sam3Revision } else { $Sam2Revision }
-  $marker = Join-Path $VenvDir ".poligome-$Family-$revision.ok"
+  # O sabor entra no marcador do SAM 3: CPU e CUDA usam rodas diferentes do torch.
+  $flavour = if ($Family -eq 'sam3' -and $Device -eq 'cpu') { '-cpu' } else { '' }
+  $marker = Join-Path $VenvDir ".poligome-$Family-$revision$flavour.ok"
 
   # A prova de que o runtime está instalado é ele importar, não um arquivo ao lado
   # dele existir. O marcador é só atalho: perdê-lo não pode custar ao usuário o
   # download do PyTorch de novo, que foi o que aconteceu aqui.
   $probe = if ($Family -eq 'sam3') {
-    'import cv2, fastapi, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model'
+    $base = "$Sam3TritonShim; import cv2, fastapi, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model"
+    # Um torch CUDA tambem roda em CPU, entao serve a quem escolheu CPU. O
+    # contrario nao: quem quer a GPU com um torch de CPU precisa reinstalar.
+    if ($Device -eq 'cpu') { $base } else { "$base; raise SystemExit(0 if torch.version.cuda else 1)" }
   } else {
     'import cv2, fastapi, torch, uvicorn; from sam2.build_sam import build_sam2; from sam2.sam2_image_predictor import SAM2ImagePredictor'
   }
@@ -376,8 +388,15 @@ function Install-Runtime([string] $Family, [string] $VenvDir, [string] $VenvPyth
   if ($Family -eq 'sam3') {
     # A revisao fixada do SAM 3 ainda importa pkg_resources, removido no 81+.
     & $VenvPython -m pip install --upgrade 'setuptools<81'
-    & $VenvPython -m pip install torch==2.10.0 torchvision --index-url https://download.pytorch.org/whl/cu128
-    if ($LASTEXITCODE -ne 0) { Fail 'falha ao instalar o PyTorch CUDA 12.8 do SAM 3.' }
+    # O rotulo local (+cpu, +cu128) faz parte do pin: sem ele o pip daria a roda
+    # do outro sabor por satisfeita e manteria o torch errado no ambiente.
+    if ($Device -eq 'cpu') {
+      & $VenvPython -m pip install 'torch==2.10.0+cpu' 'torchvision==0.25.0+cpu' --index-url https://download.pytorch.org/whl/cpu
+      if ($LASTEXITCODE -ne 0) { Fail 'falha ao instalar o PyTorch de CPU do SAM 3.' }
+    } else {
+      & $VenvPython -m pip install 'torch==2.10.0+cu128' 'torchvision==0.25.0+cu128' --index-url https://download.pytorch.org/whl/cu128
+      if ($LASTEXITCODE -ne 0) { Fail 'falha ao instalar o PyTorch CUDA 12.8 do SAM 3.' }
+    }
     & $VenvPython -m pip install "https://github.com/facebookresearch/sam3/archive/$Sam3Revision.zip"
     if ($LASTEXITCODE -ne 0) { Fail 'falha ao instalar o pacote oficial do SAM 3.' }
     # A revisao oficial usa estes pacotes no import principal mas os declara
@@ -403,7 +422,7 @@ function Install-Runtime([string] $Family, [string] $VenvDir, [string] $VenvPyth
 
   Write-Host "Verificando imports do runtime $Family..."
   $verify = if ($Family -eq 'sam3') {
-    'import cv2, fastapi, huggingface_hub, pkg_resources, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model'
+    "$Sam3TritonShim; import cv2, fastapi, huggingface_hub, pkg_resources, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model"
   } else {
     'import cv2, fastapi, torch, uvicorn; from sam2.build_sam import build_sam2; from sam2.sam2_image_predictor import SAM2ImagePredictor'
   }
@@ -420,8 +439,21 @@ function Install-Runtime([string] $Family, [string] $VenvDir, [string] $VenvPyth
 # nvidia-smi descobre isso antes, e a decisao fica com quem vai usar a maquina.
 function Resolve-DeviceChoice([string] $Family) {
   if ($Device -ne 'auto') { return $Device }
-  if ($Family -ne 'sam2') { return $Device }
-  if (-not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) { return $Device }
+  $temNvidia = [bool](Get-Command nvidia-smi -ErrorAction SilentlyContinue)
+  if ($temNvidia) {
+    & nvidia-smi -L *> $null
+    $temNvidia = $LASTEXITCODE -eq 0
+  }
+  # O SAM 2.1 em auto sem GPU ja cai em CPU sozinho no conector. O SAM 3 precisa
+  # decidir aqui: o torch dele e outro conforme o device, e o de CUDA sao
+  # gigabytes que uma maquina sem NVIDIA nunca usaria.
+  if ($Family -eq 'sam3' -and -not $temNvidia) {
+    Write-Host 'Nenhuma GPU NVIDIA encontrada: o SAM 3 vai rodar em CPU.'
+    Write-Host "Cada imagem nova leva $Sam3CpuImageTime para ser preparada; os cliques seguintes sao mais rapidos."
+    Write-Host ''
+    return 'cpu'
+  }
+  if (-not $temNvidia) { return $Device }
 
   $linha = @(& nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>$null) |
     Where-Object { $_ -match '\S' } | Select-Object -First 1
@@ -445,9 +477,14 @@ function Resolve-DeviceChoice([string] $Family) {
   Write-Host 'falha com "no kernel image is available for execution on the device". Nao e'
   Write-Host 'defeito da instalacao nem do Poligome.'
   Write-Host ''
-  Write-Host 'Em CPU funciona: fica mais devagar (alguns segundos por clique, em vez de'
-  Write-Host 'quase instantaneo), e e assim que a maioria das maquinas sem GPU recente usa'
-  Write-Host 'o SAM.'
+  if ($Family -eq 'sam3') {
+    Write-Host "Em CPU funciona: fica mais devagar ($Sam3CpuImageTime por imagem nova, em vez"
+    Write-Host 'de menos de um segundo), e o PyTorch de CPU e gigabytes menor que o de CUDA.'
+  } else {
+    Write-Host 'Em CPU funciona: fica mais devagar (alguns segundos por clique, em vez de'
+    Write-Host 'quase instantaneo), e e assim que a maioria das maquinas sem GPU recente usa'
+    Write-Host 'o SAM.'
+  }
   Write-Host ''
 
   # Sem console interativo (execucao por script ou tarefa agendada) nao ha a quem
@@ -470,7 +507,7 @@ function Resolve-DeviceChoice([string] $Family) {
 }
 
 function Assert-RuntimeDevice([string] $Family, [string] $VenvPython) {
-  if ($Family -ne 'sam3') { return }
+  if ($Family -ne 'sam3' -or $Device -eq 'cpu') { return }
   & $VenvPython -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)' 2>$null
   if ($LASTEXITCODE -ne 0) {
     Fail 'o PyTorch do SAM 3 nao conseguiu usar a GPU NVIDIA. Confirme driver e compatibilidade CUDA 12.6+.'
@@ -481,19 +518,31 @@ function Assert-RuntimeDevice([string] $Family, [string] $VenvPython) {
   $diagnostic = & $VenvPython -c @'
 import torch
 major, minor = torch.cuda.get_device_capability(0)
-compiladas = [a for a in torch.cuda.get_arch_list() if a.startswith("sm_")]
-suportadas = {int(a.removeprefix("sm_")) for a in compiladas}
-if suportadas and (major * 10 + minor) not in suportadas:
-    print(f"{torch.cuda.get_device_name(0)} tem capability {major}.{minor}, e este PyTorch traz kernels apenas para {', '.join(compiladas)}")
+placa = major * 10 + minor
+arquiteturas = torch.cuda.get_arch_list()
+
+# Um cubin sm_XY roda na mesma major com minor >= Y (sm_86 serve a uma sm_89), e
+# PTX compute_XY e recompilado para qualquer placa >= XY.
+def serve(arquitetura):
+    tipo, _, numero = arquitetura.partition("_")
+    if not numero.isdigit():
+        return False
+    valor = int(numero)
+    if tipo == "sm":
+        return valor // 10 == major and valor <= placa
+    return tipo == "compute" and valor <= placa
+
+if arquiteturas and not any(serve(a) for a in arquiteturas):
+    print(f"{torch.cuda.get_device_name(0)} tem capability {major}.{minor}, e este PyTorch traz kernels apenas para {', '.join(arquiteturas)}")
 '@ 2>$null
   if ($diagnostic) {
-    Fail "a GPU nao e compativel com o PyTorch instalado para o SAM 3: $diagnostic. O modelo nao chegaria a carregar. Escolha um SAM 2.1 ou MedSAM2, que rodam nesta maquina."
+    Fail "a GPU nao e compativel com o PyTorch instalado para o SAM 3: $diagnostic. O modelo nao chegaria a carregar. Rode de novo com `$env:POLIGOME_DEVICE = 'cpu'."
   }
 }
 
 function Assert-Sam3Platform {
   if (-not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
-    Fail 'o SAM 3 exige uma GPU NVIDIA; nvidia-smi nao foi encontrado. Escolha um SAM 2.1 ou MedSAM2, que rodam em CPU.'
+    Fail 'o SAM 3 em cuda exige uma GPU NVIDIA; nvidia-smi nao foi encontrado. Sem GPU, rode com $env:POLIGOME_DEVICE = "cpu".'
   }
   # Recusar aqui evita 11 GB de download para terminar num erro de CUDA.
   $capabilities = & nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>$null
@@ -504,7 +553,7 @@ function Assert-Sam3Platform {
       $name = $parts[0].Trim()
       $major = [int]($parts[1].Trim() -split '\.')[0]
       if ($major -lt $Sam3MinComputeMajor) {
-        Fail "a placa $name tem compute capability $($parts[1].Trim()), e o PyTorch CUDA 12.8 do SAM 3 traz kernels apenas de sm_$($Sam3MinComputeMajor)0 em diante. Escolha um SAM 2.1 ou MedSAM2."
+        Fail "a placa $name tem compute capability $($parts[1].Trim()), e o PyTorch CUDA 12.8 do SAM 3 traz kernels apenas de sm_$($Sam3MinComputeMajor)0 em diante. Rode com `$env:POLIGOME_DEVICE = 'cpu'."
       }
     }
   }
@@ -646,11 +695,12 @@ Write-Host " Poligome SAM local (Windows nativo) - $modelId"
 Write-Host '=========================================='
 Write-Host ''
 
-if ($family -eq 'sam3') { Assert-Sam3Platform }
-
 New-Item -ItemType Directory -Force $AppDir, $VenvsDir, $ModelsDir | Out-Null
 Save-Selection $PendingModelFile $modelId
 $Device = Resolve-DeviceChoice $family
+# Em auto ou cpu o SAM 3 ja tem para onde ir; so cuda explicito exige a placa, e e
+# recusado aqui para nao baixar 11 GB e terminar num erro de CUDA.
+if ($family -eq 'sam3' -and $Device -eq 'cuda') { Assert-Sam3Platform }
 Install-Connector
 Initialize-Venv $family $venvDir $venvPython
 Install-Runtime $family $venvDir $venvPython

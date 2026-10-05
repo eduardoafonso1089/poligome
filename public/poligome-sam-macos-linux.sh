@@ -6,7 +6,7 @@ POLIGOME_SAM_INSTALLER_API=2
 DEFAULT_SITE_URL="https://poligome.com"
 DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 DEFAULT_CONNECTOR_URL="${DEFAULT_ASSET_BASE_URL}/poligome-sam-local.py"
-DEFAULT_CONNECTOR_SHA256="867f643f424f203be91d1e0d964135b7f469fe9fe1a349efbb4ef36182208722"
+DEFAULT_CONNECTOR_SHA256="27ddb1b6170fd2b8cbb2c4d1952c8100c1517ba4b0acc1e8fc0c2f19937cc50f"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE_URL="${POLIGOME_SITE_URL:-${DEFAULT_SITE_URL}}"
 SITE_URL="${SITE_URL%/}"
@@ -31,6 +31,13 @@ SAM3_MIN_COMPUTE_MAJOR=7
 # O mesmo corte vale para o torch das famílias SAM 2.1/MedSAM2: abaixo disso a
 # GPU é enxergada, o modelo carrega, e a primeira inferência morre sem kernel.
 TORCH_MIN_COMPUTE=70
+# Medido no caminho de CPU do SAM 3: ~80 s por imagem num i5-9300H de 4 núcleos.
+# sam3.model.edt faz `import triton` no topo, e o torch de CPU e o de Windows não
+# trazem o triton: sem este substituto o teste de import do SAM 3 falha mesmo com
+# tudo instalado. É o mesmo que o conector faz antes de carregar o modelo; a
+# função dali só serve à simulação de cliques de treino.
+SAM3_TRITON_SHIM="import importlib.util, sys, types; importlib.util.find_spec('triton') or sys.modules.setdefault('sam3.model.edt', types.SimpleNamespace(edt_triton=None))"
+SAM3_CPU_IMAGE_TIME="de 30 s a 2 min"
 
 usage() {
   cat <<'EOF'
@@ -52,8 +59,9 @@ Modelos aceitos:
   medsam2-2411
   sam3-concepts              (alias aceito: sam3)
 
-Sem MODELO, o instalador abre um menu. SAM 3 exige Linux, GPU NVIDIA,
-Python 3.12+ e acesso aprovado ao checkpoint gated da Meta no Hugging Face.
+Sem MODELO, o instalador abre um menu. SAM 3 exige Linux, Python 3.12+ e acesso
+aprovado ao checkpoint gated da Meta no Hugging Face. Roda em GPU NVIDIA
+(capability 7.0+) ou, bem mais devagar, em CPU.
 
 Variáveis opcionais:
   POLIGOME_SITE_URL        URL HTTPS aberta no navegador e aceita no CORS
@@ -111,7 +119,7 @@ choose_model() {
   printf '  7) MedSAM2 lesão em RM     (~156 MB; fígado)\n' >&2
   printf '  8) MedSAM2 ecocardiograma  (~156 MB; ultrassom)\n' >&2
   printf '  9) MedSAM2 2411            (~156 MB; versão anterior)\n' >&2
-  printf ' 10) SAM 3 Concepts          (~3,45 GB; Linux + NVIDIA)\n\n' >&2
+  printf ' 10) SAM 3 Concepts          (~3,45 GB; Linux; lento em CPU)\n\n' >&2
   printf 'Digite 1–10 ou o ID completo: ' >&2
   IFS= read -r choice || fail "não foi possível ler a escolha. Informe o ID como primeiro argumento."
   case "$choice" in
@@ -489,10 +497,13 @@ check_platform() {
     if [[ "$OS_NAME" == "Darwin" ]]; then
       fail "SAM 3 não é oferecido no macOS: o upstream exige Linux, GPU NVIDIA e CUDA 12.6+. Escolha um modelo SAM 2.1."
     fi
+    # Em auto, quem não tem GPU utilizável segue em CPU (decide_device). Só quem
+    # pediu cuda explicitamente precisa da placa, e é recusado antes do download.
+    [[ "$DEVICE" == "cuda" ]] || return 0
     command -v nvidia-smi >/dev/null 2>&1 ||
-      fail "SAM 3 exige uma GPU NVIDIA disponível no Linux; nvidia-smi não foi encontrado."
+      fail "SAM 3 em cuda exige uma GPU NVIDIA disponível no Linux; nvidia-smi não foi encontrado. Sem GPU, rode com POLIGOME_DEVICE=cpu."
     nvidia-smi -L >/dev/null 2>&1 ||
-      fail "SAM 3 exige uma GPU NVIDIA funcional; nvidia-smi não conseguiu acessá-la."
+      fail "SAM 3 em cuda exige uma GPU NVIDIA funcional; nvidia-smi não conseguiu acessá-la. Sem GPU, rode com POLIGOME_DEVICE=cpu."
     # Ter CUDA não basta: as rodas oficiais do PyTorch CUDA 12.8 trazem kernels
     # de sm_70 para cima, e numa placa mais antiga torch.cuda.is_available()
     # responde "sim" mas toda execução morre com
@@ -506,7 +517,7 @@ check_platform() {
       minor="${BASH_REMATCH[2]}"
       if (( major < SAM3_MIN_COMPUTE_MAJOR )); then
         gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1)"
-        fail "SAM 3 exige uma GPU com capability ${SAM3_MIN_COMPUTE_MAJOR}.0 ou maior; ${gpu_name:-esta GPU} tem ${major}.${minor}. O PyTorch CUDA 12.8 não publica kernels para ela, e o modelo não chegaria a carregar. Escolha um SAM 2.1 ou MedSAM2, que rodam nesta máquina."
+        fail "SAM 3 exige uma GPU com capability ${SAM3_MIN_COMPUTE_MAJOR}.0 ou maior; ${gpu_name:-esta GPU} tem ${major}.${minor}. O PyTorch CUDA 12.8 não publica kernels para ela, e o modelo não chegaria a carregar. Rode com POLIGOME_DEVICE=cpu."
       fi
     fi
   fi
@@ -549,10 +560,21 @@ prepare_venv() {
 # custa uma chamada a nvidia-smi, e deixa a decisão com quem vai usar.
 decide_device() {
   [[ "$DEVICE" == "auto" ]] || return 0
-  [[ "$FAMILY" == "sam2" ]] || return 0
+  [[ "$OS_NAME" == "Linux" ]] || return 0
+
+  # O SAM 2.1 em auto sem GPU já cai em CPU sozinho no conector. O SAM 3 precisa
+  # decidir aqui: o PyTorch dele é outro conforme o device, e o de CUDA são
+  # gigabytes que uma máquina sem NVIDIA nunca usaria.
+  if [[ "$FAMILY" == "sam3" ]] &&
+    { ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L >/dev/null 2>&1; }; then
+    printf 'Nenhuma GPU NVIDIA encontrada: o SAM 3 vai rodar em CPU.\n'
+    printf 'Cada imagem nova leva %s para ser preparada; os cliques seguintes são mais rápidos.\n\n' "$SAM3_CPU_IMAGE_TIME"
+    DEVICE="cpu"
+    return 0
+  fi
   command -v nvidia-smi >/dev/null 2>&1 || return 0
 
-  local capability major minor gpu_name resposta minimo
+  local capability major minor gpu_name resposta minimo ritmo
   capability="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n 1 | tr -d '[:space:]')"
   [[ "$capability" =~ ^([0-9]+)\.([0-9]+)$ ]] || return 0
   major="${BASH_REMATCH[1]}"
@@ -560,6 +582,11 @@ decide_device() {
   (( major * 10 + minor < TORCH_MIN_COMPUTE )) || return 0
   gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1)"
   minimo="$((TORCH_MIN_COMPUTE / 10)).$((TORCH_MIN_COMPUTE % 10))"
+  if [[ "$FAMILY" == "sam3" ]]; then
+    ritmo="${SAM3_CPU_IMAGE_TIME} por imagem nova, em vez de menos de um segundo"
+  else
+    ritmo="alguns segundos por clique, em vez de quase instantâneo"
+  fi
 
   cat <<EOF
 
@@ -572,9 +599,8 @@ traz kernels somente de ${minimo} em diante. Nesta placa o modelo até carrega, 
 primeira anotação falha com "no kernel image is available for execution on the
 device". Não é defeito da instalação nem do Poligome.
 
-Em CPU funciona: fica mais devagar (alguns segundos por clique, em vez de quase
-instantâneo) e o download fica cerca de 4 GB menor, porque o PyTorch de CPU não
-carrega as bibliotecas da NVIDIA.
+Em CPU funciona: fica mais devagar (${ritmo}) e o download fica cerca de 4 GB
+menor, porque o PyTorch de CPU não carrega as bibliotecas da NVIDIA.
 
 EOF
 
@@ -616,7 +642,7 @@ install_runtime() {
   fi
   case "$FAMILY" in
     sam2) ready_file="${VENV_DIR}/.poligome-sam2-${SAM2_REVISION}${flavour}.ok" ;;
-    sam3) ready_file="${VENV_DIR}/.poligome-sam3-${SAM3_REVISION}.ok" ;;
+    sam3) ready_file="${VENV_DIR}/.poligome-sam3-${SAM3_REVISION}${flavour}.ok" ;;
   esac
 
   if [[ "$FAMILY" == "sam3" && -f "$ready_file" ]] &&
@@ -630,7 +656,7 @@ install_runtime() {
     if "$PYTHON" -c 'import cv2, fastapi, torch, uvicorn' >/dev/null 2>&1; then
       case "$FAMILY" in
         sam2) "$PYTHON" -c 'from sam2.build_sam import build_sam2; from sam2.sam2_image_predictor import SAM2ImagePredictor' >/dev/null 2>&1 && return 0 ;;
-        sam3) "$PYTHON" -c 'from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model' >/dev/null 2>&1 && return 0 ;;
+        sam3) "$PYTHON" -c "${SAM3_TRITON_SHIM}; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model" >/dev/null 2>&1 && return 0 ;;
       esac
     fi
   fi
@@ -653,7 +679,13 @@ install_runtime() {
       "$PYTHON" -m pip install fastapi uvicorn pillow opencv-python-headless numpy
       ;;
     sam3)
-      "$PYTHON" -m pip install torch==2.10.0 torchvision --index-url https://download.pytorch.org/whl/cu128
+      # O rótulo local (+cpu, +cu128) faz parte do pin: sem ele o pip daria a
+      # roda do outro sabor por satisfeita e manteria o torch errado no ambiente.
+      if [[ "$flavour" == "-cpu" ]]; then
+        "$PYTHON" -m pip install torch==2.10.0+cpu torchvision==0.25.0+cpu --index-url https://download.pytorch.org/whl/cpu
+      else
+        "$PYTHON" -m pip install torch==2.10.0+cu128 torchvision==0.25.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+      fi
       "$PYTHON" -m pip install "https://github.com/facebookresearch/sam3/archive/${SAM3_REVISION}.zip"
       # A revisão oficial usa estes pacotes no import principal, mas os declara
       # somente como extras (ou não os declara) no pyproject.
@@ -663,14 +695,14 @@ install_runtime() {
   printf 'Verificando imports do runtime %s...\n' "$FAMILY"
   case "$FAMILY" in
     sam2) "$PYTHON" -c 'import cv2, fastapi, torch, uvicorn; from sam2.build_sam import build_sam2; from sam2.sam2_image_predictor import SAM2ImagePredictor' ;;
-    sam3) "$PYTHON" -c 'import cv2, fastapi, huggingface_hub, pkg_resources, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model' ;;
+    sam3) "$PYTHON" -c "${SAM3_TRITON_SHIM}; import cv2, fastapi, huggingface_hub, pkg_resources, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model" ;;
   esac || fail "as dependências da família ${FAMILY} foram instaladas, mas o teste de importação acima falhou."
   touch "$ready_file"
 }
 
 verify_runtime_device() {
   local diagnostico
-  if [[ "$FAMILY" == "sam3" ]]; then
+  if [[ "$FAMILY" == "sam3" && "$DEVICE" != "cpu" ]]; then
     "$PYTHON" -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)' >/dev/null 2>&1 ||
       fail "o PyTorch do SAM 3 não conseguiu usar a GPU NVIDIA. Confirme driver e compatibilidade CUDA 12.6+."
     # torch.cuda.is_available() responde "sim" mesmo quando a instalação não tem
@@ -682,17 +714,29 @@ verify_runtime_device() {
 import torch
 
 major, minor = torch.cuda.get_device_capability(0)
-compiladas = [a for a in torch.cuda.get_arch_list() if a.startswith("sm_")]
-suportadas = {int(a.removeprefix("sm_")) for a in compiladas}
-if suportadas and (major * 10 + minor) not in suportadas:
+placa = major * 10 + minor
+arquiteturas = torch.cuda.get_arch_list()
+
+# Um cubin sm_XY roda na mesma major com minor >= Y (sm_86 serve a uma sm_89), e
+# PTX compute_XY é recompilado para qualquer placa >= XY.
+def serve(arquitetura):
+    tipo, _, numero = arquitetura.partition("_")
+    if not numero.isdigit():
+        return False
+    valor = int(numero)
+    if tipo == "sm":
+        return valor // 10 == major and valor <= placa
+    return tipo == "compute" and valor <= placa
+
+if arquiteturas and not any(serve(a) for a in arquiteturas):
     print(
         f"{torch.cuda.get_device_name(0)} tem capability {major}.{minor}, "
-        f"e este PyTorch traz kernels apenas para {', '.join(compiladas)}"
+        f"e este PyTorch traz kernels apenas para {', '.join(arquiteturas)}"
     )
 PY
 )" || true
     [[ -z "$diagnostico" ]] ||
-      fail "a GPU não é compatível com o PyTorch instalado para o SAM 3: ${diagnostico}. O modelo não chegaria a carregar. Escolha um SAM 2.1 ou MedSAM2, que rodam nesta máquina."
+      fail "a GPU não é compatível com o PyTorch instalado para o SAM 3: ${diagnostico}. O modelo não chegaria a carregar. Rode de novo com POLIGOME_DEVICE=cpu."
   fi
 }
 

@@ -337,20 +337,20 @@ const SAM3_REQUIREMENTS = {
     notes: "O guia oficial atual demonstra a instalação com PyTorch 2.10 e wheels CUDA 12.8.",
   },
   cuda: {
-    required: true,
+    required: false,
     minimum: "12.6",
     notes:
-      "A instalação oficial exige CUDA 12.6 ou superior e uma GPU com capability 7.0 ou maior: as rodas do PyTorch CUDA 12.8 trazem kernels de sm_70 em diante, e numa placa anterior o modelo é reconhecido mas não executa. O instalador confere isso pelo nvidia-smi antes de baixar qualquer coisa.",
+      "Só para a GPU: CUDA 12.6+ e capability 7.0 ou maior, porque as rodas do PyTorch CUDA 12.8 trazem kernels de sm_70 em diante. O instalador confere a placa pelo nvidia-smi antes de baixar; sem uma compatível, instala para CPU.",
   },
   compute: {
-    cpuSupported: false,
-    gpu: "required",
+    cpuSupported: true,
+    gpu: "recommended",
     notes:
-      "Só GPU. Não é uma escolha do Poligome: o código da Meta aloca a codificação de posição com device=\"cuda\" fixo, ignorando o dispositivo pedido, então pedir CPU falha com \"No CUDA GPUs are available\".",
+      "GPU NVIDIA recomendada. Em CPU funciona: o Poligome corrige os pontos do código da Meta que fixam CUDA. Cada imagem nova leva de 30 s a 2 min; os cliques seguintes, menos de 1 s.",
   },
   ram: {
     officialMinimumGb: null,
-    notes: "A Meta não publica um mínimo de RAM; somente o checkpoint ocupa aproximadamente 3,45 GB em disco.",
+    notes: "A Meta não publica um mínimo de RAM; o checkpoint ocupa 3,45 GB em disco. Em CPU, conte com cerca de 8 GB de RAM.",
   },
   vram: {
     officialMinimumGb: null,
@@ -358,7 +358,7 @@ const SAM3_REQUIREMENTS = {
   },
   operatingSystem: {
     official: "Linux/Conda no procedimento documentado",
-    notes: "Windows não possui fluxo oficial próprio e macOS não atende ao requisito CUDA do pacote oficial.",
+    notes: "Windows não possui fluxo oficial próprio; o Poligome instala nativo ou via WSL2. macOS não é oferecido.",
   },
   access: {
     type: "gated",
@@ -396,15 +396,15 @@ const SAM3_PLATFORM_SUPPORT = {
   },
   windows: {
     level: "not-documented",
-    notes: "Não há procedimento oficial próprio; uma instalação via WSL2 ainda depende de GPU e CUDA compatíveis.",
+    notes: "Não há procedimento oficial próprio; o Poligome instala nativo ou via WSL2, com GPU NVIDIA ou em CPU.",
   },
   macos: {
     level: "not-supported",
-    notes: "O pacote oficial exige CUDA 12.6+, indisponível no macOS.",
+    notes: "Não oferecido: o caminho de CPU do Poligome foi testado só em Linux e Windows.",
   },
   browser: {
     level: "backend-required",
-    notes: "O modelo oficial completo é executado no backend CUDA; não há build oficial para navegador.",
+    notes: "O modelo completo roda num backend local, em GPU ou CPU; não há build oficial para navegador.",
   },
 } as const satisfies SamModelDefinition["platformSupport"];
 
@@ -444,7 +444,7 @@ const SAM3_IMAGE_BENCHMARK = {
   notes: [
     "A Meta reporta 30 ms para uma imagem com mais de 100 objetos detectados.",
     "Este número mede inferência de imagem/conceitos e não é diretamente comparável ao FPS de vídeo do SAM 2.1.",
-    "Prompts textuais funcionam melhor como frases nominais curtas; consultas relacionais longas não são suportadas diretamente.",
+    "Prompts textuais só funcionam em inglês, e melhor como frases nominais curtas; consultas relacionais longas não são suportadas diretamente.",
   ],
   sourceUrl: "https://ai.meta.com/blog/segment-anything-model-3/",
 } as const satisfies SamOfficialBenchmark;

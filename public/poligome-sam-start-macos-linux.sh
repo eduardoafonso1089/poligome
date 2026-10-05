@@ -303,8 +303,11 @@ validate_platform() {
   if [[ "$MODEL_ID" == "sam3-concepts" ]]; then
     [[ "$os_name" == "Linux" ]] ||
       fail "SAM 3 não é disponibilizado no macOS; selecione um modelo SAM 2.1."
-    command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1 ||
-      fail "SAM 3 exige uma GPU NVIDIA funcional no Linux."
+    # Sem GPU o SAM 3 roda em CPU; só cuda pedido explicitamente exige a placa.
+    if [[ "$DEVICE" == "cuda" ]]; then
+      command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1 ||
+        fail "SAM 3 em cuda exige uma GPU NVIDIA funcional no Linux. Sem GPU, use POLIGOME_DEVICE=cpu."
+    fi
   fi
 }
 
@@ -345,12 +348,21 @@ runtime_is_complete() {
       fi
       ;;
     sam3)
-      if ! "$PYTHON" -c 'import cv2, fastapi, huggingface_hub, pkg_resources, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model' >/dev/null 2>&1; then
+      # Sem triton (torch de CPU), sam3.model.edt não importa; o conector usa o
+      # mesmo substituto. Ver SAM3_TRITON_SHIM no instalador.
+      if ! "$PYTHON" -c "import importlib.util, sys, types; importlib.util.find_spec('triton') or sys.modules.setdefault('sam3.model.edt', types.SimpleNamespace(edt_triton=None)); import cv2, fastapi, huggingface_hub, pkg_resources, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model" >/dev/null 2>&1; then
         REPAIR_REASON="dependências profundas do runtime SAM 3 estão incompletas"
         return 1
       fi
-      if ! "$PYTHON" -c 'import re, torch; version=lambda value: tuple(map(int, re.match(r"^(\d+)\.(\d+)", value or "0.0").groups())); raise SystemExit(0 if torch.cuda.is_available() and version(torch.__version__) >= (2, 7) and version(torch.version.cuda) >= (12, 6) else 1)' >/dev/null 2>&1; then
-        REPAIR_REASON="runtime SAM 3 não oferece PyTorch 2.7+ com CUDA 12.6+ funcional"
+      # Um torch de CPU (torch.version.cuda vazio) é a instalação certa de quem
+      # escolheu CPU; só um build CUDA precisa ser 12.6+.
+      if ! "$PYTHON" -c 'import re, torch; version=lambda value: tuple(map(int, re.match(r"^(\d+)\.(\d+)", value or "0.0").groups())); raise SystemExit(0 if version(torch.__version__) >= (2, 7) and (torch.version.cuda is None or version(torch.version.cuda) >= (12, 6)) else 1)' >/dev/null 2>&1; then
+        REPAIR_REASON="runtime SAM 3 não oferece PyTorch 2.7+ (CPU, ou CUDA 12.6+)"
+        return 1
+      fi
+      if [[ "$DEVICE" == "cuda" ]] &&
+        ! "$PYTHON" -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)' >/dev/null 2>&1; then
+        REPAIR_REASON="runtime SAM 3 não tem PyTorch CUDA funcional"
         return 1
       fi
       ;;

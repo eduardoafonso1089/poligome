@@ -849,11 +849,174 @@ class Sam2Adapter:
         return _predictions_from_arrays(masks, scores)
 
 
+class _CudaToCpuTorch:
+    """`torch` visto por um módulo do SAM 3 que fixa device="cuda" na construção.
+
+    Só os construtores de tensor são desviados; o resto é o torch de verdade.
+    """
+
+    def __init__(self, torch_module: Any):
+        self._torch = torch_module
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._torch, name)
+
+    def zeros(self, *args: Any, **kwargs: Any) -> Any:
+        if str(kwargs.get("device")) == "cuda":
+            kwargs["device"] = "cpu"
+        return self._torch.zeros(*args, **kwargs)
+
+
+def _provide_sam3_edt_without_triton() -> None:
+    """Deixa o SAM 3 importar quando o triton não está instalado.
+
+    sam3.model.edt faz `import triton` no topo, e o modelo de imagem o importa de
+    tabela pelo rastreador. O torch de CPU — e o de Windows — não traz o triton,
+    então a carga morria antes de qualquer inferência. A função dali
+    (edt_triton) só serve à simulação de cliques de treino; o substituto faz a
+    mesma conta com cv2.distanceTransform, que o próprio docstring do upstream
+    dá como equivalente.
+    """
+    import importlib.util
+    import types
+
+    if importlib.util.find_spec("triton") is not None or "sam3.model.edt" in sys.modules:
+        return
+    import torch
+
+    def edt_triton(data: Any) -> Any:
+        assert data.dim() == 3
+        masks = data.detach().to("cpu", torch.uint8).numpy()
+        distances = np.stack(
+            [cv2.distanceTransform(mask, cv2.DIST_L2, 0) for mask in masks]
+        )
+        return torch.from_numpy(distances).to(data.device)
+
+    module = types.ModuleType("sam3.model.edt")
+    module.edt_triton = edt_triton  # type: ignore[attr-defined]
+    sys.modules["sam3.model.edt"] = module
+
+
+def _patch_sam3_for_cpu() -> None:
+    """Deixa o caminho de imagem do SAM 3 rodar sem GPU.
+
+    O código da Meta aceita device="cpu" em build_sam3_image_model e no
+    Sam3Processor, mas dois pontos da construção criam tensores em "cuda" fixo,
+    um terceiro exige memória fixada, e o MLP do ViT força bfloat16 contando com
+    o autocast da GPU. Sem estas trocas, qualquer máquina sem GPU NVIDIA para com
+    "Torch not compiled with CUDA enabled" ou com dtypes misturados. O resto do
+    caminho de imagem já segue o device dos tensores, e o NMS e os componentes
+    conexos têm fallback de CPU próprio. Os pontos são conferidos antes da troca:
+    se a revisão do upstream mudar, o erro diz isso na carga, e não no meio da
+    inferência.
+    """
+    import torch
+    from sam3.model import decoder, position_encoding, vitdet
+
+    if (
+        not hasattr(position_encoding, "torch")
+        or not hasattr(decoder.TransformerDecoder, "_get_coords")
+        or not hasattr(vitdet, "addmm_act")
+    ):
+        raise RuntimeError(
+            "Esta revisão do SAM 3 não tem os pontos que o modo CPU do Poligome "
+            "corrige; reinstale com o instalador do Poligome."
+        )
+
+    # PositionEmbeddingSine pré-calcula o cache com torch.zeros(device="cuda").
+    position_encoding.torch = _CudaToCpuTorch(torch)
+
+    # TransformerDecoder monta o cache de coordenadas com device="cuda" fixo.
+    original_get_coords = decoder.TransformerDecoder._get_coords
+
+    def _get_coords(H: int, W: int, device: Any) -> Any:
+        if str(device) == "cuda":
+            device = "cpu"
+        return original_get_coords(H, W, device)
+
+    decoder.TransformerDecoder._get_coords = staticmethod(_get_coords)
+
+    # O MLP do ViT usa um addmm "fundido" que converte tudo para bfloat16 por
+    # conta própria. Na GPU o autocast reconcilia os dtypes depois; em CPU a
+    # camada seguinte, em float32, recebia bfloat16 e parava com "mat1 and mat2
+    # must have the same dtype". Em CPU a conta comum em float32 é a certa — e
+    # também a mais rápida onde não há instruções de bfloat16.
+    functional = torch.nn.functional
+
+    def addmm_act(activation: Any, linear: Any, mat1: Any) -> Any:
+        output = linear(mat1)
+        if activation in (functional.relu, torch.nn.ReLU):
+            return functional.relu(output)
+        if activation in (functional.gelu, torch.nn.GELU):
+            return functional.gelu(output)
+        raise ValueError(f"Unexpected activation {activation}")
+
+    vitdet.addmm_act = addmm_act
+
+    # O carregador oficial lê os 3,45 GB do checkpoint para a RAM enquanto o
+    # modelo, do mesmo tamanho, já está alocado. Com mmap os pesos vêm do disco
+    # sob demanda, em páginas que o sistema pode descartar sob pressão, e a carga
+    # caiu de 194 s para 58 s num notebook de 4 núcleos. A seleção de chaves é a
+    # mesma do upstream.
+    from sam3 import model_builder
+
+    original_load_checkpoint = model_builder._load_checkpoint
+
+    def _load_checkpoint(model: Any, checkpoint_path: str) -> None:
+        try:
+            ckpt = torch.load(
+                checkpoint_path, map_location="cpu", weights_only=True, mmap=True
+            )
+        except Exception:
+            return original_load_checkpoint(model, checkpoint_path)
+        if "model" in ckpt and isinstance(ckpt["model"], dict):
+            ckpt = ckpt["model"]
+        state = {k.replace("detector.", ""): v for k, v in ckpt.items() if "detector" in k}
+        if model.inst_interactive_predictor is not None:
+            state.update(
+                {
+                    k.replace("tracker.", "inst_interactive_predictor.model."): v
+                    for k, v in ckpt.items()
+                    if "tracker" in k
+                }
+            )
+        missing_keys, _ = model.load_state_dict(state, strict=False)
+        if missing_keys:
+            print(f"Checkpoint do SAM 3 sem {len(missing_keys)} chaves esperadas.", flush=True)
+
+    model_builder._load_checkpoint = _load_checkpoint
+
+    # O encoder de caixas fixa a escala com pin_memory(), que exige um acelerador.
+    # Em CPU fixar memória não tem propósito: o tensor já está onde vai ser usado.
+    torch.Tensor.pin_memory = lambda self, *args, **kwargs: self  # type: ignore[method-assign]
+
+
+def _move_rope_caches(model: Any, device: str) -> None:
+    """Leva para o device os caches RoPE que o SAM 3 guarda fora dos buffers.
+
+    RoPEAttention e SimpleRoPEAttention criam freqs_cis em "cuda" sempre que o
+    PyTorch enxerga uma GPU — mesmo quando foi pedida CPU, que é justamente o
+    caso de uma placa antiga demais. Como não são buffers, model.to() não os move.
+    """
+    import torch
+
+    for module in model.modules():
+        for name in ("freqs_cis", "freqs_cis_real", "freqs_cis_imag"):
+            value = getattr(module, name, None)
+            if isinstance(value, torch.Tensor) and value.device.type != device:
+                setattr(module, name, value.to(device))
+
+
 class Sam3Adapter:
     DEFAULT_THRESHOLD = 0.5
 
     def __init__(self, spec: ModelSpec, checkpoint: Path, device: str):
         import torch
+
+        _provide_sam3_edt_without_triton()
+        if device == "cpu":
+            _patch_sam3_for_cpu()
+
         from sam3.model.sam3_image_processor import Sam3Processor
         from sam3.model_builder import build_sam3_image_model
 
@@ -864,6 +1027,8 @@ class Sam3Adapter:
             enable_inst_interactivity=True,
         )
         model.to(device=device)
+        if device == "cpu":
+            _move_rope_caches(model, device)
         model.eval()
         self.spec = spec
         self.device = device
@@ -1191,6 +1356,16 @@ def _resolve_device(requested: str) -> str:
                 "para o PyTorch instalado. Seguindo em CPU, que funciona.",
                 flush=True,
             )
+        if cuda_available and not _cuda_has_kernels(torch):
+            # Placa antiga demais para este PyTorch: is_available() diz sim, mas a
+            # primeira inferência morreria com "no kernel image is available".
+            # Acontece quando o editor troca de modelo e o conector sobe em auto.
+            print(
+                f"A GPU {torch.cuda.get_device_name(0)} é antiga demais para o "
+                "PyTorch instalado. Seguindo em CPU, que funciona.",
+                flush=True,
+            )
+            return "cpu"
         return "cuda" if cuda_available else "mps" if mps_available else "cpu"
     if requested == "cuda" and not torch.cuda.is_available():
         raise RuntimeError(
@@ -1199,6 +1374,29 @@ def _resolve_device(requested: str) -> str:
     if requested == "mps" and not mps_available:
         raise RuntimeError("Apple Silicon/MPS não está disponível. Use --device cpu.")
     return requested
+
+
+def _cuda_has_kernels(torch: Any) -> bool:
+    # Um cubin sm_XY roda em placas da mesma major com minor >= Y (sm_86 serve a
+    # uma sm_89), e PTX compute_XY é recompilado para qualquer placa >= XY.
+    try:
+        major, minor = torch.cuda.get_device_capability(0)
+        archs = torch.cuda.get_arch_list()
+    except Exception:
+        return True
+    if not archs:
+        return True
+    device = major * 10 + minor
+    for arch in archs:
+        kind, _, number = arch.partition("_")
+        if not number.isdigit():
+            continue
+        value = int(number)
+        if kind == "sm" and value // 10 == major and value <= device:
+            return True
+        if kind == "compute" and value <= device:
+            return True
+    return False
 
 
 def _numeric_version(value: str | None) -> tuple[int, int]:
@@ -1213,8 +1411,10 @@ def _validate_sam3_runtime(device: str) -> None:
         raise RuntimeError("SAM 3 exige Python 3.12 ou mais novo.")
     if _numeric_version(torch.__version__) < (2, 7):
         raise RuntimeError(f"SAM 3 exige PyTorch 2.7+; encontrado {torch.__version__}.")
+    if device == "cpu":
+        return
     if device != "cuda":
-        raise RuntimeError("SAM 3 exige GPU NVIDIA e dispositivo CUDA; CPU e MPS não são suportados neste conector.")
+        raise RuntimeError("SAM 3 roda em GPU NVIDIA (CUDA) ou em CPU; MPS não é suportado neste conector.")
     cuda_version = getattr(torch.version, "cuda", None)
     if _numeric_version(cuda_version) < (12, 6):
         raise RuntimeError(f"SAM 3 exige um build PyTorch CUDA 12.6+; encontrado CUDA {cuda_version or 'ausente'}.")

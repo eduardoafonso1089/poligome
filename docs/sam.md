@@ -159,7 +159,8 @@ Duas condições, conferidas antes de qualquer download:
   então num Intel o instalador recusa em vez de falhar no meio do `pip`.
 - **macOS 14 ou mais novo**, que é o mínimo do PyTorch atual.
 
-O SAM 3 não é oferecido no macOS, porque exige CUDA.
+O SAM 3 não é oferecido no macOS: o caminho de CPU dele foi testado só em Linux
+e Windows.
 
 ### Windows
 
@@ -226,9 +227,10 @@ O SAM 3 não compartilha ambiente com o SAM 2.1:
 | | SAM 2.1 e MedSAM2 | SAM 3 |
 | --- | --- | --- |
 | Python | 3.10+ | 3.12+ |
-| PyTorch | 2.5.1+ | 2.10 com CUDA 12.8 |
-| GPU | recomendada | **obrigatória**, CUDA 12.6+ |
-| Sistema | Linux, macOS (Apple Silicon), WSL2 | Linux ou WSL2 |
+| PyTorch | 2.5.1+ | 2.10, roda CUDA 12.8 ou de CPU |
+| GPU | recomendada | recomendada, CUDA 12.6+ e capability 7.0+ |
+| CPU | funciona | funciona, bem mais devagar (ver adiante) |
+| Sistema | Linux, macOS (Apple Silicon), WSL2 | Linux, WSL2 ou Windows nativo |
 | Licença | Apache 2.0 · MedSAM2 restrito a pesquisa | SAM License, própria da Meta |
 
 A instalação do SAM 3 fixa `setuptools<81` enquanto a revisão oficial ainda
@@ -247,6 +249,7 @@ Com uma conta aprovada, o fluxo foi exercitado assim:
 | instalação | `bash poligome-sam-macos-linux.sh sam3-concepts` do começo ao fim, com a seleção salva em `selected-model.txt` |
 | inferência | ponto 0,980 · caixa 0,984 · texto devolvendo três instâncias para "red circle" e duas para "blue square" |
 | troca de modelo | entra e sai do SAM 3 sem perder SAM 2.1 nem MedSAM2 |
+| CPU | instalador real no WSL2 e no Windows nativo, num i5-9300H com GTX 1050: "cat" acha os dois gatos (0,96), "remote control" os dois controles (0,97), ponto 0,98 |
 
 Numa segunda passagem, em outra máquina e partindo do zero, o ramo de download
 foi exercitado pelo próprio instalador: com a conta aprovada e sem checkpoint em
@@ -278,7 +281,9 @@ Isso revelou dois defeitos que o gate escondia, ambos corrigidos:
 | caixa como exemplar | não | não | sim |
 | múltiplas instâncias de um conceito | não | não | sim |
 
-O prompt de texto funciona melhor como frase nominal curta — `carro vermelho`.
+O prompt de texto só funciona em inglês, e melhor como frase nominal curta —
+`red car`, não `carro vermelho`. Em português o SAM 3 não acha nada: na mesma
+foto, `cat` e `couch` encontram os objetos e `gato` e `sofá` voltam vazios.
 Descrições relacionais longas exigem outro tipo de modelo.
 
 O MedSAM2 aceita os mesmos prompts do SAM 2.1, mas foi treinado em TC, RM e
@@ -360,26 +365,38 @@ máquina sem CUDA falha na hora, dizendo isso, em vez de carregar o modelo e
 quebrar depois. O serviço do systemd grava a escolha na unidade, então ela
 sobrevive ao reinício.
 
-### Por que o SAM 3 não roda em CPU
+### SAM 3 em CPU
 
-Essa é a única exceção, e ela não vem do Poligome: vem do código da Meta.
-Pedir CPU ao SAM 3 é recusado pelo conector, e a recusa apenas antecipa o que
-aconteceria adiante. Exercitando o modelo com a guarda desligada e a GPU
-escondida, o carregamento morre aqui:
+O código da Meta aceita `device="cpu"`, mas não roda nele sem ajustes. O
+conector corrige estes pontos antes de montar o modelo, sem fork do upstream:
 
-```
-sam3/model_builder.py, em build_sam3_image_model
-  -> _create_vision_backbone
-  -> _create_position_encoding
-     sam3/model/position_encoding.py, linha 55:
-     tensors = torch.zeros((1, 1) + size, device="cuda")
-RuntimeError: No CUDA GPUs are available
-```
+| Ponto do upstream | O que acontecia em CPU | O que o conector faz |
+| --- | --- | --- |
+| `position_encoding.py:55` cria o cache com `device="cuda"` | `No CUDA GPUs are available` | desvia esse `torch.zeros` para CPU |
+| `decoder.py:301` monta coordenadas com `device="cuda"` | idem | mesma troca em `_get_coords` |
+| `geometry_encoders.py:651` chama `pin_memory()` | exige acelerador | `pin_memory` vira no-op |
+| `vitdet.py` usa um addmm "fundido" que força bfloat16 | `mat1 and mat2 must have the same dtype` | conta comum em float32 |
+| `edt.py` faz `import triton` no topo | o torch de CPU e o de Windows não trazem triton | substituto com `cv2.distanceTransform` |
+| caches RoPE (`freqs_cis`) criados em `cuda` | tensores em dois dispositivos | movidos para CPU após a montagem |
 
-O `device="cuda"` está escrito no próprio upstream e ignora o dispositivo
-pedido. Não há configuração que contorne isso, e é por isso que o conector diz
-não logo na entrada, em vez de deixar o usuário esperar o download de 3,45 GB
-para receber um erro de CUDA no fim.
+O carregador também passa a ler o checkpoint com `mmap`: os pesos vêm do disco
+sob demanda, e a carga caiu de 194 s para 58 s. Se
+uma revisão nova do upstream mudar esses pontos, a carga falha dizendo isso, em
+vez de quebrar no meio da inferência.
+
+Medido num notebook i5-9300H (4 núcleos), com o checkpoint oficial:
+
+| Etapa | Tempo |
+| --- | --- |
+| carregar o modelo | ~1 min |
+| imagem nova (codificação) | ~60 s no Windows nativo, ~80 s no WSL2 |
+| novo texto na mesma imagem | ~8 s |
+| ponto ou caixa na mesma imagem | 0,2–0,3 s |
+
+Conte com cerca de 8 GB de RAM. Em `auto`, o instalador vai para CPU sozinho
+quando não há GPU NVIDIA, e instala o PyTorch de CPU, alguns GB menor que o de
+CUDA. Com uma GPU antiga demais, pergunta antes; sem terminal para perguntar,
+segue em CPU.
 
 ### A GPU precisa ser nova o bastante
 
@@ -393,9 +410,14 @@ with the current PyTorch installation.
 ```
 
 O instalador confere a capability pelo `nvidia-smi` antes de baixar qualquer
-coisa e recusa em segundos, dizendo qual é a placa e qual é o mínimo. Sem essa
-conferência, o erro só apareceria depois de cerca de 11 GB baixados, na forma
-de `no kernel image is available for execution on the device`.
+coisa. Em `auto`, uma placa assim leva o SAM 3 para CPU; com
+`POLIGOME_DEVICE=cuda`, o instalador recusa em segundos, dizendo qual é a placa
+e qual é o mínimo. Sem essa conferência, o erro só apareceria depois de cerca de
+11 GB baixados, na forma de `no kernel image is available for execution on the
+device`.
+
+A conferência aceita placas que o PyTorch não lista uma a uma: um kernel
+`sm_86` roda numa `sm_89`, porque a regra é mesma major e minor igual ou menor.
 
 ---
 
@@ -410,7 +432,7 @@ As mensagens abaixo são as que aparecem de verdade, com o que fazer em cada uma
 | `a porta 7860 já está ocupada` | outro conector, com outro modelo, está no ar | fechar o terminal dele, ou trocar de modelo pelo editor em vez do instalador |
 | `exige um Mac Apple Silicon` | Mac Intel | usar Linux, ou um Mac M1 ou mais novo |
 | `exige macOS 14 ou mais novo` | macOS antigo | atualizar o sistema |
-| `nvidia-smi não foi encontrado` | pediu SAM 3 sem GPU NVIDIA | escolher um SAM 2.1 ou MedSAM2, que rodam em CPU |
+| `SAM 3 em cuda exige uma GPU NVIDIA` | pediu `POLIGOME_DEVICE=cuda` sem GPU NVIDIA | usar `auto` ou `cpu` |
 | `CUDA não está disponível` | pediu `POLIGOME_DEVICE=cuda` sem CUDA | usar `auto` ou `cpu` |
 | `não foi possível baixar o checkpoint gated` | SAM 3 sem aprovação da Meta | pedir acesso e esperar a liberação |
 | `o conector terminou antes de ... ficar pronto` | o modelo não coube na memória | forçar `POLIGOME_DEVICE=cpu`, ou escolher um modelo menor |

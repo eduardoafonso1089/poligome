@@ -217,6 +217,10 @@ if [[ "${1:-}" == "-m" && "${2:-}" == "pip" ]]; then
     printf 'sam3-repair\t%s\n' "$*" >>"$POLIGOME_TEST_LOG"
     exit 0
   fi
+  if [[ "${POLIGOME_TEST_ALLOW_PIP:-}" == 1 ]]; then
+    printf 'pip\t%s\n' "$*" >>"$POLIGOME_TEST_LOG"
+    exit 0
+  fi
   printf 'unexpected-pip\t%s\n' "$*" >>"$POLIGOME_TEST_LOG"
   exit 97
 fi
@@ -301,6 +305,16 @@ MOCK_UNAME
 cat >"${MOCK_BIN}/nvidia-smi" <<'MOCK_NVIDIA'
 #!/usr/bin/env bash
 printf 'nvidia-smi\t%s\n' "$*" >>"${POLIGOME_TEST_LOG:?}"
+# Sem GPU: o binário existe (driver desinstalado pela metade, WSL sem GPU) mas
+# não acha placa nenhuma.
+[[ -z "${POLIGOME_TEST_NO_GPU:-}" ]] || exit 9
+if [[ -n "${POLIGOME_TEST_GPU_CAP:-}" ]]; then
+  case "$*" in
+    *compute_cap*name*|*name*compute_cap*) printf 'NVIDIA GeForce GTX 1050, %s\n' "$POLIGOME_TEST_GPU_CAP" ;;
+    *compute_cap*) printf '%s\n' "$POLIGOME_TEST_GPU_CAP" ;;
+    *name*) printf 'NVIDIA GeForce GTX 1050\n' ;;
+  esac
+fi
 exit 0
 MOCK_NVIDIA
 
@@ -359,6 +373,9 @@ run_isolated() {
     POLIGOME_TEST_DOWNLOAD_SIZE_OVERRIDE="${POLIGOME_TEST_DOWNLOAD_SIZE_OVERRIDE:-}" \
     POLIGOME_TEST_ALLOW_SAM3_REPAIR="${POLIGOME_TEST_ALLOW_SAM3_REPAIR:-}" \
     POLIGOME_TEST_FAIL_DEEP_IMPORT="${POLIGOME_TEST_FAIL_DEEP_IMPORT:-}" \
+    POLIGOME_TEST_ALLOW_PIP="${POLIGOME_TEST_ALLOW_PIP:-}" \
+    POLIGOME_TEST_NO_GPU="${POLIGOME_TEST_NO_GPU:-}" \
+    POLIGOME_TEST_GPU_CAP="${POLIGOME_TEST_GPU_CAP:-}" \
     POLIGOME_TEST_HEALTH_MATCH="${POLIGOME_TEST_HEALTH_MATCH:-}" \
     POLIGOME_TEST_PORT_IN_USE="${POLIGOME_TEST_PORT_IN_USE:-}" \
     POLIGOME_TEST_CONNECTOR_EXIT="${POLIGOME_TEST_CONNECTOR_EXIT:-}" \
@@ -1040,6 +1057,62 @@ test_sam3_rejects_old_gpu() {
   pass "SAM 3 recusa GPU antiga antes de baixar runtime e checkpoint"
 }
 
+# O SAM 3 roda em CPU quando não há GPU NVIDIA utilizável. O caminho tem três
+# decisões que só aparecem rodando: auto sem GPU vira cpu, o torch instalado é a
+# roda de CPU (com o rótulo +cpu no pin, senão o pip daria o torch CUDA por
+# satisfeito), e uma placa antiga sem terminal para perguntar segue em CPU em
+# vez de recusar.
+test_sam3_cpu_path() {
+  local model="sam3-concepts"
+  local case_name home_dir app_dir venv_dir log output expected_call
+  for case_name in sem-gpu torch-de-gpu gpu-antiga; do
+    home_dir="${TEMP_ROOT}/home-sam3-cpu-${case_name}"
+    app_dir="${home_dir}/.poligome-sam"
+    venv_dir="${app_dir}/venvs/sam3"
+    log="${TEMP_ROOT}/sam3-cpu-${case_name}.log"
+    prepare_model_home "$model" "$home_dir"
+    create_sparse_checkpoint "$model" "$home_dir"
+    # prepare_model_home marca o ambiente de GPU como pronto. Nos casos em que o
+    # de CPU já existe, a troca de marcador evita reinstalar.
+    if [[ "$case_name" != torch-de-gpu ]]; then
+      mv "${venv_dir}/${READY_FILE[sam3]}" "${venv_dir}/${READY_FILE[sam3]%.ok}-cpu.ok"
+    fi
+    : >"$log"
+    if ! output="$(
+      POLIGOME_TEST_NO_GPU="$([[ "$case_name" == gpu-antiga ]] || printf 1)" \
+      POLIGOME_TEST_GPU_CAP="$([[ "$case_name" == gpu-antiga ]] && printf 6.1)" \
+      POLIGOME_TEST_ALLOW_PIP="$([[ "$case_name" == torch-de-gpu ]] && printf 1)" \
+        run_isolated "$home_dir" "$log" bash "$INSTALLER" "$model" </dev/null 2>&1
+    )"; then
+      printf '%s\n' "$output" >&2
+      fail "SAM 3 em CPU (${case_name}): o instalador falhou"
+    fi
+    expected_call="$(expected_connector_call "$model" "$app_dir")"
+    assert_file_line "${expected_call/--device$'\t'auto/--device$'\t'cpu}" "$log" \
+      "SAM 3 em CPU (${case_name}) chama o conector com --device cpu"
+    assert_no_unexpected_work "$log" "SAM 3 em CPU (${case_name})"
+    case "$case_name" in
+      sem-gpu)
+        assert_contains "$output" 'Nenhuma GPU NVIDIA encontrada: o SAM 3 vai rodar em CPU.' \
+          "aviso de CPU sem GPU"
+        ;;
+      torch-de-gpu)
+        grep -Fq $'pip\t-m pip install torch==2.10.0+cpu torchvision==0.25.0+cpu --index-url https://download.pytorch.org/whl/cpu' "$log" || {
+          grep '^pip' "$log" >&2
+          fail "SAM 3 em CPU: o ambiente de GPU não foi trocado pela roda de CPU com rótulo +cpu"
+        }
+        [[ -e "${venv_dir}/${READY_FILE[sam3]%.ok}-cpu.ok" ]] ||
+          fail "SAM 3 em CPU: o marcador do sabor CPU não foi gravado"
+        ;;
+      gpu-antiga)
+        assert_contains "$output" 'Sem terminal interativo para perguntar: seguindo em CPU.' \
+          "placa antiga sem terminal segue em CPU"
+        ;;
+    esac
+  done
+  pass "SAM 3 vai para CPU sem GPU, com GPU antiga e troca o torch de GPU pelo de CPU"
+}
+
 bash -n "$INSTALLER" "$STARTER" "$SERVICE"
 pass "sintaxe dos scripts Bash"
 
@@ -1063,6 +1136,7 @@ test_pinned_default_connector
 test_service_covers_every_model
 test_device_is_choosable
 test_sam3_rejects_old_gpu
+test_sam3_cpu_path
 
 # O instalador nativo de Windows repete o catálogo em PowerShell, porque é um
 # arquivo que o usuário baixa sozinho e não pode depender do .sh. Repetição é o
