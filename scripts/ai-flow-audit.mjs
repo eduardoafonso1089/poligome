@@ -112,6 +112,13 @@ async function preannotate(page,{byom=false,all=false,region=false}={}) {
 const done=page=>page.locator(".ai-run-card.done");
 try {
   await check("empty project disables preannotation",{demo:false},async({page})=>{await expect(page.getByRole("button",{name:"Pré-anotar",exact:true})).toBeDisabled();await close(await hub(page))});
+  await check("BYOM import fields fit mobile viewport without horizontal scrolling",{},async({page})=>{
+    for(const width of [360,390]){
+      await page.setViewportSize({width,height:844});const d=await hub(page);await d.getByRole("tab",{name:/Automático/}).click();await d.getByRole("button",{name:/Adicionar meu modelo/}).click();
+      for(const field of ["Identificador","Nome"]){const bounds=await d.getByRole("textbox",{name:field,exact:true}).boundingBox();assert.ok(bounds&&bounds.x>=0&&bounds.x+bounds.width<=width);}
+      const bounds=await d.boundingBox();assert.ok(bounds.x>=0&&bounds.x+bounds.width<=width);await close(d);
+    }
+  });
   await check("offline hub, tabs and no-model installation path",{runtime:false,connectorOffline:true},async({page})=>{
     const d=await hub(page);await d.getByRole("tab",{name:/Conexões/}).click();await expect(d.getByText("Desligado",{exact:true})).toHaveCount(2);await close(d);
     await page.getByRole("button",{name:"Pré-anotar",exact:true}).click();await page.getByRole("dialog").getByRole("button",{name:/Ver como instalar/}).click();await expect(page.getByRole("dialog",{name:"Modelos de IA"})).toBeVisible();
