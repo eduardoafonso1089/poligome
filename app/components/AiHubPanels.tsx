@@ -341,7 +341,7 @@ export function ConnectionsPanel({
   copy, connector, runtime, containers, onShowInstall, onShowAddModel, onShowRuntimeInstall,
 }: {
   copy: AiCopy;
-  connector: { state: ServiceState; endpoint: string; host: string | null; serving: string; onEndpoint: (value: string) => void; onRetry: () => void };
+  connector: { state: ServiceState; endpoint: string; host: string | null; serving: string; modelState?: "ready" | "loading" | "error"; onEndpoint: (value: string) => void; onRetry: () => void };
   runtime: { state: ServiceState; endpoint: string; serving: string; onEndpoint: (value: string) => void; onRetry: () => void };
   containers: readonly ByomModel[];
   onShowInstall: () => void;
@@ -360,7 +360,11 @@ export function ConnectionsPanel({
 
     <section className="ai-conn-card">
       <header><span className="ai-conn-icon"><Cpu size={16} /></span><div><b>{copy.connConnectorTitle}</b><small>{copy.connConnectorRole}</small></div><StatusPill copy={copy} state={connector.state} /></header>
-      {connector.state === "ready" && <p className="ai-conn-detail">{fill(copy.connServing, { model: connector.serving })}{connector.host ? ` · ${fill(copy.connHost, { host: connector.host })}` : ""}</p>}
+      {connector.state === "ready" && connector.modelState === "error" ? <>
+        <p className="ai-conn-detail" role="alert">{copy.connModelError}</p>
+        <details><summary>{copy.containerErrorDetail}</summary><code>{connector.serving}</code></details>
+      </> : connector.state === "ready" && connector.modelState === "loading" ? <p className="ai-conn-detail">{copy.connModelLoading}</p>
+        : connector.state === "ready" && <p className="ai-conn-detail">{fill(copy.connServing, { model: connector.serving })}{connector.host ? ` · ${fill(copy.connHost, { host: connector.host })}` : ""}</p>}
       {connector.state === "offline" && <p className="ai-conn-detail">{copy.connConnectorHow}</p>}
       <div className="ai-conn-row">
         <EndpointField copy={copy} value={connector.endpoint} placeholder="http://127.0.0.1:7860/predict" onCommit={connector.onEndpoint} onValidityChange={setConnectorAddressValid} />

@@ -15,6 +15,10 @@ import type { Language } from "./i18n";
  * português, e o compilador recusa o que faltar.
  */
 const pt = {
+  runCudaRecovery: "O modelo não conseguiu usar a GPU. Reinicie o conector ou contêiner usando CPU e execute novamente. Confira os logs se quiser corrigir o ambiente CUDA.",
+  runMemoryRecovery: "O modelo ficou sem memória. Use um modelo menor, reduza a imagem ou feche outros programas antes de tentar novamente.",
+  connModelError: "O conector está ligado, mas o modelo não carregou. Confira o checkpoint e as dependências; se o erro for CUDA, reinicie usando CPU.",
+  connModelLoading: "Conector ligado. O modelo ainda está carregando; aguarde antes de segmentar.",
   aiButton: "IA",
   aiHintSam: "Assistido: {model}",
   aiHintRuntime: "Nativo: {model}",
@@ -240,6 +244,10 @@ export type AiCopyKey = keyof typeof pt;
 export type AiCopy = Record<AiCopyKey, string>;
 
 const en: AiCopy = {
+  connModelError: "The connector is running, but the model did not load. Check its checkpoint and dependencies; for CUDA errors, restart using CPU.",
+  connModelLoading: "Connector running. The model is still loading; wait before segmenting.",
+  runCudaRecovery: "The model could not use the GPU. Restart the connector or container using CPU and try again. Check its logs to repair the CUDA environment.",
+  runMemoryRecovery: "The model ran out of memory. Use a smaller model, reduce the image or close other applications before trying again.",
   aiButton: "AI",
   aiHintSam: "Assisted: {model}",
   aiHintRuntime: "Native: {model}",
@@ -462,6 +470,10 @@ const en: AiCopy = {
 };
 
 const fr: AiCopy = {
+  connModelError: "Le connecteur fonctionne, mais le modèle n’a pas chargé. Vérifiez le checkpoint et les dépendances ; pour une erreur CUDA, redémarrez sur CPU.",
+  connModelLoading: "Connecteur actif. Le modèle charge encore ; attendez avant de segmenter.",
+  runCudaRecovery: "Le modèle n’a pas pu utiliser le GPU. Redémarrez le connecteur ou conteneur sur CPU et réessayez. Consultez les logs pour réparer l’environnement CUDA.",
+  runMemoryRecovery: "Le modèle manque de mémoire. Utilisez un modèle plus petit, réduisez l’image ou fermez d’autres applications avant de réessayer.",
   aiButton: "IA",
   aiHintSam: "Assisté : {model}",
   aiHintRuntime: "Natif : {model}",
@@ -684,6 +696,10 @@ const fr: AiCopy = {
 };
 
 const es: AiCopy = {
+  connModelError: "El conector funciona, pero el modelo no cargó. Revisa el checkpoint y las dependencias; ante errores CUDA, reinicia usando CPU.",
+  connModelLoading: "Conector activo. El modelo sigue cargando; espera antes de segmentar.",
+  runCudaRecovery: "El modelo no pudo usar la GPU. Reinicia el conector o contenedor usando CPU y vuelve a intentarlo. Consulta los logs para reparar CUDA.",
+  runMemoryRecovery: "El modelo se quedó sin memoria. Usa un modelo más pequeño, reduce la imagen o cierra otras aplicaciones antes de volver a intentarlo.",
   aiButton: "IA",
   aiHintSam: "Asistido: {model}",
   aiHintRuntime: "Nativo: {model}",
@@ -906,6 +922,13 @@ const es: AiCopy = {
 };
 
 const translations: Record<Language, AiCopy> = { pt, en, fr, es };
+
+/** Translate actionable model failures while retaining other domain explanations. */
+export function aiFailureMessage(detail: string, copy: AiCopy): string {
+  if (/out of memory|memoryerror|sem mem[oó]ria|cuda.*\boom\b/i.test(detail)) return copy.runMemoryRecovery;
+  if (/cuda.*(?:error|unavailable|not available|n[aã]o|indispon[ií]vel)|device-side assert|no kernel image|torch\.cuda/i.test(detail)) return copy.runCudaRecovery;
+  return detail;
+}
 
 export function getAiCopy(language: Language): AiCopy {
   return translations[language];

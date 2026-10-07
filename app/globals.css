@@ -667,3 +667,5 @@ html[data-theme="light"]{--ink:#29262F;--muted:#6E6A75;--line:#DEDCE4;--green:#7
 .sam-steps li code,.sam-relaunch code{white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere}
 
 .coco-import-modal header>div{display:block;min-width:0;overflow-wrap:anywhere}.coco-import-modal header{align-items:flex-start}.coco-import-modal header>button{flex-shrink:0}.coco-import-list b{font-size:14px}
+
+.byom-setup-guide{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}.byom-setup-guide>summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--text)}.byom-setup-guide[open]>.sam-os-picker{margin:12px 0}

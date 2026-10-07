@@ -6,6 +6,9 @@ export type ThemeMode = "system" | "light" | "dark";
 export const SOURCE_URL = "https://github.com/eduardoafonso1089/poligome";
 
 const pt = {
+  imageImportRejected: "Não foi possível importar: {files}",
+  imageImportUnsupported: "formato não suportado nesta importação",
+  imageImportUnreadable: "o navegador não conseguiu ler a imagem",
   projectClassesRecovered: "{n} anotação(ões) sem classe válida recuperada(s) em Sem label. Salve o projeto atualizado.",
     finishDrawing: "Concluir",
     multipleSelection: "Selecionar várias",
@@ -213,6 +216,9 @@ export type TranslationKey = keyof typeof pt;
 const translations: Record<Language, Record<TranslationKey, string>> = {
   pt,
   en: {
+    imageImportRejected: "Could not import: {files}",
+    imageImportUnsupported: "format not supported by this import",
+    imageImportUnreadable: "the browser could not read this image",
     projectClassesRecovered: "{n} annotation(s) with a missing class recovered as Unlabeled. Save the updated project.",
     finishDrawing: "Finish",
     multipleSelection: "Select multiple",
@@ -415,6 +421,9 @@ fileMenu: "File", renameProject: "Rename project", projectImages: "images", proj
     convUnavailable: "The local converter is not running. Download and run",
   },
   fr: {
+    imageImportRejected: "Impossible d’importer : {files}",
+    imageImportUnsupported: "format non pris en charge par cet import",
+    imageImportUnreadable: "le navigateur n’a pas pu lire l’image",
     projectClassesRecovered: "{n} annotation(s) sans classe valide récupérée(s) dans Sans étiquette. Enregistrez le projet mis à jour.",
     finishDrawing: "Terminer",
     multipleSelection: "Sélection multiple",
@@ -617,6 +626,9 @@ fileMenu: "Fichier", renameProject: "Renommer le projet", projectImages: "images
     convUnavailable: "Le convertisseur local ne tourne pas. Téléchargez et lancez",
   },
   es: {
+    imageImportRejected: "No se pudo importar: {files}",
+    imageImportUnsupported: "formato no compatible con esta importación",
+    imageImportUnreadable: "el navegador no pudo leer la imagen",
     projectClassesRecovered: "{n} anotación(es) sin clase válida recuperada(s) en Sin etiqueta. Guarda el proyecto actualizado.",
     finishDrawing: "Terminar",
     multipleSelection: "Selección múltiple",

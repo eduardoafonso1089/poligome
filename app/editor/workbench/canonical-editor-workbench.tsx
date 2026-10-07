@@ -4,7 +4,7 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { Asset, Label } from "../../lib/types";
 import { fill, getCopy, storedLanguage, storedTheme, type Language } from "../../lib/i18n";
-import { countAnnotations, getAiCopy } from "../../lib/ai-copy";
+import { aiFailureMessage, countAnnotations, getAiCopy } from "../../lib/ai-copy";
 import { preannotationUndoPlan } from "../../lib/preannotation-undo";
 import { translateErrorCode } from "../../lib/error-message";
 import type { EditorAnnotation } from "../models/annotation-model";
@@ -626,10 +626,10 @@ export function CanonicalEditorWorkbench() {
   // O runtime e o conector SAM são serviços distintos, em endpoints distintos.
   // Mandar verificar o SAM quando quem não respondeu foi o runtime manda a
   // pessoa mexer no serviço errado.
-  const describeFailure = useCallback((error: unknown, source: PreannotateRequest["source"]) =>
+  const describeFailure = useCallback((error: unknown, source: PreannotateRequest["source"]) => aiFailureMessage(
     error instanceof RuntimeError ? fill(aiCopy.runRuntimeError, { detail: error.message })
       : error instanceof PreannotateError ? error.message
-        : source === "runtime" ? aiCopy.runRuntimeUnreachable : aiCopy.runConnectorUnreachable, [aiCopy]);
+        : source === "runtime" ? aiCopy.runRuntimeUnreachable : aiCopy.runConnectorUnreachable, aiCopy), [aiCopy]);
 
   /**
    * Uma pré-anotação: um modelo, sobre a imagem aberta, uma região dela ou o
@@ -805,14 +805,14 @@ export function CanonicalEditorWorkbench() {
     } catch (error) {
       if (controller.signal.aborted || samRunRef.current !== controller) return;
       setSamPreviews([]);
-      setMessage(error instanceof Error ? error.message : copy.errSamUnreachable);
+      setMessage(error instanceof Error ? aiFailureMessage(error.message, aiCopy) : copy.errSamUnreachable);
     } finally {
       if (samRunRef.current === controller) {
         samRunRef.current = null;
         setSamLoading(false);
       }
     }
-  }, [activeLabel, asset, copy, makeId, samThreshold]);
+  }, [activeLabel, aiCopy, asset, copy, makeId, samThreshold]);
 
   function addSamPrompt(point: { x: number; y: number }, negative: boolean) {
     const next: SamPrompt[] = [...samPrompts, { x: point.x, y: point.y, label: negative ? 0 : 1 }];
@@ -949,7 +949,8 @@ export function CanonicalEditorWorkbench() {
         if (!current) setCurrent(loaded.assets[0].id);
         setSessionDirty(true);
       }
-      setMessage(`${copy.importImages}: ${loaded.assets.length}${loaded.rejected.length ? ` · ${loaded.rejected.length}` : ""}.`);
+      const rejectionSummary = loaded.rejections.map(({ file, reason }) => `${file.name}: ${reason === "unsupported" ? copy.imageImportUnsupported : copy.imageImportUnreadable}`).join("; ");
+      setMessage(`${copy.importImages}: ${loaded.assets.length}.${rejectionSummary ? ` ${fill(copy.imageImportRejected, { files: rejectionSummary })}` : ""}`);
     } finally {
       setLoading(false);
     }

@@ -5,6 +5,7 @@ export type LoadedImageAssets = {
   assets: Asset[];
   objectUrls: string[];
   rejected: File[];
+  rejections: { file: File; reason: "unsupported" | "unreadable" }[];
 };
 
 export type RelinkMissingAssetsResult = {
@@ -100,10 +101,12 @@ export async function loadLocalImageAssets(
   const assets: Asset[] = [];
   const objectUrls: string[] = [];
   const rejected: File[] = [];
+  const rejections: LoadedImageAssets["rejections"] = [];
 
   for (const file of files) {
     if (!acceptedImage(file)) {
       rejected.push(file);
+      rejections.push({ file, reason: "unsupported" });
       continue;
     }
     const src = URL.createObjectURL(file);
@@ -122,10 +125,11 @@ export async function loadLocalImageAssets(
     } catch {
       URL.revokeObjectURL(src);
       rejected.push(file);
+      rejections.push({ file, reason: "unreadable" });
     }
   }
 
-  return { assets, objectUrls, rejected };
+  return { assets, objectUrls, rejected, rejections };
 }
 
 export async function relinkMissingAssets(assets: Asset[], files: File[]): Promise<RelinkMissingAssetsResult> {

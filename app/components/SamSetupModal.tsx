@@ -74,6 +74,10 @@ function Rich({ text }: { text: string }) {
     : part)}</>;
 }
 
+function preferredInstallOs(): "unix" | "native" {
+  return typeof window !== "undefined" && typeof navigator !== "undefined" && /Windows|Win32|Win64/i.test(`${navigator.userAgent} ${navigator.platform}`) ? "native" : "unix";
+}
+
 const CAPABILITY_KEYS = {
   imageSegmentation: "capImage",
   videoSegmentation: "capVideo",
@@ -133,16 +137,19 @@ function ByomPanel({
   // precisa aparecer aqui: sem isto o botão limpava os campos e não dizia nada.
   const [importError, setImportError] = useState("");
   const [importing, setImporting] = useState(false);
+  const [commandOs, setCommandOs] = useState<"unix" | "native">(preferredInstallOs);
+  const cli = commandOs === "native" ? "powershell -ExecutionPolicy Bypass -File .\\poligome-byom-windows.ps1" : "bash poligome-byom-macos-linux.sh";
+  const repoCli = commandOs === "native" ? "powershell -ExecutionPolicy Bypass -File .\\public\\poligome-byom-windows.ps1" : "bash public/poligome-byom-macos-linux.sh";
   const portNumber = Number(draftPort);
   const validId = BYOM_MODEL_ID_PATTERN.test(draftId.trim().toLowerCase());
   const validPort = Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535;
   const canRegister = validId && validPort;
   const steps = [
-    { title: sc.byomStep1Title, body: sc.byomStep1Body, command: `cd ~/Downloads   ${sc.byomStep1Comment}` },
+    { title: sc.byomStep1Title, body: sc.byomStep1Body, command: commandOs === "native" ? `cd "$env:USERPROFILE\\Downloads"   ${sc.byomStep1Comment}` : `cd ~/Downloads   ${sc.byomStep1Comment}` },
     { title: sc.byomStep2Title, body: sc.byomStep2Body, command: "docker build -t meu-modelo ." },
-    { title: sc.byomStep3Title, body: sc.byomStep3Body, command: "bash poligome-byom-macos-linux.sh register --model-id byom-meu-modelo --image meu-modelo --name \"Meu modelo\" --port 8080" },
-    { title: sc.byomStep4Title, body: sc.byomStep4Body, command: "bash poligome-byom-macos-linux.sh start --model-id byom-meu-modelo" },
-    { title: sc.byomStep5Title, body: sc.byomStep5Body, command: "bash poligome-byom-macos-linux.sh start --model-id byom-meu-modelo" },
+    { title: sc.byomStep3Title, body: sc.byomStep3Body, command: `${cli} register --model-id byom-meu-modelo --image meu-modelo --name "Meu modelo" --port 8080` },
+    { title: sc.byomStep4Title, body: sc.byomStep4Body, command: `${cli} start --model-id byom-meu-modelo` },
+    { title: sc.byomStep5Title, body: sc.byomStep5Body, command: `${cli} start --model-id byom-meu-modelo` },
   ];
 
   return <div className="byom-panel">
@@ -153,6 +160,45 @@ function ByomPanel({
       <p><Rich text={sc.byomSagemaker} /></p>
     </section>
 
+    <section className="byom-registered">
+      <h4>{sc.byomImportTitle}</h4>
+      <p className="byom-import-hint"><Rich text={sc.byomImportHint} /></p>
+      <div className="byom-import">
+        <label>{sc.byomFieldId}<input value={draftId} onChange={(event) => setDraftId(event.target.value)} placeholder="byom-meu-modelo" spellCheck={false} /></label>
+        <label>{sc.byomFieldName}<input value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder={sc.byomNamePlaceholder} /></label>
+        <label>{sc.byomFieldPort}<input type="number" min={1} max={65535} value={draftPort} onChange={(event) => setDraftPort(event.target.value)} /></label>
+        <button
+          className="byom-add"
+          disabled={!canRegister || importing}
+          onClick={async () => {
+            setImportError("");
+            setImporting(true);
+            const outcome = await onRegister({ modelId: draftId.trim().toLowerCase(), name: draftName.trim(), port: portNumber });
+            setImporting(false);
+            // Limpar só no sucesso: quem errou a porta corrige o que digitou em
+            // vez de reescrever tudo.
+            if (outcome.ok) { setDraftId("byom-"); setDraftName(""); }
+            else setImportError(outcome.detail);
+          }}
+        >
+          {importing ? <Gauge className="spin" size={14} /> : <Plus size={14} />}{importing ? sc.byomImporting : sc.byomImport}
+        </button>
+      </div>
+      {!validId && draftId.trim() !== "byom-" && <p className="byom-reason"><Rich text={sc.byomIdRule} /></p>}
+      {!validPort && <p className="byom-reason" role="alert">{sc.byomPortRule}</p>}
+      {importError && <p className="byom-reason" role="alert">{fill(sc.byomImportFailed, { detail: importError })}</p>}
+
+      <p className="byom-import-hint">{models.length === 0
+        ? <Rich text={sc.byomNoneRegistered} />
+        : models.length === 1 ? sc.byomOneRegistered : fill(sc.byomManyRegistered, { n: models.length })}</p>
+    </section>
+
+    <details className="byom-setup-guide">
+      <summary>{sc.byomSetupGuide}</summary>
+      <div className="sam-os-picker" role="tablist" aria-label={sc.osPicker}>
+        <button role="tab" aria-selected={commandOs === "native"} className={commandOs === "native" ? "active" : ""} onClick={() => setCommandOs("native")}>Windows · PowerShell</button>
+        <button role="tab" aria-selected={commandOs === "unix"} className={commandOs === "unix" ? "active" : ""} onClick={() => setCommandOs("unix")}>Linux / macOS / WSL2 · bash</button>
+      </div>
     <section className="byom-steps">
       <h4>{sc.byomBefore}</h4>
       <article><b>{sc.byomDockerTitle}</b><p>{sc.byomDockerBody}</p></article>
@@ -197,7 +243,7 @@ function ByomPanel({
         <a href="/byom/Dockerfile" download><Download size={15} /><span><strong>{sc.byomDockerfile}</strong><small>{sc.byomDockerfileHint}</small></span></a>
         <a href="/byom/serve.py" download><Download size={15} /><span><strong>{sc.byomServe}</strong><small>{sc.byomServeHint}</small></span></a>
       </div>
-      <code>{"bash poligome-byom-macos-linux.sh --help\npowershell -ExecutionPolicy Bypass -File .\\poligome-byom-windows.ps1 help"}</code>
+      <code>{`${cli} help`}</code>
     </section>
 
     <section className="byom-steps">
@@ -205,17 +251,17 @@ function ByomPanel({
       <article>
         <b>{sc.byomRepoTitle}</b>
         <p>{sc.byomRepoBody}</p>
-        <code>bash public/poligome-byom-macos-linux.sh examples</code>
+        <code>{`${repoCli} examples`}</code>
       </article>
       <article>
         <b>{sc.byomFilesOnlyTitle}</b>
         <p>{sc.byomFilesOnlyBody}</p>
-        <code>{"docker build -t poligome-byom-exemplo .\nbash poligome-byom-macos-linux.sh register --model-id byom-otsu --image poligome-byom-exemplo --name \"Exemplo Otsu\" --port 8080 --env METHOD=otsu\nbash poligome-byom-macos-linux.sh register --model-id byom-watershed --image poligome-byom-exemplo --name \"Exemplo Watershed\" --port 8081 --env METHOD=watershed\nbash poligome-byom-macos-linux.sh start --model-id byom-otsu\nbash poligome-byom-macos-linux.sh start --model-id byom-watershed"}</code>
+        <code>{`docker build -t poligome-byom-exemplo .\n${cli} register --model-id byom-otsu --image poligome-byom-exemplo --name "Exemplo Otsu" --port 8080 --env METHOD=otsu\n${cli} register --model-id byom-watershed --image poligome-byom-exemplo --name "Exemplo Watershed" --port 8081 --env METHOD=watershed\n${cli} start --model-id byom-otsu\n${cli} start --model-id byom-watershed`}</code>
       </article>
       <article>
         <b>{sc.byomCheckTitle}</b>
         <p>{sc.byomCheckBody}</p>
-        <code>{"bash poligome-byom-macos-linux.sh list\nbash poligome-byom-macos-linux.sh logs --model-id byom-otsu"}</code>
+        <code>{`${cli} list\n${cli} logs --model-id byom-otsu`}</code>
       </article>
     </section>
 
@@ -225,6 +271,7 @@ function ByomPanel({
           Windows precisa saber que os mesmos passos existem lá, com o mesmo nome,
           antes de tentar rodar bash no PowerShell e achar que o BYOM não serve. */}
       <p className="byom-import-hint"><Rich text={sc.byomStepsShell} /></p>
+
       {steps.map((step) => <article key={step.title}>
         <b>{step.title}</b>
         {step.body && <p>{step.body}</p>}
@@ -232,38 +279,7 @@ function ByomPanel({
       </article>)}
     </section>
 
-    <section className="byom-registered">
-      <h4>{sc.byomImportTitle}</h4>
-      <p className="byom-import-hint"><Rich text={sc.byomImportHint} /></p>
-      <div className="byom-import">
-        <label>{sc.byomFieldId}<input value={draftId} onChange={(event) => setDraftId(event.target.value)} placeholder="byom-meu-modelo" spellCheck={false} /></label>
-        <label>{sc.byomFieldName}<input value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder={sc.byomNamePlaceholder} /></label>
-        <label>{sc.byomFieldPort}<input type="number" min={1} max={65535} value={draftPort} onChange={(event) => setDraftPort(event.target.value)} /></label>
-        <button
-          className="byom-add"
-          disabled={!canRegister || importing}
-          onClick={async () => {
-            setImportError("");
-            setImporting(true);
-            const outcome = await onRegister({ modelId: draftId.trim().toLowerCase(), name: draftName.trim(), port: portNumber });
-            setImporting(false);
-            // Limpar só no sucesso: quem errou a porta corrige o que digitou em
-            // vez de reescrever tudo.
-            if (outcome.ok) { setDraftId("byom-"); setDraftName(""); }
-            else setImportError(outcome.detail);
-          }}
-        >
-          {importing ? <Gauge className="spin" size={14} /> : <Plus size={14} />}{importing ? sc.byomImporting : sc.byomImport}
-        </button>
-      </div>
-      {!validId && draftId.trim() !== "byom-" && <p className="byom-reason"><Rich text={sc.byomIdRule} /></p>}
-      {!validPort && <p className="byom-reason" role="alert">{sc.byomPortRule}</p>}
-      {importError && <p className="byom-reason" role="alert">{fill(sc.byomImportFailed, { detail: importError })}</p>}
 
-      <p className="byom-import-hint">{models.length === 0
-        ? <Rich text={sc.byomNoneRegistered} />
-        : models.length === 1 ? sc.byomOneRegistered : fill(sc.byomManyRegistered, { n: models.length })}</p>
-    </section>
 
     <section className="byom-limits">
       <AlertTriangle size={15} />
@@ -271,6 +287,7 @@ function ByomPanel({
     </section>
 
     <section className="sam-privacy"><ShieldCheck size={16} /><div><b>{sc.privacyTitle}</b><p><Rich text={sc.byomPrivacy} /></p></div></section>
+    </details>
   </div>;
 }
 
@@ -317,7 +334,7 @@ export default function SamSetupModal({
   const [forceCpu, setForceCpu] = useState(false);
   // Um sistema por vez. Três caminhos lado a lado obrigavam o usuário a descobrir
   // qual era o dele antes de ler qualquer instrução.
-  const [installOs, setInstallOs] = useState<"unix" | "wsl" | "native">("unix");
+  const [installOs, setInstallOs] = useState<"unix" | "wsl" | "native">(preferredInstallOs);
 
   /**
    * Esc fecha o catálogo, como em qualquer diálogo.
@@ -529,7 +546,7 @@ export default function SamSetupModal({
           </section>
         </aside>}
 
-        <div className="sam-model-detail">
+        <div className="sam-model-detail" key={`${tab}-${automaticView}`}>
           {tab === "connections" ? <ConnectionsPanel
             copy={ai}
             connector={{
@@ -537,6 +554,7 @@ export default function SamSetupModal({
               endpoint,
               host: connectorHost?.host ?? null,
               serving: runtimeLabel || loadedModelId || "—",
+              modelState: connectionState === "error" ? "error" : connectionState === "loading" ? "loading" : "ready",
               onEndpoint: onEndpointChange,
               onRetry: onRecheckConnector,
             }}
@@ -671,7 +689,7 @@ export default function SamSetupModal({
                     </tr>
                     <tr>
                       <th>{sc.uninstallNative}</th>
-                      <td><code>{String.raw`%USERPROFILE%\.poligome-sam`}</code><br /><code>{String.raw`rmdir /s /q "%USERPROFILE%\.poligome-sam"`}</code></td>
+                      <td><code>{String.raw`$env:USERPROFILE\.poligome-sam`}</code><br /><code>{String.raw`Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '.poligome-sam') -Recurse -Force`}</code></td>
                     </tr>
                     <tr>
                       <th>{sc.uninstallWsl}</th>
@@ -835,7 +853,7 @@ export default function SamSetupModal({
                     </tr>
                     <tr>
                       <th>{sc.uninstallNative}</th>
-                      <td><code>{String.raw`%USERPROFILE%\.poligome-sam`}</code><br /><code>{String.raw`rmdir /s /q "%USERPROFILE%\.poligome-sam"`}</code></td>
+                      <td><code>{String.raw`$env:USERPROFILE\.poligome-sam`}</code><br /><code>{String.raw`Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '.poligome-sam') -Recurse -Force`}</code></td>
                     </tr>
                     <tr>
                       <th>{sc.uninstallWsl}</th>

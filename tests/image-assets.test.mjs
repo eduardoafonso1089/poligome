@@ -118,6 +118,7 @@ test("a file that is not an image is rejected before any object URL is made", as
 
     assert.deepEqual(result.assets, []);
     assert.deepEqual(result.rejected, [notAnImage]);
+    assert.deepEqual(result.rejections,[{file:notAnImage,reason:'unsupported'}]);
     assert.deepEqual(revoked, [], "nothing was allocated, so nothing needs revoking");
   });
 });
@@ -139,6 +140,7 @@ test("an undecodable image is rejected and its object URL is released", async ()
 
     assert.deepEqual(result.assets, []);
     assert.deepEqual(result.rejected, [corrupt]);
+    assert.deepEqual(result.rejections,[{file:corrupt,reason:'unreadable'}]);
     assert.equal(revoked.length, 1, "a rejected import must not leak a blob URL");
     assert.deepEqual(result.objectUrls, []);
   });

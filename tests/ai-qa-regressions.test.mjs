@@ -7,7 +7,7 @@ import { preannotationUndoPlan } from '../app/lib/preannotation-undo.ts';
 import { createEditorState, editorReducer } from '../app/editor/state/editor-state.ts';
 import { requestSamPredictions } from '../app/lib/sam.ts';
 import { getCopy } from '../app/lib/i18n.ts';
-import { getAiCopy } from '../app/lib/ai-copy.ts';
+import { getAiCopy, aiFailureMessage } from '../app/lib/ai-copy.ts';
 import { ConnectionsPanel } from '../app/components/AiHubPanels.tsx';
 import { render, text, buttons } from './helpers/render.mjs';
 import { box } from './helpers/editor-fixtures.mjs';
@@ -24,6 +24,20 @@ test('model endpoints reject malformed URLs and non-local destinations', () => {
   for (const address of ['https://example.com', 'http://localhost.example.com', 'http://192.168.0.3:7861']) {
     assert.equal(localEndpointError(address), 'remote');
     assert.equal(connectorBaseUrl(address), '');
+  }
+});
+
+test('a connected service with a failed model offers recovery rather than announcing it as running',()=>{
+  for(const language of ['pt','en','fr','es']) {
+    const copy=getAiCopy(language);
+    const connector={state:'ready',modelState:'error',endpoint:'http://localhost:7860/predict',host:'Windows',serving:'RuntimeError: CUDA unavailable',onEndpoint(){},onRetry(){}};
+    const markup=render(ConnectionsPanel,{copy,connector,runtime:{...connector,state:'offline'},containers:[],onShowInstall(){},onShowAddModel(){},onShowRuntimeInstall(){}});
+    assert.ok(text(markup).includes(copy.connModelError));
+    assert.ok(!text(markup).includes(copy.connServing.replace('{model}',connector.serving)));
+    assert.match(markup,/<details/);assert.match(markup,/role="alert"/);
+    assert.equal(aiFailureMessage('RuntimeError: CUDA error: device-side assert triggered',copy),copy.runCudaRecovery);
+    assert.equal(aiFailureMessage('CUDA out of memory',copy),copy.runMemoryRecovery);
+    assert.equal(aiFailureMessage('Unsupported point prompt',copy),'Unsupported point prompt');
   }
 });
 
