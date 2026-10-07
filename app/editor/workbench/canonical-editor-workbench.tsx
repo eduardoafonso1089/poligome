@@ -1239,6 +1239,7 @@ export function CanonicalEditorWorkbench() {
     return {
       ...source,
       id,
+      prediction: undefined,
       vertices: source.vertices.map((vertex, index) => ({ id: `${id}:outer:v${index}`, x: vertex.x + dx, y: vertex.y + dy })),
       holes: source.holes.map((hole, holeIndex) => hole.map((vertex, vertexIndex) => ({ id: `${id}:hole-${holeIndex}:v${vertexIndex}`, x: vertex.x + dx, y: vertex.y + dy }))),
     };
