@@ -5,6 +5,11 @@ export type AnnotationBase = {
   asset: string;
   label: string;
   reviewScore?: number;
+  prediction?: {
+    source: string;
+    geometry: string;
+    bounds: { x: number; y: number; width: number; height: number };
+  };
 };
 
 export type BoxAnnotation = AnnotationBase & {

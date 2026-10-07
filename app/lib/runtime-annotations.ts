@@ -264,8 +264,49 @@ export function withoutEdited(
   const originals = keptOriginals.map(editorEnvelope);
   return annotations.filter((annotation) => {
     const box = editorEnvelope(annotation);
-    return !originals.some((original) => iou(box, original) >= threshold);
+    return !originals.some((original) => (
+      (box.width * box.height === 0 || original.width * original.height === 0)
+        ? box.x === original.x && box.y === original.y && box.width === original.width && box.height === original.height
+        : iou(box, original) >= threshold
+    ));
   });
+}
+
+function predictionGeometry(annotation: EditorAnnotation): string {
+  const { id, asset, prediction, ...geometry } = annotation;
+  void id; void asset; void prediction;
+  return JSON.stringify(geometry);
+}
+
+export function markRuntimePredictions(annotations: readonly EditorAnnotation[], source: string): EditorAnnotation[] {
+  return annotations.map((annotation) => ({ ...annotation, prediction: {
+    source, geometry: predictionGeometry(annotation), bounds: editorEnvelope(annotation),
+  } }));
+}
+
+/** Replace only untouched results of this model and scope, including after reopening a project. */
+export function runtimePredictionPlan(
+  drafts: ReadonlyMap<string, EditorAnnotation>,
+  onCanvas: readonly EditorAnnotation[],
+  final: readonly EditorAnnotation[],
+  source: string,
+  replacePrevious = true,
+): { remove: string[]; add: EditorAnnotation[]; previous: EditorAnnotation[] } {
+  const { discard, keptOriginals } = reconcileDrafts(drafts, onCanvas);
+  const previous: EditorAnnotation[] = [];
+  if (replacePrevious) for (const annotation of onCanvas) {
+    const prediction = annotation.prediction;
+    if (drafts.has(annotation.id) || prediction?.source !== source || typeof prediction.geometry !== "string") continue;
+    const bounds = prediction.bounds;
+    if (!bounds || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) || bounds.width < 0 || bounds.height < 0) continue;
+    if (prediction.geometry === predictionGeometry(annotation)) previous.push(annotation);
+    else keptOriginals.push({ id: annotation.id, asset: annotation.asset, label: annotation.label, type: "box", ...bounds });
+  }
+  return {
+    remove: [...discard, ...previous.map((annotation) => annotation.id)],
+    add: withoutEdited(final, keptOriginals),
+    previous,
+  };
 }
 
 function flatten(vertices: ReadonlyArray<{ x: number; y: number }>): number[] {

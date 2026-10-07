@@ -45,10 +45,10 @@ import { PREANNOTATE_EVENT, type PreannotateRequest, type RuntimeParams } from "
 import { storedRuntimeEndpoint } from "../presentation/use-runtime-status";
 import {
   ensureLabels,
-  reconcileDrafts,
+  markRuntimePredictions,
+  runtimePredictionPlan,
   toEditorAnnotations,
   withContext,
-  withoutEdited,
 } from "../../lib/runtime-annotations";
 import { Check, Crosshair, ListRestart, LoaderCircle, Minus, Plus, Settings2, Sparkles, Square, X } from "lucide-react";
 import { requestSamAnnotations } from "../models/model-output";
@@ -519,8 +519,10 @@ export function CanonicalEditorWorkbench() {
     controller: AbortController,
     note: (done: number, total: number) => void,
     params: RuntimeParams,
-  ): Promise<string[]> => {
+    modelName: string,
+  ): Promise<{ ids: string[]; previous: EditorAnnotation[]; replaced: number }> => {
     const endpoint = storedRuntimeEndpoint();
+    const predictionSource = JSON.stringify([endpoint, modelName, target.id, asked ?? null]);
 
     // Os bytes sobem uma vez; a inferência cita a imagem pelo id depois.
     const fetched = await fetch(target.src, { signal: controller.signal });
@@ -554,21 +556,22 @@ export function CanonicalEditorWorkbench() {
     const fallbackLabelId = labelsRef.current.find((label) => label.id === activeLabel)?.id
       ?? labelsRef.current[0]?.id ?? EMPTY_LABELS[0].id;
     let produced: string[] = [];
+    let previous: EditorAnnotation[] = [];
+    let completed = false;
     // A decisão roda no reducer, sobre o canvas de agora: o fechamento deste
     // callback ainda vê o canvas de antes da execução, sem rascunho nenhum, e
     // concluiria que a pessoa apagou todos.
-    const settle = (final: EditorAnnotation[]) => {
+    const settle = (final: EditorAnnotation[], replacePrevious = true) => {
       const drafts = new Map(drafted);
       drafted.clear();
+      const previewPlan = runtimePredictionPlan(drafts, annotationsRef.current, final, predictionSource, replacePrevious);
+      if (replacePrevious) { previous = previewPlan.previous; produced = previewPlan.add.map((annotation) => annotation.id); }
       editor.dispatch({
         type: "settle-drafts",
-        plan: (onCanvas) => {
-          const { discard, keptOriginals } = reconcileDrafts(drafts, onCanvas);
-          return { remove: discard, add: withoutEdited(final, keptOriginals) };
-        },
+        plan: (onCanvas) => runtimePredictionPlan(drafts, onCanvas, final, predictionSource, replacePrevious),
       });
     };
-    const discardDrafts = () => settle([]);
+    const discardDrafts = () => settle([], false);
 
     try {
       for await (const event of runtimeInfer({
@@ -591,7 +594,7 @@ export function CanonicalEditorWorkbench() {
           setLabels(resolved.labels);
         }
 
-        const converted = toEditorAnnotations(event.annotations, {
+        const converted = markRuntimePredictions(toEditorAnnotations(event.annotations, {
           asset: target.id,
           fallbackLabelId,
           makeId: () => makeId("runtime"),
@@ -599,7 +602,7 @@ export function CanonicalEditorWorkbench() {
           scaleX,
           scaleY,
           clipTo: asked,
-        });
+        }), predictionSource);
 
         if (event.partial) {
           for (const annotation of converted) drafted.set(annotation.id, annotation);
@@ -609,18 +612,19 @@ export function CanonicalEditorWorkbench() {
         }
 
         settle(converted);
+        completed = true;
         setSessionDirty(true);
         // O que o reducer deixar de fora por já haver uma versão editada não
         // existe no canvas, e desfazer só remove o que encontrar.
-        produced = converted.map((annotation) => annotation.id);
+        break;
       }
     } catch (error) {
       // O que a pessoa editou sobrevive a uma falha; o resto era rascunho.
       discardDrafts();
       throw error;
     }
-    if (controller.signal.aborted) { discardDrafts(); return []; }
-    return produced;
+    if (controller.signal.aborted && !completed) { discardDrafts(); return { ids: [], previous: [], replaced: 0 }; }
+    return { ids: produced, previous, replaced: previous.length };
   }, [activeLabel, editor, makeId]);
 
   // O runtime e o conector SAM são serviços distintos, em endpoints distintos.
@@ -673,7 +677,10 @@ export function CanonicalEditorWorkbench() {
         at(0, 0);
         try {
           if (request.source === "runtime") {
-            ids.push(...await inferAsset(target, asked, controller, at, request.params));
+            const outcome = await inferAsset(target, asked, controller, at, request.params, request.modelName);
+            ids.push(...outcome.ids);
+            replaced += outcome.replaced;
+            previous.push(...outcome.previous);
           } else {
             const outcome = await inferAssetWithContainer(target, request.modelId, request.modelName, controller.signal);
             ids.push(...outcome.ids);

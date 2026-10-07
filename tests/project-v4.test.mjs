@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import { savePoligomeProjectV4, openPoligomeProjectV4 } from '../app/lib/project.ts';
 import { getCopy } from '../app/lib/i18n.ts';
 import { normalizeAnnotationLabels, UNLABELED_ID } from '../app/editor/panels/panel-model.ts';
+import { markRuntimePredictions, runtimePredictionPlan } from '../app/lib/runtime-annotations.ts';
 
 function installDownloadCapture() {
   const originalDocument=globalThis.document;
@@ -124,4 +125,20 @@ test('an image-only project without classes can be saved and reopened', async ()
     assert.equal(loaded.annotations.length,0);
     assert.equal(loaded.recoveredAnnotations,0);
   } finally { capture.restore(); }
+});
+
+test('native prediction provenance persists through PLGM reopening so reruns preserve manual edits',async()=>{
+  const capture=installDownloadCapture();
+  const labels=[{id:'dog',name:'Dog',color:'#00ff00',key:''}];
+  const [original]=markRuntimePredictions([{id:'native',asset:qaAsset.id,label:'dog',type:'box',x:10,y:20,width:50,height:60}], 'native dog');
+  try {
+    await savePoligomeProjectV4('Native',[qaAsset],labels,[original],getCopy('en'));
+    const loaded=await openPoligomeProjectV4(await capture.saved().arrayBuffer(),getCopy('en'));
+    assert.deepEqual(loaded.annotations,[original]);
+    assert.deepEqual(runtimePredictionPlan(new Map(),loaded.annotations,[],'native dog').remove,['native']);
+    const edited={...original,x:200};
+    await savePoligomeProjectV4('Edited Native',[qaAsset],labels,[edited],getCopy('en'));
+    const reopened=await openPoligomeProjectV4(await capture.saved().arrayBuffer(),getCopy('en'));
+    assert.deepEqual(runtimePredictionPlan(new Map(),reopened.annotations,[],'native dog').remove,[]);
+  }finally{capture.restore();}
 });
