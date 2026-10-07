@@ -16,6 +16,7 @@ import {
   type ModelAvailability,
 } from "../../lib/sam-connector";
 import { DEFAULT_SAM_MODEL_ID, isByomModelId, isSamModelId } from "../../lib/sam-models";
+import { normalizeSamEndpoint } from "../../lib/local-endpoint";
 import type { ByomModel } from "../../lib/sam-models";
 
 export type ConnectionState = "idle" | "checking" | "loading" | "ready" | "error" | "offline";
@@ -69,7 +70,7 @@ export function useSamCatalog(active: boolean) {
   // Lido já na criação, e não num efeito depois: começar no padrão e trocar em
   // seguida disparava duas sondagens, e a do endereço velho, recusada por
   // último, apagava o que a do endereço salvo tinha encontrado.
-  const [endpoint, setEndpointState] = useState(() => readStored(ENDPOINT_KEY) || DEFAULT_SAM_ENDPOINT);
+  const [endpoint, setEndpointState] = useState(() => normalizeSamEndpoint(readStored(ENDPOINT_KEY) || DEFAULT_SAM_ENDPOINT));
   const [selectedModelId, setSelectedModelIdState] = useState<string>(DEFAULT_SAM_MODEL_ID);
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
@@ -102,6 +103,7 @@ export function useSamCatalog(active: boolean) {
   }, []);
 
   const setEndpoint = useCallback((value: string) => {
+    const normalized = normalizeSamEndpoint(value);
     latest.current += 1;
     switching.current = false;
     setLoadedModelId(null);
@@ -110,8 +112,8 @@ export function useSamCatalog(active: boolean) {
     setAvailability([]);
     setByomModels([]);
     setConnectionState("checking");
-    setEndpointState(value);
-    writeStored(ENDPOINT_KEY, value);
+    setEndpointState(normalized);
+    writeStored(ENDPOINT_KEY, normalized);
   }, []);
 
   const setSelectedModelId = useCallback((value: string) => {

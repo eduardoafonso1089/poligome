@@ -1,4 +1,4 @@
-import { localEndpointError } from "./local-endpoint";
+import { localEndpointError, normalizeSamEndpoint } from "./local-endpoint";
 import { contours } from "d3-contour";
 import { fill } from "./i18n";
 import type { Copy } from "./i18n";
@@ -382,7 +382,7 @@ export async function requestSamPredictions({
       prompt.y / alturaOrigem * alturaEnvio,
     ]);
     const pointLabels = prompts.map((prompt) => prompt.label);
-    const response = await fetch(endpoint, {
+    const response = await fetch(normalizeSamEndpoint(endpoint), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

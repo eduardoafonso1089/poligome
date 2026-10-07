@@ -5,8 +5,26 @@ import {sameGeometry,reconcileDrafts,toEditorAnnotations} from '../app/lib/runti
 import {createPolygon} from '../app/editor/models/annotation-factory.ts';
 import {polygonRle} from '../app/editor/import/coco-rle.ts';
 import {fetchByomModels} from '../app/lib/sam-connector.ts';
+import {normalizeSamEndpoint, localEndpointError} from '../app/lib/local-endpoint.ts';
 
 const final={type:'result',annotations:[],partial:false};
+
+test('SAM normalizes connector origins while preserving explicit paths and endpoint validation',()=>{
+ for(const origin of ['http://127.0.0.1:7860','http://localhost:9876/','http://[::1]:7860'])assert.equal(new URL(normalizeSamEndpoint(origin)).pathname,'/predict');
+ assert.equal(normalizeSamEndpoint('http://localhost:7860/predict'),'http://localhost:7860/predict');
+ assert.equal(normalizeSamEndpoint('http://localhost:7860/custom/predict'),'http://localhost:7860/custom/predict');
+ for(const invalid of ['abc','https://example.com','http://user:password@localhost','http://localhost?q=x'])assert.ok(localEndpointError(normalizeSamEndpoint(invalid)));
+});
+
+test('SAM inference from an older persisted base URL posts to /predict',async(t)=>{
+ const {requestSamPredictions}=await import('../app/lib/sam.ts');
+ const {getCopy}=await import('../app/lib/i18n.ts');
+ const previous=globalThis.window;globalThis.window={setTimeout,clearTimeout};t.after(()=>{if(previous===undefined)delete globalThis.window;else globalThis.window=previous});
+ const requests=[];
+ t.mock.method(globalThis,'fetch',async(url,options)=>{requests.push({url,options});return Response.json({width:100,height:100,polygons:[[10,10,30,10,30,30,10,30]]})});
+ await requestSamPredictions({endpoint:'http://localhost:9876',asset:{id:'qa',src:'data:image/png;base64,eA==',width:100,height:100},copy:getCopy('pt'),prompts:[{x:20,y:20,label:1}]});
+ assert.equal(requests[0].url,'http://localhost:9876/predict');assert.equal(requests[0].options.method,'POST');assert.deepEqual(JSON.parse(requests[0].options.body).point_labels,[1]);
+});
 const stream=(...chunks)=>new ReadableStream({start(c){for(const bytes of chunks)c.enqueue(typeof bytes==='string'?new TextEncoder().encode(bytes):bytes);c.close()}});
 async function collect(input,signal){const out=[];for await(const event of parseEventStream(input,signal))out.push(event);return out}
 for(const ending of ['\n','\r\n','\r'])test(`SSE accepts ${JSON.stringify(ending)} and data without a space`,async()=>{

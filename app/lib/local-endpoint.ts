@@ -9,3 +9,12 @@ export function localEndpointError(value: string): "invalid" | "remote" | null {
     return "invalid";
   }
 }
+
+/** A connector origin is sufficient input; SAM inference lives at /predict. */
+export function normalizeSamEndpoint(value: string): string {
+  const trimmed = value.trim();
+  if (localEndpointError(trimmed)) return trimmed;
+  const url = new URL(trimmed);
+  if (url.pathname === "/") url.pathname = "/predict";
+  return url.toString();
+}
