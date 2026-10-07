@@ -77,6 +77,11 @@ try {
   if ((Get-ServerState $Python 'sam2.1-hiera-small') -ne 'device-mismatch') { throw 'Explicit CUDA silently accepted CPU' }
   Write-Host 'ok - actual health probe distinguishes ready CPU, auto and requested CUDA'
 } finally {
+  # A Windows venv may launch a child Python process. Stop only the child that
+  # belongs to this fixture before stopping its redirector.
+  Get-CimInstance Win32_Process -Filter "ParentProcessId = $($healthProcess.Id)" |
+    Where-Object { $_.CommandLine -and $_.CommandLine.Contains($healthScript) } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   if (-not $healthProcess.HasExited) { $healthProcess.Kill(); $healthProcess.WaitForExit() }
 }
 Write-Host "Test evidence retained in $qaRoot"
