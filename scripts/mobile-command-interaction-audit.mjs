@@ -170,7 +170,7 @@ try {
     await loadDemo(page);
     const guide = await button(page, /Guias de coordenadas X\/Y|Coordinate guides/i);
     await guide.tap();
-    if (await guide.getAttribute("aria-pressed") !== "true") throw new Error("guide did not activate");
+    await page.waitForFunction((element) => element.getAttribute("aria-pressed") === "true", await guide.elementHandle());
   });
 
   await check("Snap toggles on mobile", async () => {

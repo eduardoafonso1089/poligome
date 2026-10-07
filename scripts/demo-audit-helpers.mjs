@@ -4,7 +4,9 @@ export async function openDemoDataset(page, base) {
   await tutorial.waitFor({ state: "visible", timeout: 30000 });
   const close = tutorial.getByRole("button", { name: /Fechar|Close|Fermer|Cerrar/i }).first();
   await close.click({ force: true });
+  await tutorial.waitFor({ state: "hidden" });
   await page.waitForFunction(() => document.querySelectorAll("[data-annotation-id]").length >= 7, null, { timeout: 30000 });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
 export async function startGuidedDemo(page, base) {
