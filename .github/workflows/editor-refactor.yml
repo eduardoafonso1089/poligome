@@ -14,6 +14,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  local-ai:
+    name: SAM installers and BYOM HTTP contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install reference container dependencies
+        run: pip install numpy==2.2.6 opencv-python-headless==4.11.0.86 pillow==11.3.0
+      - name: Check SAM installers
+        run: bash tests/sam-installers.test.sh
+      - name: Check BYOM CLI and real HTTP handler
+        run: bash tests/byom.test.sh
+
+  native-ai:
+    name: Native Windows SAM launch and device checks
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install current Hugging Face CLI
+        run: pip install huggingface_hub==2.1.1
+      - name: Check real Python argv, HF entry point and health probe
+        shell: powershell
+        run: ./tests/sam-native-installer.test.ps1
+
   # Tier 1: everything that needs no build and no browser. Fails fast so a typo
   # or a broken unit never costs a full build.
   static:

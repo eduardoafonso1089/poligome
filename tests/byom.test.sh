@@ -393,6 +393,17 @@ PY
   pass "catálogo e conector aceitam o mesmo formato de id BYOM"
 }
 
+test_invalid_inference_inputs() {
+  local template_python
+  if ! template_python="$(find_capable_python)"; then
+    printf 'ok - # SKIP entradas invalidas do BYOM sem OpenCV, NumPy e Pillow\n'
+    return
+  fi
+  "$template_python" "${PROJECT_ROOT}/tests/byom-template.test.py" ||
+    fail "entradas invalidas derrubaram o contrato HTTP do BYOM."
+  pass "entradas invalidas retornam 400 e a inferencia valida continua funcionando"
+}
+
 test_syntax
 test_dockerfile_contract
 test_contract_roundtrip
@@ -401,5 +412,6 @@ test_shipped_examples
 test_registration
 test_connector_registry
 test_catalog_alignment
+test_invalid_inference_inputs
 
 printf '\nTodos os testes locais do BYOM passaram.\n'
