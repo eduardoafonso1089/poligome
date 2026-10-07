@@ -332,12 +332,12 @@ open_site() {
 }
 
 server_state() {
-  "$PYTHON" - "$MODEL_ID" "$PORT" <<'PY' 2>/dev/null
+  "$PYTHON" - "$MODEL_ID" "$PORT" "$DEVICE" <<'PY' 2>/dev/null
 import json
 import sys
 import urllib.request
 
-expected_model, port = sys.argv[1:]
+expected_model, port, expected_device = sys.argv[1:]
 try:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(f"http://127.0.0.1:{port}/health", timeout=2) as response:
@@ -347,6 +347,8 @@ except Exception:
     raise SystemExit(0)
 if payload.get("service") != "Poligome SAM local" or payload.get("api_version") != 2:
     print("mismatch")
+elif payload.get("status") == "ready" and expected_device != "auto" and payload.get("device") != expected_device:
+    print("device-mismatch")
 elif payload.get("model_id") != expected_model:
     # Um conector saudável servindo outro modelo não é obstáculo: o checkpoint
     # novo fica instalado e a troca se faz pelo editor, sem derrubar nada.
@@ -866,6 +868,9 @@ wait_for_existing_model() {
         return 0
         ;;
       loading) sleep 2 ;;
+      device-mismatch)
+        fail "o conector usa outro dispositivo. Feche a janela antiga e execute novamente para usar ${DEVICE}."
+        ;;
       error)
         fail "o conector falhou ao carregar ${MODEL_ID}: $(server_error_message)"
         ;;
@@ -928,7 +933,7 @@ run_connector_transactionally() {
         trap - EXIT HUP INT TERM
         fail "o modelo ${MODEL_ID} não conseguiu carregar: ${error_message}"
         ;;
-      mismatch|other-model|unhealthy)
+      mismatch|other-model|unhealthy|device-mismatch)
         cleanup_connector
         trap - EXIT HUP INT TERM
         fail "a porta ${PORT} respondeu com um serviço ou modelo diferente durante a inicialização."
@@ -1007,6 +1012,9 @@ verify_runtime_device
 ensure_checkpoint
 
 case "$(server_state)" in
+  device-mismatch)
+    fail "o conector na porta ${PORT} usa outro dispositivo. Feche a janela do conector e execute novamente para usar ${DEVICE}; o processo existente não foi alterado."
+    ;;
   ready)
     complete_installation
     printf '\nO modelo %s já está carregado pelo conector na porta %s.\n' "$MODEL_ID" "$PORT"

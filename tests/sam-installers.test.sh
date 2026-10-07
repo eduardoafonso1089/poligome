@@ -170,7 +170,7 @@ for python_arg in "$@"; do
   python_log_line+=$'\t'"$python_arg"
 done
 printf '%s\n' "$python_log_line" >>"${POLIGOME_TEST_LOG:?}"
-if [[ "${1:-}" == - && $# -eq 3 ]]; then
+if [[ "${1:-}" == - && $# -eq 4 ]]; then
   probe_program="$(cat)"
   printf 'health-model-probe\t%s\n' "${2:-}" >>"$POLIGOME_TEST_LOG"
   if [[ "${POLIGOME_TEST_HEALTH_MATCH:-}" == "${2:-}" ]]; then

@@ -569,7 +569,17 @@ function Invoke-Hf([string] $VenvPython, [string[]] $HfArgs) {
   # O console script hf.exe grava o caminho do interpretador dentro do binario e
   # para de funcionar se a pasta do app for renomeada; chamar o modulo pelo
   # proprio python do venv nao tem esse problema.
-  & $VenvPython -m huggingface_hub.commands.huggingface_cli @HfArgs
+  & $VenvPython -c @'
+import sys
+from importlib.metadata import distribution
+try:
+    entry = next(candidate for candidate in distribution('huggingface_hub').entry_points
+                 if candidate.group == 'console_scripts' and candidate.name == 'hf')
+except Exception as error:
+    raise SystemExit(f'nao foi possivel localizar o CLI do Hugging Face: {error}')
+sys.argv = ['hf', *sys.argv[1:]]
+entry.load()()
+'@ @HfArgs
 }
 
 function Install-Sam3Checkpoint([string] $VenvPython, [string] $Destination) {
@@ -595,6 +605,10 @@ function Install-Sam3Checkpoint([string] $VenvPython, [string] $Destination) {
 
 # ------------------------------------------------------------- conector ------
 
+function ConvertTo-NativeArgument([string] $Value) {
+  return '"' + ($Value -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
+}
+
 function Get-ServerState([string] $VenvPython, [string] $ExpectedModel) {
   $state = & $VenvPython -c @"
 import json, urllib.request
@@ -606,6 +620,8 @@ except Exception:
     print('offline'); raise SystemExit(0)
 if payload.get('service') != 'Poligome SAM local' or payload.get('api_version') != 2:
     print('mismatch')
+elif payload.get('status') == 'ready' and '$Device' != 'auto' and payload.get('device') != '$Device':
+    print('device-mismatch')
 elif payload.get('model_id') != '$ExpectedModel':
     # Conector saudavel com outro modelo nao bloqueia: o checkpoint novo fica
     # instalado e a troca se faz pelo editor.
@@ -722,6 +738,9 @@ if (-not (Test-CheckpointValid $checkpoint $spec.Size)) {
 }
 
 switch (Get-ServerState $venvPython $modelId) {
+  'device-mismatch' {
+    Fail "o conector na porta $Port usa outro dispositivo. Feche a janela do conector e execute novamente para usar $Device; o processo existente nao foi alterado."
+  }
   'ready' {
     Save-Selection $SelectedModelFile $modelId
     Remove-Item -LiteralPath $PendingModelFile -Force -ErrorAction SilentlyContinue
@@ -731,6 +750,23 @@ switch (Get-ServerState $venvPython $modelId) {
   }
   'loading' {
     Write-Host "O conector ja esta carregando $modelId; aguardando o modelo ficar pronto..."
+    $existingDeadline = (Get-Date).AddSeconds($StartupTimeout)
+    while ((Get-Date) -lt $existingDeadline) {
+      $existingState = Get-ServerState $venvPython $modelId
+      if ($existingState -eq 'ready') {
+        Save-Selection $SelectedModelFile $modelId
+        Remove-Item -LiteralPath $PendingModelFile -Force -ErrorAction SilentlyContinue
+        Write-Host "O modelo $modelId ja esta pronto na porta $Port."
+        exit 0
+      }
+      if ($existingState -eq 'device-mismatch') {
+        Fail "o conector na porta $Port usa outro dispositivo. Feche a janela do conector e execute novamente para usar $Device."
+      }
+      if ($existingState -eq 'error') { Fail "o modelo nao conseguiu carregar: $(Get-ServerError $venvPython)" }
+      if ($existingState -ne 'loading') { Fail 'o conector que estava carregando deixou de responder corretamente.' }
+      Start-Sleep -Seconds 2
+    }
+    Fail "o carregamento de $modelId excedeu $StartupTimeout segundos."
   }
   'other-model' {
     # Instalar um segundo modelo e o caminho normal de quem ja usa o Poligome.
@@ -775,7 +811,10 @@ while ($true) {
   $arguments += @('--device', $Device, '--port', "$Port", '--app-dir', $AppDir)
 
   Write-Host "Iniciando o conector e aguardando $modelId ficar pronto..."
-  $process = Start-Process -FilePath $venvPython -ArgumentList $arguments -NoNewWindow -PassThru
+  # Start-Process joins array items without preserving their boundaries. Quote
+  # every argument, including trailing backslashes, using Windows argv rules.
+  $quotedArguments = $arguments | ForEach-Object { ConvertTo-NativeArgument $_ }
+  $process = Start-Process -FilePath $venvPython -ArgumentList ($quotedArguments -join ' ') -NoNewWindow -PassThru
   # Tocar em Handle faz o .NET guardar o handle do processo; sem isso o
   # ExitCode volta vazio depois que o processo sai.
   $null = $process.Handle
@@ -791,7 +830,7 @@ while ($true) {
         if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
         Fail "o modelo $modelId nao conseguiu carregar: $message"
       }
-      { $_ -in 'mismatch', 'other-model', 'unhealthy' } {
+      { $_ -in 'mismatch', 'other-model', 'unhealthy', 'device-mismatch' } {
         if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
         Fail "a porta $Port respondeu com um servico ou modelo diferente durante a inicializacao."
       }
