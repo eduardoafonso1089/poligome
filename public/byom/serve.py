@@ -32,7 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 PORT = int(os.environ.get("PORT", "8080"))
 MODEL_DIR = os.environ.get("MODEL_DIR", "/opt/ml/model")
@@ -59,14 +59,21 @@ SEED_FACTOR = float(os.environ.get("SEED_FACTOR", "0.6"))
 def _decode_image(value: str) -> np.ndarray:
     if not isinstance(value, str) or not value:
         raise ValueError("o campo image é obrigatório")
-    payload = value.split(",", 1)[1] if value.startswith("data:") else value
+    payload = value
+    if value.startswith("data:"):
+        header, separator, payload = value.partition(",")
+        if not separator or not header.lower().startswith("data:image/") or not header.lower().endswith(";base64"):
+            raise ValueError("image deve ser um data URL de imagem em base64")
     try:
         blob = base64.b64decode(payload, validate=True)
     except (binascii.Error, ValueError) as error:
         raise ValueError(f"image não é base64 válido: {error}") from error
-    with Image.open(io.BytesIO(blob)) as handle:
-        handle.load()
-        return np.asarray(handle.convert("RGB"))
+    try:
+        with Image.open(io.BytesIO(blob)) as handle:
+            handle.load()
+            return np.asarray(handle.convert("RGB"))
+    except (UnidentifiedImageError, OSError) as error:
+        raise ValueError("image não contém uma imagem válida") from error
 
 
 MIN_REGION_AREA = 64
@@ -317,6 +324,10 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
         except ValueError:
             self._send_json(400, {"detail": "corpo não é JSON válido"})
+            return
+
+        if not isinstance(payload, dict):
+            self._send_json(400, {"detail": "corpo JSON deve ser um objeto com o campo image"})
             return
 
         try:
