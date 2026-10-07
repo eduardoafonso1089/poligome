@@ -8,6 +8,22 @@ export function ensureUnlabeledLabel(labels: Label[], name: string): Label[] {
   return [...labels, { id: UNLABELED_ID, name, color: "#929a95", key: "" }];
 }
 
+/** Keep geometry when its class is missing, including projects saved by older SAM flows. */
+export function normalizeAnnotationLabels(labels: Label[], annotations: EditorAnnotation[], name: string) {
+  const labelIds = new Set(labels.map((label) => label.id));
+  let recoveredAnnotations = 0;
+  const normalized = annotations.map((annotation) => {
+    if (annotation.label && labelIds.has(annotation.label)) return annotation;
+    recoveredAnnotations += 1;
+    return { ...annotation, label: UNLABELED_ID };
+  });
+  return {
+    labels: recoveredAnnotations || !labels.length ? ensureUnlabeledLabel(labels, name) : labels,
+    annotations: recoveredAnnotations ? normalized : annotations,
+    recoveredAnnotations,
+  };
+}
+
 export function reorderItemById<T extends { id: string }>(
   items: T[],
   sourceId: string,

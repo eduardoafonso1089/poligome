@@ -6,6 +6,7 @@ export type ThemeMode = "system" | "light" | "dark";
 export const SOURCE_URL = "https://github.com/eduardoafonso1089/poligome";
 
 const pt = {
+  projectClassesRecovered: "{n} anotação(ões) sem classe válida recuperada(s) em Sem label. Salve o projeto atualizado.",
     finishDrawing: "Concluir",
     multipleSelection: "Selecionar várias",
     touchDraw: "Toque para marcar pontos · dois dedos para mover e ampliar",
@@ -212,6 +213,7 @@ export type TranslationKey = keyof typeof pt;
 const translations: Record<Language, Record<TranslationKey, string>> = {
   pt,
   en: {
+    projectClassesRecovered: "{n} annotation(s) with a missing class recovered as Unlabeled. Save the updated project.",
     finishDrawing: "Finish",
     multipleSelection: "Select multiple",
     touchDraw: "Tap to place points · two fingers to pan and zoom",
@@ -413,6 +415,7 @@ fileMenu: "File", renameProject: "Rename project", projectImages: "images", proj
     convUnavailable: "The local converter is not running. Download and run",
   },
   fr: {
+    projectClassesRecovered: "{n} annotation(s) sans classe valide récupérée(s) dans Sans étiquette. Enregistrez le projet mis à jour.",
     finishDrawing: "Terminer",
     multipleSelection: "Sélection multiple",
     touchDraw: "Touchez pour placer des points · deux doigts pour déplacer et zoomer",
@@ -614,6 +617,7 @@ fileMenu: "Fichier", renameProject: "Renommer le projet", projectImages: "images
     convUnavailable: "Le convertisseur local ne tourne pas. Téléchargez et lancez",
   },
   es: {
+    projectClassesRecovered: "{n} anotación(es) sin clase válida recuperada(s) en Sin etiqueta. Guarda el proyecto actualizado.",
     finishDrawing: "Terminar",
     multipleSelection: "Selección múltiple",
     touchDraw: "Toque para añadir puntos · dos dedos para mover y ampliar",

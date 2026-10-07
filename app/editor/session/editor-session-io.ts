@@ -13,6 +13,7 @@ export type CanonicalProject = {
   layout?: ProjectLayout;
   objectUrls: string[];
   missingImages: number;
+  recoveredAnnotations?: number;
 };
 
 export async function openEditorProject(file: File, copy: Copy): Promise<CanonicalProject> {

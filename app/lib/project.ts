@@ -3,6 +3,7 @@ import { fill } from "./i18n";
 import type { Copy } from "./i18n";
 import type { Asset, Label } from "./types";
 import type { EditorAnnotation } from "../editor/models/annotation-model";
+import { normalizeAnnotationLabels } from "../editor/panels/panel-model";
 
 type PortableAsset = Omit<Asset, "src" | "local" | "runtimeRasterSource"> & { bundled_path?: string; source?: string };
 export type ProjectLayout = { leftPanelWidth: number; rightPanelWidth: number };
@@ -27,6 +28,7 @@ export type LoadedPoligomeProjectV4 = {
   layout?: ProjectLayout;
   objectUrls: string[];
   missingImages: number;
+  recoveredAnnotations: number;
 };
 
 function downloadBlob(name: string, blob: Blob) {
@@ -83,7 +85,7 @@ function validAnnotation(value: unknown): value is EditorAnnotation {
   return false;
 }
 
-function parseManifestV4(value: unknown, copy: Copy): ProjectManifestV4 {
+function parseManifestV4(value: unknown, copy: Copy): ProjectManifestV4 & { recoveredAnnotations: number } {
   if (!isObject(value) || value.format !== "poligome-project" || value.version !== 4 || value.coordinate_space !== "image-pixels") {
     throw new Error(copy.errProjectFormat);
   }
@@ -96,13 +98,13 @@ function parseManifestV4(value: unknown, copy: Copy): ProjectManifestV4 {
     (typeof item.bundled_path === "string" || typeof item.source === "string" || item.missing === true),
   );
   const labels = value.labels.filter((item): item is Label =>
-    isObject(item) && typeof item.id === "string" && typeof item.name === "string" && typeof item.color === "string" && typeof item.key === "string",
+    isObject(item) && typeof item.id === "string" && Boolean(item.id.trim()) && typeof item.name === "string" && typeof item.color === "string" && typeof item.key === "string",
   );
   const annotations = value.annotations.filter(validAnnotation);
-  if (!assets.length || !labels.length) throw new Error(copy.errProjectEmpty);
+  if (!assets.length) throw new Error(copy.errProjectEmpty);
 
   const assetIds = new Set(assets.map((item) => item.id));
-  const labelIds = new Set(labels.map((item) => item.id));
+  const normalized = normalizeAnnotationLabels(labels, annotations.filter((item) => assetIds.has(item.asset)), copy.unlabeled);
   return {
     format: "poligome-project",
     version: 4,
@@ -110,8 +112,9 @@ function parseManifestV4(value: unknown, copy: Copy): ProjectManifestV4 {
     project_name: value.project_name.trim() || copy.defaultProjectName,
     saved_at: typeof value.saved_at === "string" ? value.saved_at : new Date().toISOString(),
     assets,
-    labels,
-    annotations: annotations.filter((item) => assetIds.has(item.asset) && labelIds.has(item.label)),
+    labels: normalized.labels,
+    annotations: normalized.annotations,
+    recoveredAnnotations: normalized.recoveredAnnotations,
     layout: parseLayout(value.layout),
   };
 }
@@ -170,6 +173,7 @@ export async function savePoligomeProjectV4(
   layout?: ProjectLayout,
 ) {
   const zip = new JSZip();
+  const normalized = normalizeAnnotationLabels(labels, annotations, copy.unlabeled);
   const manifest: ProjectManifestV4 = {
     format: "poligome-project",
     version: 4,
@@ -177,8 +181,8 @@ export async function savePoligomeProjectV4(
     project_name: projectName.trim() || copy.defaultProjectName,
     saved_at: new Date().toISOString(),
     assets: portableAssets(assets),
-    labels,
-    annotations,
+    labels: normalized.labels,
+    annotations: normalized.annotations,
     layout: layout ? {
       left_panel_width: Math.round(layout.leftPanelWidth),
       right_panel_width: Math.round(layout.rightPanelWidth),
@@ -208,5 +212,6 @@ export async function openPoligomeProjectV4(file: File | Blob | ArrayBuffer | Ui
     } : undefined,
     objectUrls,
     missingImages: assets.filter((asset) => asset.missing).length,
+    recoveredAnnotations: manifest.recoveredAnnotations,
   };
 }

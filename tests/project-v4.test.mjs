@@ -3,6 +3,7 @@ import test from 'node:test';
 import JSZip from 'jszip';
 import { savePoligomeProjectV4, openPoligomeProjectV4 } from '../app/lib/project.ts';
 import { getCopy } from '../app/lib/i18n.ts';
+import { normalizeAnnotationLabels, UNLABELED_ID } from '../app/editor/panels/panel-model.ts';
 
 function installDownloadCapture() {
   const originalDocument=globalThis.document;
@@ -66,4 +67,61 @@ test('project V4 loader rejects V3 normalized manifests instead of migrating the
   }));
   const bytes=await zip.generateAsync({type:'uint8array'});
   await assert.rejects(()=>openPoligomeProjectV4(bytes,getCopy('en')));
+});
+
+const qaAsset={id:'a',name:'image.png',src:'data:image/png;base64,eA==',local:true,width:320,height:240};
+const samPolygon={id:'sam-mask',asset:'a',label:'',type:'polygon',holes:[],vertices:[{id:'v1',x:10,y:20},{id:'v2',x:100,y:20},{id:'v3',x:60,y:100}]};
+
+test('a SAM mask accepted without a class and saved in a fresh project reopens intact', async () => {
+  const capture=installDownloadCapture();
+  try {
+    const accepted=normalizeAnnotationLabels([], [samPolygon], getCopy('en').unlabeled);
+    assert.equal(accepted.annotations[0].label,UNLABELED_ID);
+    await savePoligomeProjectV4('SAM', [qaAsset], accepted.labels, accepted.annotations, getCopy('en'));
+    const loaded=await openPoligomeProjectV4(await capture.saved().arrayBuffer(),getCopy('en'));
+    assert.deepEqual(loaded.annotations,accepted.annotations);
+    assert.equal(loaded.labels[0].id,UNLABELED_ID);
+    assert.equal(loaded.recoveredAnnotations,0);
+    assert.equal(samPolygon.label,'');
+  } finally { capture.restore(); }
+});
+
+test('saving repairs orphaned references without modifying live annotations or losing geometry', async () => {
+  const capture=installDownloadCapture();
+  try {
+    await savePoligomeProjectV4('Legacy SAM', [qaAsset], [], [samPolygon], getCopy('pt'));
+    const loaded=await openPoligomeProjectV4(await capture.saved().arrayBuffer(),getCopy('pt'));
+    assert.equal(loaded.annotations.length,1);
+    assert.deepEqual(loaded.annotations[0].vertices,samPolygon.vertices);
+    assert.equal(loaded.annotations[0].label,UNLABELED_ID);
+    assert.equal(loaded.labels[0].name,getCopy('pt').unlabeled);
+    assert.equal(samPolygon.label,'');
+  } finally { capture.restore(); }
+});
+
+test('legacy projects recover empty and deleted SAM classes while preserving valid BYOM classes', async () => {
+  for (const labels of [[],[{id:'byom-class',name:'Region',color:'#00ff00',key:'1'}]]) {
+    const annotations=[samPolygon,{...samPolygon,id:'orphan-mask',label:'deleted-class'}];
+    if(labels.length)annotations.push({...samPolygon,id:'byom-mask',label:'byom-class'});
+    const zip=new JSZip();
+    zip.file('project.json',JSON.stringify({format:'poligome-project',version:4,coordinate_space:'image-pixels',project_name:'Legacy',assets:[{...qaAsset,missing:true}],labels,annotations}));
+    const loaded=await openPoligomeProjectV4(await zip.generateAsync({type:'uint8array'}),getCopy('en'));
+    assert.equal(loaded.annotations.length,annotations.length);
+    assert.equal(loaded.recoveredAnnotations,2);
+    assert.deepEqual(loaded.annotations.slice(0,2).map(a=>a.label),[UNLABELED_ID,UNLABELED_ID]);
+    assert.deepEqual(loaded.annotations.map(a=>a.vertices),annotations.map(a=>a.vertices));
+    if(labels.length)assert.equal(loaded.annotations[2].label,'byom-class');
+    assert.ok(loaded.labels.some(l=>l.id===UNLABELED_ID));
+  }
+});
+
+test('an image-only project without classes can be saved and reopened', async () => {
+  const capture=installDownloadCapture();
+  try {
+    await savePoligomeProjectV4('Images', [qaAsset], [], [], getCopy('en'));
+    const loaded=await openPoligomeProjectV4(await capture.saved().arrayBuffer(),getCopy('en'));
+    assert.equal(loaded.assets.length,1);
+    assert.equal(loaded.annotations.length,0);
+    assert.equal(loaded.recoveredAnnotations,0);
+  } finally { capture.restore(); }
 });

@@ -59,7 +59,7 @@ import type { PolygonAnnotation } from "../models/annotation-model";
 import { QualityReviewPanel } from "../review/quality-review-panel";
 import { setAssetReviewScore, setLabelReviewScore } from "../review/quality-review-model";
 import { EditorManagementPanels } from "../panels/editor-management-panels";
-import { createLabel as createPanelLabel, ensureUnlabeledLabel, moveItemById, recolorLabel, renameLabel, stackAnnotationsByLabel, UNLABELED_ID } from "../panels/panel-model";
+import { createLabel as createPanelLabel, ensureUnlabeledLabel, normalizeAnnotationLabels, moveItemById, recolorLabel, renameLabel, stackAnnotationsByLabel, UNLABELED_ID } from "../panels/panel-model";
 import { selectRange } from "../selection/selection-model";
 import { commandFromKeyboard, isEditableShortcutTarget, type VectorTool } from "../commands/editor-shortcuts";
 import { simplifyPolygonAnnotation, unionPolygonAnnotations } from "../geometry/vector-operations";
@@ -866,10 +866,13 @@ export function CanonicalEditorWorkbench() {
     // instalou o conector para ver. Quem chegou até aqui já passou do tutorial:
     // encerrá-lo sem repor as anotações da demo preserva a máscara.
     leaveDemoTutorial();
+    const normalized = normalizeAnnotationLabels(labelsRef.current, samPreviews, copy.unlabeled);
+    setLabels(normalized.labels);
+    if (!normalized.labels.some((label) => label.id === activeLabel)) setActiveLabel(UNLABELED_ID);
     editor.dispatch({
       type: "replace-annotations-batch",
       removeIds: [],
-      annotations: samPreviews,
+      annotations: normalized.annotations,
       selectIds: samPreviews.map((preview) => preview.id),
     });
     const total = samPreviews.length;
@@ -925,9 +928,9 @@ export function CanonicalEditorWorkbench() {
       editor.replaceAnnotations(loaded.annotations, true);
       resetTransientVisibility();
       resetDemoTutorial();
-      setSessionDirty(false);
+      setSessionDirty(Boolean(loaded.recoveredAnnotations));
       resetInteractionState();
-      setMessage(`${copy.projectOpened}: ${file.name}${loaded.missingImages ? ` · ${loaded.missingImages} ${copy.projectImagesNeedReload}` : ""}`);
+      setMessage(`${copy.projectOpened}: ${file.name}${loaded.recoveredAnnotations ? ` · ${fill(copy.projectClassesRecovered, { n: loaded.recoveredAnnotations })}` : ""}${loaded.missingImages ? ` · ${loaded.missingImages} ${copy.projectImagesNeedReload}` : ""}`);
     } catch (error) {
       setMessage(translateErrorCode(error, copy, copy.projectOpenError));
     } finally {
