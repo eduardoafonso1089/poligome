@@ -8,7 +8,7 @@ import { createEditorState, editorReducer } from '../app/editor/state/editor-sta
 import { requestSamPredictions } from '../app/lib/sam.ts';
 import { getCopy } from '../app/lib/i18n.ts';
 import { getAiCopy, aiFailureMessage } from '../app/lib/ai-copy.ts';
-import { ConnectionsPanel } from '../app/components/AiHubPanels.tsx';
+import { ConnectionsPanel, ContainerModelPanel } from '../app/components/AiHubPanels.tsx';
 import { render, text, buttons } from './helpers/render.mjs';
 import { box } from './helpers/editor-fixtures.mjs';
 import { QualityReviewPanel } from '../app/editor/review/quality-review-panel.tsx';
@@ -44,6 +44,13 @@ test('a connected service with a failed model offers recovery rather than announ
 test('runtime rejects image upload to a remote URL before sending any bytes', async () => {
   await assert.rejects(registerRuntimeImage('https://example.com', 'test', new Blob(['image'])), { code: 'invalid_endpoint' });
   assert.equal(await fetchRuntimeHealth('abc'), null);
+});
+
+test('a stopped BYOM shows the start command for the connector operating system', () => {
+  const model = { model_id: 'byom-example', name: 'Example', endpoint: 'http://localhost:8080', ready: false, env: {}, notes: '', metadata: null };
+  const props = { copy: getAiCopy('pt'), model, busy: false, onPreannotate() {}, onRemove() {}, onSave() {} };
+  assert.match(text(render(ContainerModelPanel, { ...props, commandOs: 'native' })), /powershell -ExecutionPolicy Bypass -File .\\poligome-byom-windows\.ps1 start -ModelId byom-example/);
+  assert.match(text(render(ContainerModelPanel, { ...props, commandOs: 'unix' })), /bash poligome-byom-macos-linux\.sh start --model-id byom-example/);
 });
 
 test('SAM rejects a saved remote endpoint before preparing or sending an image', async () => {

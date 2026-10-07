@@ -220,6 +220,7 @@ function describeContainer(copy: AiCopy, model: ByomModel): string {
 }
 
 type ContainerModelPanelProps = {
+  commandOs?: "native" | "unix";
   copy: AiCopy;
   model: ByomModel;
   busy: boolean;
@@ -234,7 +235,7 @@ export function ContainerModelPanel(props: ContainerModelPanelProps) {
   return <ContainerModelForm key={formKey} {...props} />;
 }
 
-function ContainerModelForm({ copy, model, busy, onPreannotate, onRemove, onSave }: ContainerModelPanelProps) {
+function ContainerModelForm({ copy, model, busy, commandOs = "unix", onPreannotate, onRemove, onSave }: ContainerModelPanelProps) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(model.name);
   const [port, setPort] = useState(String(Number(model.endpoint.split(":").at(-1)) || 8080));
@@ -261,7 +262,9 @@ function ContainerModelForm({ copy, model, busy, onPreannotate, onRemove, onSave
       <AlertTriangle size={15} />
       <div>
         <b>{copy.containerStoppedHint}</b>
-        <code>{`bash poligome-byom-macos-linux.sh start --model-id ${model.model_id}`}</code>
+        <code>{commandOs === "native"
+          ? `powershell -ExecutionPolicy Bypass -File .\\poligome-byom-windows.ps1 start -ModelId ${model.model_id}`
+          : `bash poligome-byom-macos-linux.sh start --model-id ${model.model_id}`}</code>
         {model.unavailable_reason && <details><summary>{copy.containerErrorDetail}</summary><p>{model.unavailable_reason}</p></details>}
       </div>
     </section>}

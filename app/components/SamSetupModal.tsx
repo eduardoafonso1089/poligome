@@ -580,6 +580,7 @@ export default function SamSetupModal({
             />
             : automaticView === "container" && viewedContainer ? <ContainerModelPanel
               copy={ai}
+              commandOs={connectorHost?.host === "Windows" ? "native" : connectorHost?.host ? "unix" : preferredInstallOs()}
               model={viewedContainer}
               busy={byomBusy}
               onPreannotate={onPreannotate}
