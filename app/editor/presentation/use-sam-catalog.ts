@@ -104,6 +104,8 @@ export function useSamCatalog(active: boolean) {
 
   const setEndpoint = useCallback((value: string) => {
     const normalized = normalizeSamEndpoint(value);
+    writeStored(ENDPOINT_KEY, normalized);
+    if (normalized === endpoint) return;
     latest.current += 1;
     switching.current = false;
     setLoadedModelId(null);
@@ -113,8 +115,7 @@ export function useSamCatalog(active: boolean) {
     setByomModels([]);
     setConnectionState("checking");
     setEndpointState(normalized);
-    writeStored(ENDPOINT_KEY, normalized);
-  }, []);
+  }, [endpoint]);
 
   const setSelectedModelId = useCallback((value: string) => {
     setSelectedModelIdState(value);

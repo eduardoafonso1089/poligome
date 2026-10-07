@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
-import { localEndpointError } from "../lib/local-endpoint";
+import { localEndpointError, normalizeSamEndpoint } from "../lib/local-endpoint";
 import {
   AlertTriangle, Boxes, Check, Cpu, Gauge, Layers, Pencil, RefreshCw, Server, ShieldCheck, Sparkles, Trash2, ScanSearch,
 } from "lucide-react";
@@ -318,13 +318,18 @@ function ContainerModelForm({ copy, model, busy, commandOs = "unix", onPreannota
  * Gravar a cada tecla disparava uma sondagem por letra, e cada uma espera
  * segundos por uma porta que ainda está pela metade.
  */
-function EndpointField({ copy, value, placeholder, onCommit, onValidityChange }: { copy: AiCopy; value: string; placeholder: string; onCommit: (value: string) => void; onValidityChange: (valid: boolean) => void }) {
+function EndpointField({ copy, value, placeholder, normalize, onCommit, onValidityChange }: { copy: AiCopy; value: string; placeholder: string; normalize?: (value: string) => string; onCommit: (value: string) => void; onValidityChange: (valid: boolean) => void }) {
   const [draftState, setDraft] = useState({ source: value, text: value });
   const draft = draftState.source === value ? draftState.text : value;
   const errorId = useId();
   const reason = localEndpointError(draft);
   useEffect(() => { onValidityChange(!localEndpointError(value)); }, [value, onValidityChange]);
-  const commit = () => { const next = draft.trim(); if (!localEndpointError(next) && next !== value) onCommit(next); };
+  const commit = () => {
+    const next = normalize ? normalize(draft) : draft.trim();
+    if (localEndpointError(next)) return;
+    setDraft({ source: value, text: next });
+    if (next !== value) onCommit(next);
+  };
   return <label className="ai-conn-address">{copy.connAddress}<input
     type="url" value={draft} placeholder={placeholder} spellCheck={false}
     aria-invalid={Boolean(reason)} aria-describedby={reason ? errorId : undefined}
@@ -370,7 +375,7 @@ export function ConnectionsPanel({
         : connector.state === "ready" && <p className="ai-conn-detail">{fill(copy.connServing, { model: connector.serving })}{connector.host ? ` · ${fill(copy.connHost, { host: connector.host })}` : ""}</p>}
       {connector.state === "offline" && <p className="ai-conn-detail">{copy.connConnectorHow}</p>}
       <div className="ai-conn-row">
-        <EndpointField copy={copy} value={connector.endpoint} placeholder="http://127.0.0.1:7860/predict" onCommit={connector.onEndpoint} onValidityChange={setConnectorAddressValid} />
+        <EndpointField copy={copy} value={connector.endpoint} placeholder="http://127.0.0.1:7860/predict" normalize={normalizeSamEndpoint} onCommit={connector.onEndpoint} onValidityChange={setConnectorAddressValid} />
         <button disabled={!connectorAddressValid} onClick={connector.onRetry}><RefreshCw size={13} />{copy.connRetry}</button>
         {connector.state === "offline" && <button className="primary" onClick={onShowInstall}>{copy.connConnectorHowButton}</button>}
       </div>

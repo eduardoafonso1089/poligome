@@ -137,6 +137,13 @@ try {
   const activateSam=async page=>{await page.getByRole("button",{name:"Segmentar com SAM (S)",exact:true}).click();await expect(page.locator(".sam-controls").getByRole("button",{name:"Caixa",exact:true})).toBeVisible()};
   const samPoint=async(page,dx=0)=>{const b=await page.locator(".stage svg").first().boundingBox();assert.ok(b);await page.mouse.click(b.x+b.width*.45+dx,b.y+b.height*.45)};
   const saveSam=page=>page.locator(".sam-controls").getByRole("button",{name:/Salvar e editar/});
+  await check("SAM equivalent base URL preserves ready connection and routes inference to predict",{},async({page,state})=>{
+    const d=await hub(page);await d.getByRole("tab",{name:/Conexões/}).click();
+    const card=d.locator(".ai-conn-card").first();await expect(card.getByText("Conectado",{exact:true})).toBeVisible();
+    const address=card.getByRole("textbox",{name:/^Endereço/});await address.fill("http://127.0.0.1:7860");await address.press("Enter");
+    await expect(address).toHaveValue("http://127.0.0.1:7860/predict");await expect(card.getByText("Conectado",{exact:true})).toBeVisible();
+    await close(d);await activateSam(page);await samPoint(page);await expect(saveSam(page)).toBeEnabled();expect(state.samCalls).toBe(1);
+  });
   await check("SAM point proposal saves explicitly and Undo preserves manual work",{},async({page,state})=>{
     const before=await count(page);await activateSam(page);await samPoint(page);await expect(saveSam(page)).toBeEnabled();expect(state.lastSam.point_labels).toEqual([1]);expect(await count(page)).toBe(before);
     await saveSam(page).click();await expect.poll(()=>count(page)).toBe(before+1);await page.getByRole("button",{name:"Desfazer",exact:true}).click();await expect.poll(()=>count(page)).toBe(before);
