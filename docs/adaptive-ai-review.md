@@ -148,9 +148,26 @@ ou de desempenho em outro domínio. Os cliques são simulados. Dados extraídos
 de [adaptive-ai-review-main.json](adaptive-ai-review-main.json), sem incorporar
 números do experimento anterior.
 
-O candidato já foi treinado e comparado; a curva de aprendizado complementar
-continua em execução. Os experimentos `half`, `overfit` e `encoder` serão
-registrados somente quando houver seus resultados efetivos.
+A rodada principal e sua curva complementar foram concluídas. Os pontos
+medidos da curva foram:
+
+| Grupos de gradiente | Dice no mesmo holdout |
+| --- | --- |
+| 0 | 73.9% |
+| 2 | 81.3% |
+| 5 | 84.1% |
+| 8 | 85.4% |
+| 10 | 86.6% |
+
+A extrapolação para 20 grupos foi de 87,9%, com faixa exploratória do ajuste
+86,1–89,7%. Isso não mede a variância entre sementes nem garante desempenho
+com novas imagens.
+
+O ambiente reiniciou durante os experimentos complementares: `half` foi
+interrompido e `overfit`/`encoder` não produziram resultados completos nesta
+revisão. Métricas parciais não foram tratadas como resultados finais. Para
+continuar sem refazer a rodada principal, preserve o diretório de resultados
+e rode `--only half overfit encoder` com o mesmo checkpoint e dispositivo.
 
 ## SAM 3 com o checkpoint local
 

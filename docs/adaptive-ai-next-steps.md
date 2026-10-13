@@ -15,6 +15,9 @@ funciona e foi validado com o SAM 2.1 Tiny pré-treinado (ver
 
 ## Revisão de UI/UX e metodologia
 
+A nova rodada principal terminou; os dados auditáveis estão em
+[adaptive-ai-review-main.json](adaptive-ai-review-main.json). Os experimentos
+complementares foram interrompidos quando o ambiente reiniciou.
 Veja [adaptive-ai-review.md](adaptive-ai-review.md). O painel apresenta evidências
 e deixa a escolha com o usuário; não declara convergência nem generalização.
 O experimento `half` agora preserva a validação interna e reduz somente os
