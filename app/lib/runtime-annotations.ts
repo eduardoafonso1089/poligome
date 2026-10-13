@@ -278,6 +278,19 @@ function predictionGeometry(annotation: EditorAnnotation): string {
   return JSON.stringify(geometry);
 }
 
+/**
+ * Uma predição automática que ninguém tocou: a geometria ainda é a que o modelo
+ * devolveu. É o que separa "o modelo disse" de "uma pessoa conferiu" — o Adaptive
+ * AI não treina com a primeira.
+ */
+export function isUntouchedPrediction(annotation: EditorAnnotation): boolean {
+  if (typeof annotation.prediction?.geometry !== "string") return false;
+  // Dar nota não é editar: a nota entra na assinatura guardada, mas não muda a forma.
+  const { reviewScore, ...unrated } = annotation;
+  void reviewScore;
+  return annotation.prediction.geometry === predictionGeometry(unrated as EditorAnnotation);
+}
+
 export function markRuntimePredictions(annotations: readonly EditorAnnotation[], source: string): EditorAnnotation[] {
   return annotations.map((annotation) => ({ ...annotation, prediction: {
     source, geometry: predictionGeometry(annotation), bounds: editorEnvelope(annotation),

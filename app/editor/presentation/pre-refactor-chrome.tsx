@@ -17,6 +17,7 @@ import SamSetupModal, { type AiHubTab } from "../../components/SamSetupModal";
 import { useSamCatalog } from "./use-sam-catalog";
 import { useRuntimeStatus } from "./use-runtime-status";
 import { PREANNOTATE_EVENT, PreannotateDialog } from "./pre-annotate-dialog";
+import type { AdaptiveProject } from "../../components/AdaptiveAiPanel";
 
 const demoGuide = {
   pt: ["Selecione a ferramenta Caixa", "Clique na ferramenta destacada para começar."],
@@ -36,6 +37,8 @@ function ToolButton({ title, keyHint, active, disabled, onClick, children, class
 }
 
 export type PreRefactorChromeProps = {
+  /** O projeto como o Adaptive AI precisa: imagens, classes e anotações. */
+  adaptiveProject?: AdaptiveProject;
   projectName: string; assetsCount: number; annotationsCount: number; language: Language; loading: boolean; dirty: boolean; hasAsset: boolean; hasAssets: boolean; imageIndex: number; zoom: number; tool: DrawingTool; vectorTool: VectorTool; snapEnabled: boolean; touchMode: boolean; addToSelection: boolean; coordinatesGuide: boolean; canFinishDraft: boolean; canRemoveDraftPoint: boolean; hasDraft: boolean; canSimplify: boolean; canDuplicate: boolean; canMerge: boolean; canEditPolygon: boolean; canUndo: boolean; canRedo: boolean; hasSelection: boolean; selectionIsBox: boolean; imagePixels: number; preannotating: boolean; strokePx: number; statusMessage: string; fileMenuExtras?: ReactNode;
   onHome: () => void; onNewProject: () => void; onRenameProject: (name: string) => void; onDemo: () => void; onOpenProject: () => void; onImportImages: () => void; onSaveProject: () => void; onLanguageChange: (language: Language) => void; onSamSettings?: () => void; onTool: (tool: DrawingTool) => void; onVectorTool: (tool: VectorTool) => void; onSimplify: () => void; onDuplicate: () => void; onMerge: () => void; onToggleSnap: () => void; onToggleCoordinatesGuide: () => void; onToggleMultiSelect: () => void; onFinishDrawing: () => void; onRemoveLastPoint: () => void; onCancelDrawing: () => void; onUndo: () => void; onRedo: () => void; onDelete: () => void; onClearAnnotations: () => void; onSelectAllAnnotations: () => void; onStrokeChange: (value: number) => void; onZoomOut: () => void; onZoomIn: () => void; onFit: () => void; onPreviousImage: () => void; onNextImage: () => void; onOpenImagesPanel?: () => void; onOpenRightPanel?: () => void;
 };
@@ -95,6 +98,7 @@ export function PreRefactorTopbar(props: PreRefactorChromeProps) {
       onRecheckConnector={catalog.recheck}
       onConnect={() => { void catalog.connect().then((ok) => { if (ok) setHubTab(null); }); }}
       onClose={() => setHubTab(null)}
+      adaptiveProject={props.adaptiveProject ?? null}
     />}
     {preannotate && <PreannotateDialog
       language={props.language}

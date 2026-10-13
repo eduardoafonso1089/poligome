@@ -10,6 +10,7 @@ import { translateErrorCode } from "../../lib/error-message";
 import type { EditorAnnotation } from "../models/annotation-model";
 import type { BoxCorner } from "../layers/box-layer";
 import { createEditorDemo, openEditorProject, saveEditorProject } from "../session/editor-session-io";
+import { newAdaptiveProjectId } from "../../lib/adaptive-dataset";
 import { loadLocalImageAssets, relinkMissingAssets } from "../session/image-assets";
 import { CocoImportControl, type CocoImportHandle } from "../import/coco-import-control";
 import { RasterImportControl, type RasterImportResult } from "../import/raster-import-control";
@@ -130,6 +131,10 @@ export function CanonicalEditorWorkbench() {
   // também: ler o idioma salvo aqui quebrava a hidratação em en/fr/es. O nome
   // padrão acompanha o idioma salvo no efeito de montagem, junto com o resto.
   const [projectName, setProjectName] = useState(() => getCopy("pt").newProject);
+  // Identidade do projeto no Adaptive AI do conector local. Vai no .plgm para
+  // que reabrir o projeto reencontre os dados e as rodadas de treino dele; um
+  // projeto novo, ou um arquivo antigo, ganha uma identidade nova.
+  const [adaptiveProjectId, setAdaptiveProjectId] = useState(() => newAdaptiveProjectId());
   const [language, setLanguage] = useState<Language>("pt");
   const [strokePx, setStrokePx] = useState(1);
   const [hiddenAnnotationIds, setHiddenAnnotationIds] = useState<Set<string>>(() => new Set());
@@ -331,6 +336,7 @@ export function CanonicalEditorWorkbench() {
     setActiveLabel("");
     setCurrent("");
     setProjectName(copy.newProject);
+    setAdaptiveProjectId(newAdaptiveProjectId());
     editor.replaceAnnotations([], true);
     resetTransientVisibility();
     resetDemoTutorial();
@@ -355,6 +361,7 @@ export function CanonicalEditorWorkbench() {
       setActiveLabel(demo.labels[0]?.id ?? EMPTY_LABELS[0].id);
       setCurrent(demo.assets[0]?.id ?? "");
       setProjectName(demo.name);
+      setAdaptiveProjectId(newAdaptiveProjectId());
       demoAnnotationsRef.current = demo.annotations;
       editor.replaceAnnotations([], true);
       resetTransientVisibility();
@@ -932,6 +939,7 @@ export function CanonicalEditorWorkbench() {
       setActiveLabel((loaded.labels[0] ?? EMPTY_LABELS[0]).id);
       setCurrent(loaded.assets.find((item) => !item.missing)?.id ?? loaded.assets[0]?.id ?? "");
       setProjectName(loaded.projectName);
+      setAdaptiveProjectId(loaded.adaptiveProjectId ?? newAdaptiveProjectId());
       editor.replaceAnnotations(loaded.annotations, true);
       resetTransientVisibility();
       resetDemoTutorial();
@@ -1283,7 +1291,7 @@ export function CanonicalEditorWorkbench() {
     if (!assets.length) return;
     setLoading(true);
     try {
-      const name = await saveEditorProject(projectName, assets, labels, editor.annotations, copy);
+      const name = await saveEditorProject(projectName, assets, labels, editor.annotations, copy, undefined, adaptiveProjectId);
       editor.markSaved();
       setSessionDirty(false);
       setMessage(`${copy.projectSaved}: ${name}`);
@@ -1525,8 +1533,14 @@ export function CanonicalEditorWorkbench() {
     }
   }
 
+  const adaptiveProject = useMemo(
+    () => ({ id: adaptiveProjectId, name: projectName, assets, labels, annotations: editor.annotations }),
+    [adaptiveProjectId, projectName, assets, labels, editor.annotations],
+  );
+
   const chromeProps = {
     projectName,
+    adaptiveProject,
     assetsCount: assets.length,
     annotationsCount: editor.annotations.length,
     language,

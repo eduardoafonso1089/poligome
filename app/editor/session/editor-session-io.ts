@@ -11,6 +11,7 @@ export type CanonicalProject = {
   labels: Label[];
   annotations: EditorAnnotation[];
   layout?: ProjectLayout;
+  adaptiveProjectId?: string;
   objectUrls: string[];
   missingImages: number;
   recoveredAnnotations?: number;
@@ -20,8 +21,8 @@ export async function openEditorProject(file: File, copy: Copy): Promise<Canonic
   return openPoligomeProjectV4(file, copy);
 }
 
-export async function saveEditorProject(projectName: string, assets: Asset[], labels: Label[], annotations: EditorAnnotation[], copy: Copy, layout?: ProjectLayout) {
-  return savePoligomeProjectV4(projectName, assets, labels, annotations, copy, layout);
+export async function saveEditorProject(projectName: string, assets: Asset[], labels: Label[], annotations: EditorAnnotation[], copy: Copy, layout?: ProjectLayout, adaptiveProjectId?: string) {
+  return savePoligomeProjectV4(projectName, assets, labels, annotations, copy, layout, adaptiveProjectId);
 }
 
 export async function createEditorDemo(language: Language) {

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { containModalFocus } from "../lib/modal-focus";
 import {
   AlertTriangle, Check, Cpu, Download, ExternalLink, Gauge, HardDrive,
-  KeyRound, Laptop, Layers, Link2, Network, Plus, PowerOff, ScanSearch, Server, ShieldCheck, Sparkles, Terminal, WandSparkles, X,
+  BrainCircuit, KeyRound, Laptop, Layers, Link2, Network, Plus, PowerOff, ScanSearch, Server, ShieldCheck, Sparkles, Terminal, WandSparkles, X,
 } from "lucide-react";
 import { fill, type Language } from "../lib/i18n";
 import { getAiCopy } from "../lib/ai-copy";
@@ -17,13 +17,18 @@ import type { RuntimeManifest } from "../lib/runtime-client";
 import {
   AutomaticGuidePanel, ConnectionsPanel, ContainerModelPanel, HowItWorksPanel, RuntimeModelPanel,
 } from "./AiHubPanels";
+import { AdaptiveAiPanel, type AdaptiveProject } from "./AdaptiveAiPanel";
+import { getAdaptiveCopy } from "../lib/adaptive-copy";
 
 type ConnectionState = "idle" | "checking" | "loading" | "ready" | "error" | "offline";
 
 type ByomWriteOutcome = { ok: true } | { ok: false; detail: string };
 
-/** As três abas da central: como a pessoa usa a IA, e não como ela roda. */
-export type AiHubTab = "assisted" | "automatic" | "connections";
+/**
+ * As abas da central: como a pessoa usa a IA, e não como ela roda. Adaptive AI
+ * é a quarta: ajustar o SAM do Assistido aos dados do projeto.
+ */
+export type AiHubTab = "assisted" | "automatic" | "connections" | "adaptive";
 
 type Props = {
   language?: Language;
@@ -62,6 +67,8 @@ type Props = {
   onRecheckConnector: () => void;
   onConnect: () => void;
   onClose: () => void;
+  /** O projeto aberto, para o Adaptive AI ler as anotações aprovadas. */
+  adaptiveProject?: AdaptiveProject | null;
 };
 
 /**
@@ -317,6 +324,7 @@ export default function SamSetupModal({
   onRecheckConnector,
   onConnect,
   onClose,
+  adaptiveProject = null,
 }: Props) {
   const ai = getAiCopy(language);
   const sc = getSamCopy(language);
@@ -466,6 +474,7 @@ export default function SamSetupModal({
           ["assisted", WandSparkles, ai.tabAssisted, ai.tabAssistedHint],
           ["automatic", ScanSearch, ai.tabAutomatic, ai.tabAutomaticHint],
           ["connections", Network, ai.tabConnections, ai.tabConnectionsHint],
+          ["adaptive", BrainCircuit, getAdaptiveCopy(language).tab, getAdaptiveCopy(language).tabHint],
         ] as const).map(([key, Icon, label, hint]) => <button
           key={key}
           role="tab"
@@ -475,7 +484,7 @@ export default function SamSetupModal({
         ><Icon size={16} /><span><b>{label}</b><small>{hint}</small></span></button>)}
       </nav>
 
-      <div className={`sam-catalog-body${tab === "connections" ? " single" : ""}`}>
+      <div className={`sam-catalog-body${tab === "connections" || tab === "adaptive" ? " single" : ""}`}>
         {tab === "assisted" && <aside className="sam-model-list" aria-label={ai.modelsList}>
           <section>
             <h3>{ai.listStartHere}</h3>
@@ -547,7 +556,8 @@ export default function SamSetupModal({
         </aside>}
 
         <div className="sam-model-detail" key={`${tab}-${automaticView}`}>
-          {tab === "connections" ? <ConnectionsPanel
+          {tab === "adaptive" ? <AdaptiveAiPanel language={language} endpoint={endpoint} project={adaptiveProject} />
+          : tab === "connections" ? <ConnectionsPanel
             copy={ai}
             connector={{
               state: connectionState === "ready" || connectionState === "loading" || connectionState === "error" ? "ready" : connectionState === "offline" ? "offline" : "checking",
