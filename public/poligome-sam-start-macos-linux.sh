@@ -350,7 +350,7 @@ runtime_is_complete() {
     sam3)
       # Sem triton (torch de CPU), sam3.model.edt não importa; o conector usa o
       # mesmo substituto. Ver SAM3_TRITON_SHIM no instalador.
-      if ! "$PYTHON" -c "import importlib.util, sys, types; importlib.util.find_spec('triton') or sys.modules.setdefault('sam3.model.edt', types.SimpleNamespace(edt_triton=None)); import cv2, fastapi, huggingface_hub, pkg_resources, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model" >/dev/null 2>&1; then
+      if ! "$PYTHON" -c "import importlib.util, sys, types; importlib.util.find_spec('triton') or sys.modules.setdefault('sam3.model.edt', types.SimpleNamespace(edt_triton=None)); import cv2, fastapi, huggingface_hub, pkg_resources, torch, uvicorn; from skimage.measure import label; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model" >/dev/null 2>&1; then
         REPAIR_REASON="dependências profundas do runtime SAM 3 estão incompletas"
         return 1
       fi

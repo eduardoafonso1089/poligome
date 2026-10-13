@@ -44,7 +44,7 @@ $POLIGOME_SAM_INSTALLER_API = 2
 
 $DefaultSiteUrl = 'https://poligome.com'
 $DefaultAssetBaseUrl = 'https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public'
-$DefaultConnectorSha256 = '425bfd7971613df72af4ec760f0aa03cd96ef9d14fefdf37c58894909d44c9b0'
+$DefaultConnectorSha256 = '9133fe0081090589bed9b86965d7c2efd8e613267b987896f793420445d0f6af'
 
 $SiteUrl = if ($env:POLIGOME_SITE_URL) { $env:POLIGOME_SITE_URL.TrimEnd('/') } else { $DefaultSiteUrl }
 $AssetBaseUrl = if ($env:POLIGOME_ASSET_BASE_URL) { $env:POLIGOME_ASSET_BASE_URL.TrimEnd('/') } else { $DefaultAssetBaseUrl }
@@ -55,7 +55,7 @@ $VenvsDir = Join-Path $AppDir 'venvs'
 $ModelsDir = Join-Path $AppDir 'models'
 $Connector = Join-Path $AppDir 'poligome-sam-local.py'
 $AdaptiveModule = Join-Path $AppDir 'poligome-sam-adaptive.py'
-$DefaultAdaptiveSha256 = '0fbb5b209028d627af8d2ad8f10d9c1bc3287c704c716f13d5c9cfb14324bbd6'
+$DefaultAdaptiveSha256 = '7867bc705d15bcae54c3096cca45ba1b029def4d8c0bbedc37ee18ffeefcbac2'
 $SelectedModelFile = Join-Path $AppDir 'selected-model.txt'
 $PendingModelFile = Join-Path $AppDir 'pending-model.txt'
 $Port = 7860
@@ -402,7 +402,7 @@ function Install-Runtime([string] $Family, [string] $VenvDir, [string] $VenvPyth
   # dele existir. O marcador é só atalho: perdê-lo não pode custar ao usuário o
   # download do PyTorch de novo, que foi o que aconteceu aqui.
   $probe = if ($Family -eq 'sam3') {
-    $base = "$Sam3TritonShim; import cv2, fastapi, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model"
+    $base = "$Sam3TritonShim; import cv2, fastapi, torch, uvicorn; from skimage.measure import label; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model"
     # Um torch CUDA tambem roda em CPU, entao serve a quem escolheu CPU. O
     # contrario nao: quem quer a GPU com um torch de CPU precisa reinstalar.
     if ($Device -eq 'cpu') { $base } else { "$base; raise SystemExit(0 if torch.version.cuda else 1)" }
@@ -437,7 +437,7 @@ function Install-Runtime([string] $Family, [string] $VenvDir, [string] $VenvPyth
     if ($LASTEXITCODE -ne 0) { Fail 'falha ao instalar o pacote oficial do SAM 3.' }
     # A revisao oficial usa estes pacotes no import principal mas os declara
     # apenas como extras, ou nao os declara.
-    & $VenvPython -m pip install fastapi uvicorn pillow einops huggingface_hub psutil pycocotools 'opencv-python-headless<4.12' 'numpy<2'
+    & $VenvPython -m pip install fastapi uvicorn pillow einops huggingface_hub psutil pycocotools 'scikit-image==0.25.2' 'opencv-python-headless<4.12' 'numpy<2'
   } else {
     & $VenvPython -m pip install --upgrade setuptools
     & $VenvPython -m pip install 'torch>=2.5.1' 'torchvision>=0.20.1'
@@ -458,7 +458,7 @@ function Install-Runtime([string] $Family, [string] $VenvDir, [string] $VenvPyth
 
   Write-Host "Verificando imports do runtime $Family..."
   $verify = if ($Family -eq 'sam3') {
-    "$Sam3TritonShim; import cv2, fastapi, huggingface_hub, pkg_resources, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model"
+    "$Sam3TritonShim; import cv2, fastapi, huggingface_hub, pkg_resources, torch, uvicorn; from skimage.measure import label; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model"
   } else {
     'import cv2, fastapi, torch, uvicorn; from sam2.build_sam import build_sam2; from sam2.sam2_image_predictor import SAM2ImagePredictor'
   }

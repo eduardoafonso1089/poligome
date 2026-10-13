@@ -6,8 +6,8 @@ POLIGOME_SAM_INSTALLER_API=2
 DEFAULT_SITE_URL="https://poligome.com"
 DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 DEFAULT_CONNECTOR_URL="${DEFAULT_ASSET_BASE_URL}/poligome-sam-local.py"
-DEFAULT_CONNECTOR_SHA256="425bfd7971613df72af4ec760f0aa03cd96ef9d14fefdf37c58894909d44c9b0"
-DEFAULT_ADAPTIVE_SHA256="0fbb5b209028d627af8d2ad8f10d9c1bc3287c704c716f13d5c9cfb14324bbd6"
+DEFAULT_CONNECTOR_SHA256="9133fe0081090589bed9b86965d7c2efd8e613267b987896f793420445d0f6af"
+DEFAULT_ADAPTIVE_SHA256="7867bc705d15bcae54c3096cca45ba1b029def4d8c0bbedc37ee18ffeefcbac2"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE_URL="${POLIGOME_SITE_URL:-${DEFAULT_SITE_URL}}"
 SITE_URL="${SITE_URL%/}"
@@ -692,16 +692,16 @@ install_runtime() {
 
   if [[ "$FAMILY" == "sam3" && -f "$ready_file" ]] &&
     { ! hf_available ||
-      ! "$PYTHON" -c 'import einops, huggingface_hub, pkg_resources, psutil, pycocotools' >/dev/null 2>&1; }; then
+      ! "$PYTHON" -c 'import einops, huggingface_hub, pkg_resources, psutil, pycocotools; from skimage.measure import label' >/dev/null 2>&1; }; then
     printf 'Completando dependências de runtime omitidas pelo pacote oficial do SAM 3...\n'
-    "$PYTHON" -m pip install --upgrade "setuptools<81" einops huggingface_hub psutil pycocotools
+    "$PYTHON" -m pip install --upgrade "setuptools<81" einops huggingface_hub psutil pycocotools "scikit-image==0.25.2" "numpy<2"
   fi
 
   if [[ -f "$ready_file" ]]; then
     if "$PYTHON" -c 'import cv2, fastapi, torch, uvicorn' >/dev/null 2>&1; then
       case "$FAMILY" in
         sam2) "$PYTHON" -c 'from sam2.build_sam import build_sam2; from sam2.sam2_image_predictor import SAM2ImagePredictor' >/dev/null 2>&1 && return 0 ;;
-        sam3) "$PYTHON" -c "${SAM3_TRITON_SHIM}; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model" >/dev/null 2>&1 && return 0 ;;
+        sam3) "$PYTHON" -c "${SAM3_TRITON_SHIM}; from skimage.measure import label; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model" >/dev/null 2>&1 && return 0 ;;
       esac
     fi
   fi
@@ -734,13 +734,13 @@ install_runtime() {
       "$PYTHON" -m pip install "https://github.com/facebookresearch/sam3/archive/${SAM3_REVISION}.zip"
       # A revisão oficial usa estes pacotes no import principal, mas os declara
       # somente como extras (ou não os declara) no pyproject.
-      "$PYTHON" -m pip install fastapi uvicorn pillow einops huggingface_hub psutil pycocotools "opencv-python-headless<4.12" "numpy<2"
+      "$PYTHON" -m pip install fastapi uvicorn pillow einops huggingface_hub psutil pycocotools "scikit-image==0.25.2" "opencv-python-headless<4.12" "numpy<2"
       ;;
   esac
   printf 'Verificando imports do runtime %s...\n' "$FAMILY"
   case "$FAMILY" in
     sam2) "$PYTHON" -c 'import cv2, fastapi, torch, uvicorn; from sam2.build_sam import build_sam2; from sam2.sam2_image_predictor import SAM2ImagePredictor' ;;
-    sam3) "$PYTHON" -c "${SAM3_TRITON_SHIM}; import cv2, fastapi, huggingface_hub, pkg_resources, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model" ;;
+    sam3) "$PYTHON" -c "${SAM3_TRITON_SHIM}; import cv2, fastapi, huggingface_hub, pkg_resources, torch, uvicorn; from skimage.measure import label; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model" ;;
   esac || fail "as dependências da família ${FAMILY} foram instaladas, mas o teste de importação acima falhou."
   touch "$ready_file"
 }

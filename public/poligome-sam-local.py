@@ -2192,6 +2192,17 @@ def predict(payload: PredictionRequest):
             decoded = decode_image(payload.image)
             height, width = decoded.pixels.shape[:2]
             prompts = _validate_prompts(payload, width, height)
+            # Snapshot the effective model while inference still owns the lock.
+            # SAM 3 concept prompts use its separate, unadapted text decoder.
+            prediction_adapter = None
+            prediction_fingerprint = None
+            if _adaptive_service is not None:
+                active = _adaptive_service.active_summary()
+                if active is not None and not (adapter.spec.family == "sam3" and prompts.text is not None):
+                    prediction_adapter = dict(active)
+                live = _adaptive_service.get_live_model()
+                if live is not None and live.model is getattr(adapter, "model", None):
+                    prediction_fingerprint = _adaptive_service.fingerprint(live)
             if prompts.text is not None and "text" not in adapter.spec.capabilities:
                 raise HTTPException(
                     status_code=400,
@@ -2292,7 +2303,9 @@ def predict(payload: PredictionRequest):
         "reused_embedding": reused_embedding,
         "model_id": adapter.spec.model_id,
         "family": adapter.spec.family,
-        "adapter": _adaptive_service.active_summary() if _adaptive_service is not None else None,
+        "adapter": prediction_adapter,
+        "device": adapter.device,
+        "model_fingerprint": prediction_fingerprint,
         "raw_prediction_count": raw_prediction_count,
         "predictions_truncated": predictions_truncated,
         "prediction_limit": MAX_SAM3_PREDICTIONS
