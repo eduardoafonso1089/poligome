@@ -631,6 +631,7 @@ class FailureTests(unittest.TestCase):
         harness.fill(self.project)
         run = harness.service.start_training(self.project, dict(FAST, max_epochs=200, patience=100))
         try:
+            self.assertTrue(harness.service.training_active())
             with self.assertRaises(adaptive.AdaptiveError) as caught:
                 harness.service.start_training(self.project, FAST)
             self.assertEqual(caught.exception.code, "training_busy")
@@ -664,6 +665,21 @@ class FailureTests(unittest.TestCase):
         self.assertEqual(record["epochs_run"], 3)
         self.assertTrue(record["diagnosis"]["no_improvement_over_base"])
         self.assertNotEqual(record["comparison"]["decision"]["outcome"], "improved")
+
+    def test_decoder_strategy_without_feature_cache_still_trains(self):
+        import os
+
+        harness = ServiceHarness(self.folder)
+        harness.fill(self.project)
+        os.environ["POLIGOME_ADAPTIVE_CACHE_MB"] = "0"
+        try:
+            run = harness.service.start_training(self.project, dict(FAST, strategy="decoder", max_epochs=2, min_epochs=1))
+            harness.service.wait_for_training(300)
+        finally:
+            del os.environ["POLIGOME_ADAPTIVE_CACHE_MB"]
+        record = harness.service.get_run(self.project, run["run_id"])
+        self.assertEqual(record["status"], "completed", record.get("error"))
+        self.assertEqual(len(record["epochs"]), 3)
 
     def test_unsupported_family_is_refused(self):
         harness = ServiceHarness(self.folder)

@@ -81,6 +81,7 @@ EXAMPLE_NAME_PATTERN = re.compile(r"^example-[0-9]{2}\.png$")
 
 ACCEPTED_ORIGINS = ("manual", "corrected_prediction", "reviewed_prediction")
 MAX_INSTANCES_PER_ITEM = 200
+MAX_RINGS_PER_INSTANCE = 256
 MAX_POLYGON_POINTS = 20_000
 MIN_INSTANCE_AREA_PX = 16
 MAX_ITEMS_PER_PROJECT = 5_000
@@ -984,9 +985,11 @@ class Sam2Segmenter:
         self.feature_sizes = [(size, size) for size in sizes]
 
     def preprocess(self, pixels: np.ndarray) -> Any:
-        tensor = torch.from_numpy(np.ascontiguousarray(pixels)).to(self.device).permute(2, 0, 1)[None].float() / 255.0
+        # Redimensiona em CPU: o bilinear com antialias não existe em todo
+        # backend (MPS), e é o mesmo filtro do Resize do torchvision no preditor.
+        tensor = torch.from_numpy(np.ascontiguousarray(pixels)).permute(2, 0, 1)[None].float() / 255.0
         tensor = F.interpolate(tensor, size=(self.resolution, self.resolution), mode="bilinear", align_corners=False, antialias=True)
-        return (tensor - self.mean) / self.std
+        return (tensor.to(self.device) - self.mean) / self.std
 
     def encode(self, image_tensor: Any) -> dict[str, Any]:
         model = self.model
@@ -1251,7 +1254,12 @@ def ingest_item(
             if origin not in ACCEPTED_ORIGINS:
                 rejected.append({"index": index, "reason": "unverified_origin"})
                 continue
-            mask = rasterize_instance(raw_instance.get("polygons") or [], raw_instance.get("holes") or [], width, height)
+            polygons = raw_instance.get("polygons") or []
+            holes = raw_instance.get("holes") or []
+            if not isinstance(polygons, list) or not isinstance(holes, list) or len(polygons) + len(holes) > MAX_RINGS_PER_INSTANCE:
+                rejected.append({"index": index, "reason": "invalid"})
+                continue
+            mask = rasterize_instance(polygons, holes, width, height)
             area = int(mask.sum())
             if area < MIN_INSTANCE_AREA_PX:
                 rejected.append({"index": index, "reason": "too_small"})
@@ -1881,7 +1889,15 @@ class TrainingJob:
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, schedule)
 
         cached: dict[tuple[str, bool], dict[str, Any]] = {}
-        if decoder_only:
+        # Features em float16 na RAM custam ~8,4 MB por imagem no SAM 2 a 1024 px.
+        # Acima do orçamento, primeiro some a cópia espelhada; depois o cache
+        # inteiro, e o encoder (congelado) roda a cada passo.
+        budget_mb = float(os.environ.get("POLIGOME_ADAPTIVE_CACHE_MB", "2048") or 2048)
+        per_image_mb = 8.4 * (segmenter.resolution / 1024) ** 2
+        cache_flips = config.augment_hflip and len(fit) * 2 * per_image_mb <= budget_mb
+        use_cache = decoder_only and len(fit) * per_image_mb <= budget_mb
+        data["cache"] = {"enabled": use_cache, "flips": use_cache and cache_flips}
+        if use_cache:
             # Com o encoder congelado, as features de cada imagem (e da versão
             # espelhada) são calculadas uma vez só: o treino fica centenas de
             # vezes mais barato, ao custo de não haver aumento fotométrico.
@@ -1890,8 +1906,9 @@ class TrainingJob:
                 self.progress = {"phase": "caching", "done": index, "total": len(fit)}
                 with lora_disabled(model):
                     cached[(sample.key, False)] = self._to_storage(self._features(segmenter, sample.pixels, False))
-                    if config.augment_hflip:
+                    if cache_flips:
                         cached[(sample.key, True)] = self._to_storage(self._features(segmenter, np.ascontiguousarray(sample.pixels[:, ::-1]), False))
+        if decoder_only:
             val_cache = {}
             for sample in data["val"]:
                 with lora_disabled(model):
@@ -1923,7 +1940,7 @@ class TrainingJob:
                 self.progress = {"phase": "training", "epoch": epoch, "max_epochs": data["max_epochs"], "done": position, "total": len(fit)}
                 for attempt in range(2):
                     try:
-                        loss, dice = self._train_step(segmenter, sample, cached, rng, max_instances, decoder_only, len(fit))
+                        loss, dice = self._train_step(segmenter, sample, cached, rng, max_instances, decoder_only, data["cache"])
                         break
                     except Exception as error:
                         if not _is_oom(error) or attempt == 1 or max_instances == 1:
@@ -2004,13 +2021,17 @@ class TrainingJob:
             "created_at": _now_iso(),
         }
 
-    def _train_step(self, segmenter: Any, sample: Sample, cached: dict, rng: np.random.Generator, max_instances: int, decoder_only: bool, n_images: int) -> tuple[float, float]:
+    def _train_step(self, segmenter: Any, sample: Sample, cached: dict, rng: np.random.Generator, max_instances: int, decoder_only: bool, cache: dict[str, bool]) -> tuple[float, float]:
         config = self.config
         size = segmenter.resolution // 4
         if decoder_only:
             flipped = config.augment_hflip and rng.random() < 0.5
-            features = self._from_storage(cached[(sample.key, flipped)])
             masks = [instance["mask"][:, ::-1] if flipped else instance["mask"] for instance in sample.instances]
+            if cache["enabled"] and (flipped is False or cache["flips"]):
+                features = self._from_storage(cached[(sample.key, flipped)])
+            else:
+                pixels = np.ascontiguousarray(sample.pixels[:, ::-1]) if flipped else sample.pixels
+                features = self._features(segmenter, pixels, False)
         else:
             pixels, masks = _augment(sample, rng, config)
             features = self._features(segmenter, pixels, True)
@@ -2600,6 +2621,10 @@ class AdaptiveService:
             self._job_thread = thread
             thread.start()
         return self._public_run(record)
+
+    def training_active(self) -> bool:
+        job = self._job
+        return job is not None and job.record.get("status") in ACTIVE_RUN_STATES
 
     def wait_for_training(self, timeout: float | None = None) -> None:
         thread = self._job_thread
