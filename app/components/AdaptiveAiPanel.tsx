@@ -35,6 +35,12 @@ const points = (value: number | null | undefined) =>
 const num = (value: number | null | undefined, digits = 2) =>
   value === null || value === undefined || !Number.isFinite(value) ? "—" : value.toFixed(digits);
 
+/** "run-20261013t144705z-abc123" → "2026-10-13 14:47 UTC": o id da rodada é a data em que ela começou. */
+export function runLabel(runId: string): string {
+  const match = /^run-(\d{4})(\d{2})(\d{2})t(\d{2})(\d{2})/.exec(runId);
+  return match ? `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]} UTC` : runId;
+}
+
 /** Uma frase por motivo, com os números do servidor; o código cru só se não houver tradução. */
 export function reasonText(t: AdaptiveCopy, reason: AdaptiveReason): string {
   const key = `reason_${reason.code}` as keyof AdaptiveCopy;
@@ -357,6 +363,10 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base, projectId, record?.run_id, exampleFiles]);
 
+  async function reloadRecord() {
+    if (projectId && selectedRunId) setRecord(await adaptiveApi.run(base, projectId, selectedRunId));
+  }
+
   async function act(name: string, action: () => Promise<unknown>) {
     setBusy(name);
     setError("");
@@ -422,11 +432,11 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
         <section className="adaptive-active">
           <Power size={14} />
           <div>
-            <b>{activeHere ? fill(t.activeAdapter, { run: activeHere.run_id.slice(4, 19) }) : t.usingBase}</b>
+            <b>{activeHere ? fill(t.activeAdapter, { run: runLabel(activeHere.run_id) }) : t.usingBase}</b>
             <small>{activeHere ? (activeHere.applied ? t.activeAppliedNote : t.activeNotAppliedNote) : activeElsewhere ? t.activeElsewhere : t.usingBaseNote}</small>
           </div>
-          {(activeHere || activeElsewhere) && <button disabled={busy !== null} onClick={() => act("deactivate", async () => { setStatus(await adaptiveApi.deactivate(base)); await refreshRuns(); })}><X size={12} />{t.deactivate}</button>}
-          {activeHere && <button disabled={busy !== null} onClick={() => act("rollback", async () => { setStatus(await adaptiveApi.rollback(base, project.id)); await refreshRuns(); })}><Undo2 size={12} />{t.rollback}</button>}
+          {(activeHere || activeElsewhere) && <button disabled={busy !== null} onClick={() => act("deactivate", async () => { setStatus(await adaptiveApi.deactivate(base)); await refreshRuns(); await reloadRecord(); })}><X size={12} />{t.deactivate}</button>}
+          {activeHere && <button disabled={busy !== null} onClick={() => act("rollback", async () => { setStatus(await adaptiveApi.rollback(base, project.id)); await refreshRuns(); await reloadRecord(); })}><Undo2 size={12} />{t.rollback}</button>}
         </section>
 
         <section className="adaptive-section">
@@ -486,10 +496,10 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
           <ComparisonView t={t} comparison={record.comparison} examples={examples} />
           <div className="adaptive-actions">
             {record.activation === "active" ? <span className="adaptive-badge"><Check size={12} />{t.isActive}</span> : <>
-              {outcome === "improved" && <button className="primary" disabled={busy !== null || !modelSupported} onClick={() => act("activate", async () => { setStatus(await adaptiveApi.activate(base, project.id, record.run_id, false)); await refreshRuns(); setSelectedRunId(record.run_id); })}><Power size={13} />{t.activate}</button>}
+              {outcome === "improved" && <button className="primary" disabled={busy !== null || !modelSupported} onClick={() => act("activate", async () => { setStatus(await adaptiveApi.activate(base, project.id, record.run_id, false)); setRecord(await adaptiveApi.run(base, project.id, record.run_id)); await refreshRuns(); })}><Power size={13} />{t.activate}</button>}
               {outcome === "insufficient_evidence" && <>
                 <label className="adaptive-confirm"><input type="checkbox" checked={confirmOverride} onChange={(event) => setConfirmOverride(event.target.checked)} />{t.confirmOverride}</label>
-                <button disabled={busy !== null || !confirmOverride || !modelSupported} onClick={() => act("activate", async () => { setStatus(await adaptiveApi.activate(base, project.id, record.run_id, true)); setConfirmOverride(false); await refreshRuns(); })}><Power size={13} />{t.activateAnyway}</button>
+                <button disabled={busy !== null || !confirmOverride || !modelSupported} onClick={() => act("activate", async () => { setStatus(await adaptiveApi.activate(base, project.id, record.run_id, true)); setConfirmOverride(false); setRecord(await adaptiveApi.run(base, project.id, record.run_id)); await refreshRuns(); })}><Power size={13} />{t.activateAnyway}</button>
               </>}
               {outcome === "not_improved" && <span className="adaptive-note">{t.keptPrevious}</span>}
               {record.activation !== "rejected" && <button disabled={busy !== null} onClick={() => act("reject", async () => { await adaptiveApi.reject(base, project.id, record.run_id); await refreshRuns(); const next = await adaptiveApi.run(base, project.id, record.run_id); setRecord(next); })}><X size={13} />{t.reject}</button>}

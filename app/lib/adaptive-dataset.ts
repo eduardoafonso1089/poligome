@@ -66,7 +66,8 @@ export function sequenceGroup(name: string): string | null {
   if (!/\d+$/.test(base)) return null;
   const prefix = base
     .replace(/\d+$/, "")
-    .replace(/[\s._-]*(frame|frames|slice|slices|corte|cortes|fatia|seq|sequence|sequencia|img|image|f|s|t|z)?[\s._-]*$/i, "")
+    // Só palavras inteiras: letras soltas ("f5", "s18") juntavam nomes sem relação.
+    .replace(/[\s._-]*(frame|frames|slice|slices|corte|cortes|fatia|seq|sequence|sequencia|img|image)?[\s._-]*$/i, "")
     .replace(/[\s._-]+$/, "");
   if (prefix.length < 3 || GENERIC_PREFIXES.has(prefix)) return null;
   return `name:${prefix}`;

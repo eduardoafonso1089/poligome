@@ -22,7 +22,7 @@ import { ADAPTIVE_PROJECT_ID_PATTERN, openPoligomeProjectV4, savePoligomeProject
 import { getCopy } from "../app/lib/i18n.ts";
 import { getAdaptiveCopy } from "../app/lib/adaptive-copy.ts";
 import {
-  AdaptiveAiPanel, ComparisonView, MetricChart, ReadinessView, TrainingView, reasonText,
+  AdaptiveAiPanel, ComparisonView, MetricChart, ReadinessView, TrainingView, reasonText, runLabel,
 } from "../app/components/AdaptiveAiPanel.tsx";
 import SamSetupModal from "../app/components/SamSetupModal.tsx";
 
@@ -173,6 +173,10 @@ test("training view shows measured epochs and marks the best one", () => {
   assert.match(running, /<progress[^>]*max="12"[^>]*value="3"/);
 });
 
+test("round ids read as their start time", () => {
+  assert.equal(runLabel("run-20261013t144705z-b2c8f2"), "2026-10-13 14:47 UTC");
+});
+
 test("metric chart refuses to draw without data", () => {
   assert.equal(render(MetricChart, { title: "x", epochs: [], series: [] }), "");
 });
@@ -207,4 +211,18 @@ test("the AI hub has an Adaptive AI tab that renders the panel", () => {
   const markup = render(SamSetupModal, props);
   assert.match(markup, /aria-selected="true"[^>]*><svg[^>]*>.*?<b>Adaptive AI<\/b>/s);
   assert.match(text(markup), /Looking for the local connector/);
+});
+
+test("single letters before a number do not merge unrelated names", () => {
+  const groups = ["field-f5.png", "field-s18.png", "field-t19.png", "field-a0.png"].map(sequenceGroup);
+  assert.equal(new Set(groups).size, 4, JSON.stringify(groups));
+});
+
+test("installers pin the adaptive module they download", async () => {
+  const { createHash } = await import("node:crypto");
+  const digest = createHash("sha256").update(readFileSync(new URL("../public/poligome-sam-adaptive.py", import.meta.url))).digest("hex");
+  const bash = readFileSync(new URL("../public/poligome-sam-macos-linux.sh", import.meta.url), "utf8");
+  const powershell = readFileSync(new URL("../public/poligome-sam-windows-native.ps1", import.meta.url), "utf8");
+  assert.match(bash, new RegExp(`^DEFAULT_ADAPTIVE_SHA256="${digest}"$`, "m"), "bash installer pin is stale: run the pin update");
+  assert.match(powershell, new RegExp(`^\\$DefaultAdaptiveSha256 = '${digest}'\\r?$`, "m"), "PowerShell installer pin is stale");
 });
