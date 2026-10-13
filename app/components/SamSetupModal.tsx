@@ -49,7 +49,7 @@ type Props = {
   byomModels: readonly ByomModel[];
   byomBusy: boolean;
   /** O Poligome Runtime: onde atende, se respondeu e o modelo que serve. */
-  runtime: { state: "checking" | "ready" | "offline"; endpoint: string; manifest: RuntimeManifest | null; setEndpoint: (value: string) => void; refresh: () => void };
+  runtime: { state: "checking" | "ready" | "offline"; endpoint: string; manifest: RuntimeManifest | null; occupied?: boolean; setEndpoint: (value: string) => void; refresh: () => void };
   onSelectModel: (modelId: string) => void;
   /** Abre o diálogo de pré-anotação já com este modelo: "runtime" ou o id de um contêiner. */
   onPreannotate: (modelKey: string) => void;
@@ -589,6 +589,7 @@ export default function SamSetupModal({
               state: runtime.state,
               endpoint: runtime.endpoint,
               serving: runtime.manifest ? `${runtime.manifest.name} ${runtime.manifest.version}` : "",
+              occupied: Boolean(runtime.occupied),
               onEndpoint: runtime.setEndpoint,
               onRetry: runtime.refresh,
             }}

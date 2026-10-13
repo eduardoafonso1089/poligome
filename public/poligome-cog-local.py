@@ -10,7 +10,7 @@ The server also serves the finished COG with Range support, so Poligome can read
 result by tiles without downloading the file again.
 
     python poligome-cog-local.py
-    python poligome-cog-local.py --port 7861 --folder ~/poligome-cog
+    python poligome-cog-local.py --port 7862 --folder ~/poligome-cog
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def root():
 def health():
     with TRAVA:
         rodando = sum(1 for t in TRABALHOS.values() if t["estado"] == "convertendo")
-    return {"status": "ready", "convertendo": rodando, "trabalhos": len(TRABALHOS)}
+    return {"service": "Poligome local COG", "status": "ready", "convertendo": rodando, "trabalhos": len(TRABALHOS)}
 
 
 def perfil_para(caminho: Path) -> str:
@@ -176,7 +176,7 @@ def descarta(identificador: str):
 def main() -> None:
     global PASTA
     parser = argparse.ArgumentParser(description="Local TIFF-to-COG converter for Poligome")
-    parser.add_argument("--port", type=int, default=7861)
+    parser.add_argument("--port", type=int, default=7862)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--folder", default=str(PASTA),
                         help="onde guardar os COGs convertidos")

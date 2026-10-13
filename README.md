@@ -54,7 +54,7 @@ python3 -m venv .venv
 .venv/bin/python examples/serve_runtime.py --adapter fasterrcnn
 ```
 
-The same steps appear in the editor under **AI › Automatic** while no runtime is running. The editor looks for it at `http://127.0.0.1:7861` by default; that is also the local COG converter's default port, so if both run on the same machine change one of them and the address under **Connections**.
+The same steps appear in the editor under **AI › Automatic** while no runtime is running. The editor looks for it at `http://127.0.0.1:7861` by default. The local COG converter uses `7862` (older converter downloads used 7861; the editor still finds them there).
 
 ## Local helpers
 
@@ -62,7 +62,7 @@ Optional helper services run on your own computer and bind to loopback rather th
 
 **Local SAM** — AI pre-annotation, plus BYOM for your own containerized model. The catalog, installers, and editor UI are described in [Local SAM](#local-sam) and [BYOM](#byom--bring-your-own-model) below.
 
-**Local COG converter** supports large geospatial rasters. `public/poligome-cog-windows.bat` and `public/poligome-cog-macos-linux.sh` install the required Python packages and start the converter on `http://127.0.0.1:7861`. The manual service is `public/poligome-cog-local.py`.
+**Local COG converter** supports large geospatial rasters. `public/poligome-cog-windows.bat` and `public/poligome-cog-macos-linux.sh` install the required Python packages and start the converter on `http://127.0.0.1:7862`. The manual service is `public/poligome-cog-local.py`.
 
 Local connectors accept browser requests from the official Poligome origins and local development by default. A trusted self-hosted instance can set `POLIGOME_ALLOWED_ORIGIN_REGEX` to an anchored regular expression for its own origins.
 

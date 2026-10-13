@@ -41,8 +41,10 @@ export type CogRecorteProps = {
 
 const LIMITE_MS = 45_000;
 
-/** Port of the local conversion helper. SAM uses 7860; this is the one next door. */
-const CONVERSOR_PADRAO = "http://127.0.0.1:7861";
+/** Port of the local conversion helper. SAM uses 7860 and Poligome Runtime 7861. */
+const CONVERSOR_PADRAO = "http://127.0.0.1:7862";
+/** Where converters installed before the move to 7862 still listen. */
+const CONVERSOR_LEGADO = "http://127.0.0.1:7861";
 const CHAVE_CONVERSOR = "poligome-cog-endpoint";
 /** Key from before the rebranding; read once so an already saved endpoint is not lost. */
 const CHAVE_CONVERSOR_LEGADA = "epiaka-cog-endpoint";
@@ -92,9 +94,12 @@ export default function CogRecorte({ origem, nome, reference, copy, onCancelar, 
   const [conversor, setConversor] = useState<"desconhecido" | "ativo" | "ausente">("desconhecido");
   const [conversao, setConversao] = useState<Trabalho | null>(null);
   const [segundos, setSegundos] = useState(0);
-  const endpoint = typeof window === "undefined"
-    ? CONVERSOR_PADRAO
-    : localStorage.getItem(CHAVE_CONVERSOR) || localStorage.getItem(CHAVE_CONVERSOR_LEGADA) || CONVERSOR_PADRAO;
+  const salvo = typeof window === "undefined"
+    ? null
+    : (() => { try { return localStorage.getItem(CHAVE_CONVERSOR) || localStorage.getItem(CHAVE_CONVERSOR_LEGADA); } catch { return null; } })();
+  // Sem endereço salvo, o conversor pode estar na porta nova ou, se foi
+  // instalado antes da mudança, na antiga. Fica o que se identificar.
+  const [endpoint, setEndpoint] = useState(salvo || CONVERSOR_PADRAO);
 
   // Map extent → pixel window of the file. It is the only conversion this component has
   // to do on its own; the rest lives in lib/cog.
@@ -234,12 +239,28 @@ export default function CogRecorte({ origem, nome, reference, copy, onCancelar, 
     let vivo = true;
     const controle = new AbortController();
     const tempo = window.setTimeout(() => controle.abort(), 4000);
-    fetch(`${endpoint}/health`, { signal: controle.signal })
-      .then((resposta) => { if (vivo) setConversor(resposta.ok ? "ativo" : "ausente"); })
-      .catch(() => { if (vivo) setConversor("ausente"); })
-      .finally(() => window.clearTimeout(tempo));
+    // Responder 200 em /health não basta: o Poligome Runtime também responde ali,
+    // e a tela anunciava o conversor como ativo para depois a conversão falhar
+    // com "rota desconhecida". O conversor se reconhece pelo nome ou, nas
+    // versões antigas, pela contagem de conversões.
+    const identifica = async (base: string) => {
+      const resposta = await fetch(`${base}/health`, { signal: controle.signal });
+      if (!resposta.ok) return false;
+      const corpo = await resposta.json().catch(() => null) as { service?: unknown; convertendo?: unknown } | null;
+      return corpo?.service === "Poligome local COG" || typeof corpo?.convertendo === "number";
+    };
+    const candidatos = salvo ? [salvo] : [CONVERSOR_PADRAO, CONVERSOR_LEGADO];
+    (async () => {
+      for (const base of candidatos) {
+        if (await identifica(base).catch(() => false)) {
+          if (vivo) { setEndpoint(base); setConversor("ativo"); }
+          return;
+        }
+      }
+      if (vivo) setConversor("ausente");
+    })().finally(() => window.clearTimeout(tempo));
     return () => { vivo = false; controle.abort(); };
-  }, [meta, endpoint]);
+  }, [meta, salvo]);
 
   // Conversion clock: with no real percentage coming from GDAL, the elapsed time next to
   // the estimate is the honest information.

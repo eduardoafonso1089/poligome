@@ -118,10 +118,23 @@ export function maskToPolygons(mask: RuntimeMask): number[][][] {
   const grid = decodeRle(mask.rle, mask.width, mask.height);
   const geometry = contours().size([mask.width, mask.height]).contour(grid as unknown as number[], .5);
   const scaleX = mask.bounds.width / mask.width, scaleY = mask.bounds.height / mask.height;
-  return geometry.coordinates.map((polygon) => polygon.map((ring) =>
+  const polygons = geometry.coordinates.map((polygon) => polygon.map((ring) =>
     ring.slice(0, -1).flatMap(([x, y]) => [mask.bounds.x + x * scaleX, mask.bounds.y + y * scaleY]),
   ));
+  // Cada ilha da máscara vira uma anotação no editor. Uma máscara com ruído —
+  // comum na borda de objetos — trazia centenas de pontinhos de um pixel, e
+  // cada um era uma anotação para apagar à mão. Só some o que é desprezível
+  // pelos dois critérios: minúsculo em si e minúsculo perto da maior parte do
+  // mesmo objeto. Um objeto pequeno sozinho, ou partes reais de um objeto
+  // dividido, ficam.
+  const areas = polygons.map((rings) => area(rings[0] ?? []));
+  const largest = Math.max(0, ...areas);
+  return polygons.filter((_, index) => areas[index] >= MIN_MASK_ISLAND_PX || areas[index] >= largest * MIN_MASK_ISLAND_SHARE);
 }
+
+/** Ilhas abaixo destes dois limites são ruído da máscara, não parte do objeto. */
+const MIN_MASK_ISLAND_PX = 9;
+const MIN_MASK_ISLAND_SHARE = 0.005;
 
 /** Compatibility helper for consumers that explicitly request one outer ring. */
 export function maskToPolygon(mask: RuntimeMask): number[] | null {

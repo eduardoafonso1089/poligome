@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_RUNTIME_ENDPOINT,
   RUNTIME_ENDPOINT_KEY,
+  endpointAnswers,
   fetchRuntimeHealth,
   fetchRuntimeManifest,
   type RuntimeManifest,
@@ -36,6 +37,10 @@ export function useRuntimeStatus(active: boolean) {
   const [endpoint, setEndpointState] = useState(() => typeof window === "undefined" ? DEFAULT_RUNTIME_ENDPOINT : storedRuntimeEndpoint());
   const [state, setState] = useState<RuntimeState>("checking");
   const [manifest, setManifest] = useState<RuntimeManifest | null>(null);
+  // Outra coisa responde no endereço, mas não é o runtime: é o caso em que vale
+  // avisar sobre conflito de porta. Sem isso o aviso aparecia para todo mundo
+  // que simplesmente ainda não tinha iniciado o runtime.
+  const [occupied, setOccupied] = useState(false);
 
   const setEndpoint = useCallback((value: string) => {
     setEndpointState(value);
@@ -50,9 +55,16 @@ export function useRuntimeStatus(active: boolean) {
     setState((current) => (current === "ready" ? current : "checking"));
     const health = await fetchRuntimeHealth(endpoint);
     if (mine !== latest.current) return;
-    if (!health) { setState("offline"); setManifest(null); return; }
+    if (!health) {
+      setState("offline");
+      setManifest(null);
+      const answers = await endpointAnswers(endpoint);
+      if (mine === latest.current) setOccupied(answers);
+      return;
+    }
     const described = await fetchRuntimeManifest(endpoint);
     if (mine !== latest.current) return;
+    setOccupied(false);
     setManifest(described);
     setState(described ? "ready" : "offline");
   }, [endpoint]);
@@ -69,5 +81,5 @@ export function useRuntimeStatus(active: boolean) {
     };
   }, [active, refresh]);
 
-  return { endpoint, setEndpoint, state, manifest, refresh };
+  return { endpoint, setEndpoint, state, manifest, occupied, refresh };
 }

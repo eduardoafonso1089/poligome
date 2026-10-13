@@ -171,7 +171,7 @@ const pt = {
   connConnectorHow: "Não foi possível conectar. Se já instalou, inicie o conector, mantenha a janela aberta e permita o acesso à rede local no navegador. Para instalar, abra Assistido.",
   connConnectorHowButton: "Instalar",
   connContainersHowButton: "Adicionar",
-  connPortClash: "A porta 7861 também é do conversor de COG. Se os dois rodarem, mude uma das portas.",
+  connPortClash: "Outro programa está respondendo na porta {port}, e não é o Poligome Runtime. Versões antigas do conversor de COG usavam a 7861: baixe-o de novo (agora ele usa a 7862) ou mude aqui o endereço do runtime.",
 
   paSubtitle: "A IA anota. Você revisa ou desfaz.",
   paModel: "Modelo",
@@ -400,7 +400,7 @@ const en: AiCopy = {
   connConnectorHow: "Could not connect. If already installed, start the connector, keep its window open and allow local network access in your browser. To install it, open Assisted.",
   connConnectorHowButton: "Install",
   connContainersHowButton: "Add",
-  connPortClash: "Port 7861 is also the COG converter's. If both run, change one of the ports.",
+  connPortClash: "Another program is answering on port {port}, and it is not Poligome Runtime. Older COG converters used 7861: download it again (it now uses 7862) or change the runtime address here.",
 
   paSubtitle: "The AI annotates. You review or undo.",
   paModel: "Model",
@@ -626,7 +626,7 @@ const fr: AiCopy = {
   connConnectorHow: "Connexion impossible. S’il est déjà installé, démarrez le connecteur, laissez sa fenêtre ouverte et autorisez le réseau local dans le navigateur. Pour l’installer, ouvrez Assisté.",
   connConnectorHowButton: "Installer",
   connContainersHowButton: "Ajouter",
-  connPortClash: "Le port 7861 est aussi celui du convertisseur COG. Si les deux tournent, changez l’un des ports.",
+  connPortClash: "Un autre programme répond sur le port {port}, et ce n’est pas Poligome Runtime. Les anciennes versions du convertisseur COG utilisaient le 7861 : téléchargez-le à nouveau (il utilise maintenant le 7862) ou changez ici l’adresse du runtime.",
 
   paSubtitle: "L’IA annote. Vous relisez ou annulez.",
   paModel: "Modèle",
@@ -852,7 +852,7 @@ const es: AiCopy = {
   connConnectorHow: "No se pudo conectar. Si ya está instalado, inicia el conector, deja su ventana abierta y permite el acceso a la red local en el navegador. Para instalarlo, abre Asistido.",
   connConnectorHowButton: "Instalar",
   connContainersHowButton: "Añadir",
-  connPortClash: "El puerto 7861 también es del conversor de COG. Si corren los dos, cambia uno de los puertos.",
+  connPortClash: "Otro programa responde en el puerto {port}, y no es Poligome Runtime. Las versiones antiguas del conversor de COG usaban el 7861: descárgalo de nuevo (ahora usa el 7862) o cambia aquí la dirección del runtime.",
 
   paSubtitle: "La IA anota. Tú revisas o deshaces.",
   paModel: "Modelo",

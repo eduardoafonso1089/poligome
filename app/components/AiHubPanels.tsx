@@ -350,7 +350,7 @@ export function ConnectionsPanel({
 }: {
   copy: AiCopy;
   connector: { state: ServiceState; endpoint: string; host: string | null; serving: string; modelState?: "ready" | "loading" | "error"; onEndpoint: (value: string) => void; onRetry: () => void };
-  runtime: { state: ServiceState; endpoint: string; serving: string; onEndpoint: (value: string) => void; onRetry: () => void };
+  runtime: { state: ServiceState; endpoint: string; serving: string; occupied?: boolean; onEndpoint: (value: string) => void; onRetry: () => void };
   containers: readonly ByomModel[];
   onShowInstall: () => void;
   onShowAddModel: () => void;
@@ -385,7 +385,7 @@ export function ConnectionsPanel({
       <header><span className="ai-conn-icon"><Layers size={16} /></span><div><b>{copy.connRuntimeTitle}</b><small>{copy.connRuntimeRole}</small></div><StatusPill copy={copy} state={runtime.state} /></header>
       {runtime.state === "ready" && runtime.serving && <p className="ai-conn-detail">{fill(copy.connServing, { model: runtime.serving })}</p>}
       {runtime.state === "offline" && <p className="ai-conn-detail">{copy.runtimeOfflineBody}</p>}
-      {runtime.state === "offline" && runtimePort === "7861" && <p className="ai-conn-warning"><AlertTriangle size={13} /><span>{copy.connPortClash}</span></p>}
+      {runtime.state === "offline" && runtime.occupied && <p className="ai-conn-warning"><AlertTriangle size={13} /><span>{fill(copy.connPortClash, { port: runtimePort || "7861" })}</span></p>}
       <div className="ai-conn-row">
         <EndpointField copy={copy} value={runtime.endpoint} placeholder="http://127.0.0.1:7861" onCommit={runtime.onEndpoint} onValidityChange={setRuntimeAddressValid} />
         <button disabled={!runtimeAddressValid} onClick={runtime.onRetry}><RefreshCw size={13} />{copy.connRetry}</button>

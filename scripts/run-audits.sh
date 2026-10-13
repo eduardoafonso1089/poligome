@@ -77,6 +77,10 @@ for audit in "${full_demo_audits[@]}"; do
   node "scripts/run-audit-with-full-demo.mjs" "${audit}" || failed+=("${audit}")
 done
 
+# Against the real runtime, only when a clone is available (see the script).
+echo "[audit] runtime-live-audit.mjs"
+node "scripts/runtime-live-audit.mjs" || failed+=("runtime-live-audit.mjs")
+
 if [[ "${#failed[@]}" -gt 0 ]]; then
   printf '[audit] FAILED: %s\n' "${failed[@]}" >&2
   exit 1

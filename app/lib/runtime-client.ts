@@ -111,6 +111,22 @@ export async function fetchRuntimeHealth(
   }
 }
 
+/**
+ * Responde se há *algum* serviço HTTP no endereço. Serve para distinguir "nada
+ * rodando" de "outra coisa ocupando a porta do runtime": só no segundo caso
+ * faz sentido avisar sobre conflito de porta.
+ */
+export async function endpointAnswers(endpoint: string, timeoutMs = 1_500): Promise<boolean> {
+  try {
+    // no-cors: um serviço que não libera CORS para a página ainda conta como
+    // ocupando a porta; só a conexão recusada (nada ali) rejeita.
+    await fetch(`${base(endpoint)}/health`, { mode: "no-cors", signal: AbortSignal.timeout(timeoutMs) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchRuntimeManifest(
   endpoint: string,
   timeoutMs = 6_000,

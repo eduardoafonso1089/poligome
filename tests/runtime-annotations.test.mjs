@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ensureLabels, toEditorAnnotations, maskToPolygon } from '../app/lib/runtime-annotations.ts';
+import { ensureLabels, toEditorAnnotations, maskToPolygon, maskToPolygons } from '../app/lib/runtime-annotations.ts';
 
 function ids() { let n = 0; return prefix => `${prefix}-${++n}`; }
 
@@ -308,4 +308,20 @@ test('toda classe devolvida tem id, nome e cor — o painel resolve por id', () 
     assert.ok(label.id && label.name && label.color, `classe incompleta: ${JSON.stringify(label)}`);
     assert.notEqual(label.id, label.name, 'id e nome não podem ser a mesma coisa');
   }
+});
+
+test('mask noise does not become hundreds of one-pixel annotations', () => {
+  // 40x40 grid: a 20x20 object, a 6x6 second part, and 12 isolated speck pixels.
+  const width = 40, height = 40, grid = new Uint8Array(width * height);
+  for (let y = 5; y < 25; y++) for (let x = 5; x < 25; x++) grid[y * width + x] = 1;
+  for (let y = 30; y < 36; y++) for (let x = 30; x < 36; x++) grid[y * width + x] = 1;
+  for (let i = 0; i < 12; i++) grid[(28 + (i % 4) * 3) * width + 2 + i * 2] = 1; // isolated pixels, none touching
+  const rle = []; let value = 0, run = 0;
+  for (const pixel of grid) { if (pixel === value) run++; else { rle.push(run); value = pixel; run = 1; } }
+  rle.push(run);
+  const parts = maskToPolygons({ bounds: { x: 0, y: 0, width, height }, width, height, rle });
+  assert.equal(parts.length, 2, 'object and its real second part stay; specks go');
+  // A tiny object alone is the object, not noise.
+  const alone = maskToPolygons({ bounds: { x: 0, y: 0, width: 3, height: 3 }, width: 3, height: 3, rle: [4, 1, 4] });
+  assert.equal(alone.length, 1);
 });
