@@ -18,7 +18,12 @@ type ProjectManifestV4 = {
   labels: Label[];
   annotations: EditorAnnotation[];
   layout?: { left_panel_width: number; right_panel_width: number };
+  /** Identifica o projeto no Adaptive AI do conector local; ausente em arquivos antigos. */
+  adaptive_project_id?: string;
 };
+
+/** O mesmo padrão que o conector aceita como id de projeto. */
+export const ADAPTIVE_PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{7,63}$/;
 
 export type LoadedPoligomeProjectV4 = {
   projectName: string;
@@ -26,6 +31,7 @@ export type LoadedPoligomeProjectV4 = {
   labels: Label[];
   annotations: EditorAnnotation[];
   layout?: ProjectLayout;
+  adaptiveProjectId?: string;
   objectUrls: string[];
   missingImages: number;
   recoveredAnnotations: number;
@@ -116,6 +122,9 @@ function parseManifestV4(value: unknown, copy: Copy): ProjectManifestV4 & { reco
     annotations: normalized.annotations,
     recoveredAnnotations: normalized.recoveredAnnotations,
     layout: parseLayout(value.layout),
+    adaptive_project_id: typeof value.adaptive_project_id === "string" && ADAPTIVE_PROJECT_ID_PATTERN.test(value.adaptive_project_id)
+      ? value.adaptive_project_id
+      : undefined,
   };
 }
 
@@ -171,6 +180,7 @@ export async function savePoligomeProjectV4(
   annotations: EditorAnnotation[],
   copy: Copy,
   layout?: ProjectLayout,
+  adaptiveProjectId?: string,
 ) {
   const zip = new JSZip();
   const normalized = normalizeAnnotationLabels(labels, annotations, copy.unlabeled);
@@ -187,6 +197,7 @@ export async function savePoligomeProjectV4(
       left_panel_width: Math.round(layout.leftPanelWidth),
       right_panel_width: Math.round(layout.rightPanelWidth),
     } : undefined,
+    adaptive_project_id: adaptiveProjectId && ADAPTIVE_PROJECT_ID_PATTERN.test(adaptiveProjectId) ? adaptiveProjectId : undefined,
   };
   zip.file("project.json", JSON.stringify(manifest, null, 2));
   const archive = await zip.generateAsync({ type: "blob", compression: "STORE", mimeType: "application/vnd.poligome.project+zip" });
@@ -210,6 +221,7 @@ export async function openPoligomeProjectV4(file: File | Blob | ArrayBuffer | Ui
       leftPanelWidth: manifest.layout.left_panel_width,
       rightPanelWidth: manifest.layout.right_panel_width,
     } : undefined,
+    adaptiveProjectId: manifest.adaptive_project_id,
     objectUrls,
     missingImages: assets.filter((asset) => asset.missing).length,
     recoveredAnnotations: manifest.recoveredAnnotations,
