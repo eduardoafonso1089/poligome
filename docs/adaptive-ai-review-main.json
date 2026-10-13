@@ -67,38 +67,9 @@
     "alpha": 16.0,
     "dropout": 0.05,
     "encoder_blocks": 0,
-    "targets": [
-      "sam_mask_decoder.transformer.layers.0.self_attn.q_proj",
-      "sam_mask_decoder.transformer.layers.0.self_attn.k_proj",
-      "sam_mask_decoder.transformer.layers.0.self_attn.v_proj",
-      "sam_mask_decoder.transformer.layers.0.self_attn.out_proj",
-      "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.q_proj",
-      "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.k_proj",
-      "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.v_proj",
-      "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.out_proj",
-      "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.q_proj",
-      "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.k_proj",
-      "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.v_proj",
-      "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.out_proj",
-      "sam_mask_decoder.transformer.layers.1.self_attn.q_proj",
-      "sam_mask_decoder.transformer.layers.1.self_attn.k_proj",
-      "sam_mask_decoder.transformer.layers.1.self_attn.v_proj",
-      "sam_mask_decoder.transformer.layers.1.self_attn.out_proj",
-      "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.q_proj",
-      "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.k_proj",
-      "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.v_proj",
-      "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.out_proj",
-      "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.q_proj",
-      "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.k_proj",
-      "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.v_proj",
-      "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.out_proj",
-      "sam_mask_decoder.transformer.final_attn_token_to_image.q_proj",
-      "sam_mask_decoder.transformer.final_attn_token_to_image.k_proj",
-      "sam_mask_decoder.transformer.final_attn_token_to_image.v_proj",
-      "sam_mask_decoder.transformer.final_attn_token_to_image.out_proj"
-    ],
     "trainable_params": 94208,
-    "total_params": 39056706
+    "total_params": 39056706,
+    "target_count": 28
   },
   "epochs": [
     {
@@ -540,6 +511,152 @@
     ],
     "simulated_interaction_note": true
   },
+  "learning_curve": {
+    "points": [
+      {
+        "groups": 0,
+        "mean": 0.7391994629825055,
+        "ci_low": 0.6772372465759471,
+        "ci_high": 0.7724507450119423,
+        "kind": "base"
+      },
+      {
+        "groups": 2,
+        "mean": 0.8132966355012624,
+        "ci_low": 0.7732830648510154,
+        "ci_high": 0.8488702125919327,
+        "kind": "subset"
+      },
+      {
+        "groups": 5,
+        "mean": 0.8410980961347224,
+        "ci_low": 0.8056552116204477,
+        "ci_high": 0.876540980648997,
+        "kind": "subset"
+      },
+      {
+        "groups": 8,
+        "mean": 0.8541369799258804,
+        "ci_low": 0.8269252257896735,
+        "ci_high": 0.8812992326301433,
+        "kind": "subset"
+      },
+      {
+        "groups": 10,
+        "mean": 0.8658925218756494,
+        "ci_low": 0.8366631537109445,
+        "ci_high": 0.8965180007730399,
+        "kind": "full"
+      }
+    ],
+    "fit": {
+      "a": 0.21208012188972236,
+      "b": 0.2,
+      "c": 0.003352686953108766,
+      "ceiling": 0.9966473130468912
+    },
+    "projection": {
+      "double": {
+        "groups": 20,
+        "median": 0.8791344869109392,
+        "low": 0.8609253103975568,
+        "high": 0.8971610225671955
+      },
+      "plus10": {
+        "groups": 20,
+        "median": 0.8791344869109392,
+        "low": 0.8609253103975568,
+        "high": 0.8971610225671955
+      }
+    },
+    "additional_groups_for_one_point": {
+      "median": 5.0,
+      "low": 5.0,
+      "high": 7.0,
+      "share_beyond_range": 0.0033333333333332993
+    },
+    "last_step_gain": {
+      "median": 0.01175554194976891,
+      "low": 0.007182409542115464,
+      "high": 0.01633920936250557
+    },
+    "trend": "rising",
+    "single_seed": true,
+    "projection_interval_level": 0.8,
+    "training_variance_measured": false,
+    "fit_residual_rms": 0.0022949582248072238,
+    "train_groups": 10,
+    "epochs": 10
+  },
+  "timing": {
+    "seconds_per_epoch": 92.06,
+    "total_seconds": 3038.2
+  },
+  "status": "completed",
   "validation_scope": "synthetic nuclei; pretrained SAM2.1 Tiny; CPU",
-  "learning_curve_pending": true
+  "reproducibility": {
+    "split": {
+      "updated_at": "2026-10-13T17:10:31Z",
+      "assignment": {
+        "s00f00xxxxxx": "train",
+        "s00f01xxxxxx": "train",
+        "s00f02xxxxxx": "train",
+        "s01f00xxxxxx": "train",
+        "s01f01xxxxxx": "train",
+        "s01f02xxxxxx": "train",
+        "s02f00xxxxxx": "holdout",
+        "s02f01xxxxxx": "holdout",
+        "s02f02xxxxxx": "holdout",
+        "s03f00xxxxxx": "train",
+        "s03f01xxxxxx": "train",
+        "s03f02xxxxxx": "train",
+        "s04f00xxxxxx": "train",
+        "s04f01xxxxxx": "train",
+        "s04f02xxxxxx": "train",
+        "s05f00xxxxxx": "holdout",
+        "s05f01xxxxxx": "holdout",
+        "s05f02xxxxxx": "holdout",
+        "s06f00xxxxxx": "holdout",
+        "s06f01xxxxxx": "holdout",
+        "s06f02xxxxxx": "holdout",
+        "s07f00xxxxxx": "train",
+        "s07f01xxxxxx": "train",
+        "s07f02xxxxxx": "train",
+        "s08f00xxxxxx": "train",
+        "s08f01xxxxxx": "train",
+        "s08f02xxxxxx": "train",
+        "s09f00xxxxxx": "train",
+        "s09f01xxxxxx": "train",
+        "s09f02xxxxxx": "train",
+        "s10f00xxxxxx": "train",
+        "s10f01xxxxxx": "train",
+        "s10f02xxxxxx": "train",
+        "s11f00xxxxxx": "train",
+        "s11f01xxxxxx": "train",
+        "s11f02xxxxxx": "train",
+        "s12f00xxxxxx": "train",
+        "s12f01xxxxxx": "train",
+        "s12f02xxxxxx": "train",
+        "s13f00xxxxxx": "train",
+        "s13f01xxxxxx": "train",
+        "s13f02xxxxxx": "train",
+        "s14f00xxxxxx": "holdout",
+        "s14f01xxxxxx": "holdout",
+        "s14f02xxxxxx": "holdout",
+        "s15f00xxxxxx": "train",
+        "s15f01xxxxxx": "train",
+        "s15f02xxxxxx": "train"
+      }
+    },
+    "project_metadata": {
+      "project_id": "p-exp-main-00001",
+      "salt": "c9f9146d086e457696d31801ac0ab5c9",
+      "created_at": "2026-10-13T17:08:18Z"
+    },
+    "torch": "2.7.1+cpu",
+    "torchvision": "0.22.1+cpu",
+    "numpy": "1.26.4",
+    "opencv": "4.11.0",
+    "sam2_revision": "2b90b9f5ceec907a1c18123530e92e794ad901a4"
+  }
 }
