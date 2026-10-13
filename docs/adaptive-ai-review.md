@@ -171,11 +171,25 @@ e rode `--only half overfit encoder` com o mesmo checkpoint e dispositivo.
 
 ## Exportação e continuidade solicitadas
 
-A exportação/importação portátil do adaptador, sua reutilização em outro
-dataset e os testes de retomada foram acrescentados ao
-[prompt do Codex local](adaptive-sam3-local-codex.md). Esses recursos novos
-ainda precisam ser implementados e testados; esta revisão não os apresenta
-como entregues. A persistência local de rodadas e adaptador ativo já existe.
+Implementados exportação/importação `.plora`, nome escolhido pelo usuário,
+compatibilidade com o mesmo checkpoint base, ativação explícita em outro
+projeto e reaplicação após reiniciar o conector. O pacote contém apenas JSON
+e tensores NPY float32, sem pickle, imagens ou anotações. Limite: 64 MiB.
+Não há checkpoint completo com pesos fundidos nem retomada do otimizador;
+novas rodadas continuam partindo do modelo base e comparando com o adaptador
+em uso. Salve também o `.plgm` e preserve as imagens originais para retomar
+as anotações. O pacote importado não herda as métricas do dataset de origem.
+
+Validação adicional em 13/10/2026: suíte Python com 69 testes passando e
+4 pulados (SAM 2/3 opcionais indisponíveis neste runtime), incluindo paridade
+exata de inferência no modelo de teste após exportação, novo dataset e
+reinício; corrupção, caminhos inesperados e formas incompatíveis preservam
+o modelo ativo. Typecheck, 24 testes Adaptive AI Node e contratos dos
+instaladores passaram. No Chromium, 23 cenários de UI passaram, incluindo
+importação, escolha explícita, reabertura, download e erro de importação; as
+respostas da API nesses testes são controladas, sem checkpoint real.
+Os testes com checkpoint SAM 3 real continuam no
+[prompt do Codex local](adaptive-sam3-local-codex.md).
 
 ## SAM 3 com o checkpoint local
 

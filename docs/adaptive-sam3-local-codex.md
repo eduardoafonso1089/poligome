@@ -4,8 +4,8 @@ Cole o bloco abaixo no Codex aberto na pasta do repositório Poligome, no
 computador que contém `C:\Users\lucas\Downloads\sam3.pt`.
 
 ```text
-Você é responsável por implementar a exportação/importação e a continuidade
-de uso dos modelos adaptados do Poligome e validar o SAM 3/Adaptive AI no meu
+Você é responsável por validar e completar a exportação/importação e a
+continuidade de uso dos modelos adaptados do Poligome e validar o SAM 3/Adaptive AI no meu
 computador usando o checkpoint real. Execute o trabalho, corrija problemas
 confirmados e registre evidências. Não termine apenas com um plano.
 
@@ -42,7 +42,17 @@ CONTEXTO E ESCOPO
   atualize às cegas o ambiente de produção nem troque as revisões fixadas.
 - Não altere configurações de segurança do Windows nem desative antivírus.
 
-1A. IMPLEMENTAR EXPORTAÇÃO, IMPORTAÇÃO E RETOMADA COM FOCO EM UX
+1A. VALIDAR E COMPLETAR EXPORTAÇÃO, IMPORTAÇÃO E RETOMADA COM FOCO EM UX
+
+A branch já contém uma primeira implementação de exportação/importação
+.plora (ZIP data-only, manifesto JSON versionado e pesos NPY float32),
+validação do modelo base e dos tensores, nome, ativação explícita e aviso
+sobre ausência de avaliação no novo dataset. Há testes unitários de paridade
+no modelo de teste, reaplicação após reinício e testes de interface com APIs
+controladas. Valide isso com o SAM 3 real e corrija lacunas; não recrie o
+formato sem necessidade. O pacote completo com pesos fundidos e a retomada
+do otimizador NÃO estão implementados. Uma nova rodada parte do SAM base.
+
 
 Objetivo: uma pessoa treina hoje, fecha o programa e continua amanhã; também
 leva aquele modelo para outro computador ou usa-o em um novo dataset sem

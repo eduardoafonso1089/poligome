@@ -47,6 +47,7 @@ import threading
 import time
 import traceback
 import uuid
+import zipfile
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -493,12 +494,106 @@ def load_adapter(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     return metadata, state
 
 
+PORTABLE_LIMIT = 64 * 1024 * 1024
+
+
+def portable_adapter(metadata: dict[str, Any], state: dict[str, Any], name: str) -> bytes:
+    """Data-only ZIP: JSON + float32 NPY tensors; no pickle or training samples."""
+    output = io.BytesIO()
+    entries = []
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
+        for index, (key, tensor) in enumerate(sorted(state.items())):
+            buffer = io.BytesIO()
+            np.save(buffer, tensor.detach().cpu().float().numpy(), allow_pickle=False)
+            data = buffer.getvalue()
+            path = f"tensors/{index}.npy"
+            archive.writestr(path, data)
+            entries.append({"key": key, "file": path, "sha256": hashlib.sha256(data).hexdigest()})
+        # Whitelist: never include arbitrary record fields, images or local paths.
+        base = metadata["base_model"]
+        clean = {"base_model": {k: base[k] for k in ("model_id", "family", "fingerprint")},
+                 "lora": metadata["lora"], "created_at": metadata.get("created_at"),
+                 "best_epoch": metadata.get("best_epoch")}
+        archive.writestr("manifest.json", json.dumps({"format": "poligome-lora-portable", "version": 1,
+                          "name": name[:120], "metadata": clean, "tensors": entries}, ensure_ascii=False))
+    data = output.getvalue()
+    if len(data) > PORTABLE_LIMIT:
+        raise ValueError("adaptador excede o limite de 64 MiB")
+    return data
+
+
+def read_portable_adapter(data: bytes) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Bound every member before reading; never extract paths or allocate from NPY headers."""
+    _require_torch()
+    if len(data) > PORTABLE_LIMIT:
+        raise ValueError("adaptador excede o limite de 64 MiB")
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        files = archive.infolist()
+        names = [entry.filename for entry in files]
+        if len(files) > 2049 or len(names) != len(set(names)) or sum(entry.file_size for entry in files) > PORTABLE_LIMIT:
+            raise ValueError("pacote inválido ou grande demais")
+        if "manifest.json" not in names or archive.getinfo("manifest.json").file_size > 512 * 1024:
+            raise ValueError("manifesto inválido")
+        manifest = json.loads(archive.read("manifest.json"))
+        if manifest.get("format") != "poligome-lora-portable" or manifest.get("version") != 1:
+            raise ValueError("formato ou versão de adaptador não suportado")
+        entries = manifest["tensors"]
+        if not isinstance(entries, list) or not entries or len(entries) > 2048:
+            raise ValueError("lista de pesos inválida")
+        expected = {"manifest.json"} | {f"tensors/{i}.npy" for i in range(len(entries))}
+        if set(names) != expected:
+            raise ValueError("arquivos inesperados no pacote")
+        state = {}
+        for index, entry in enumerate(entries):
+            if entry["file"] != f"tensors/{index}.npy" or entry["key"] in state:
+                raise ValueError("identificação de tensor inválida")
+            raw = archive.read(entry["file"])
+            if hashlib.sha256(raw).hexdigest() != entry["sha256"]:
+                raise ValueError("o arquivo de pesos está corrompido")
+            stream = io.BytesIO(raw)
+            if np.lib.format.read_magic(stream) != (1, 0):
+                raise ValueError("formato de tensor não suportado")
+            shape, fortran, dtype = np.lib.format.read_array_header_1_0(stream, max_header_size=4096)
+            payload = stream.read()
+            if dtype != np.dtype("float32") or fortran or len(shape) != 2 or any(not isinstance(n, int) or n <= 0 for n in shape) or math.prod(shape) * 4 != len(payload):
+                raise ValueError("forma ou tipo de tensor inválido")
+            array = np.frombuffer(payload, dtype=dtype).reshape(shape).copy()
+            if not np.isfinite(array).all():
+                raise ValueError("pesos contêm valores inválidos")
+            state[entry["key"]] = torch.from_numpy(array)
+        return manifest["metadata"], state, str(manifest.get("name") or "LoRA")[:120]
+
+
+def validate_adapter(model: Any, metadata: dict[str, Any], state: dict[str, Any]) -> None:
+    """Check all targets without changing the currently applied adapter."""
+    lora = metadata.get("lora") or {}
+    rank, alpha, targets = lora.get("rank"), lora.get("alpha"), lora.get("targets")
+    if not isinstance(rank, int) or not 1 <= rank <= 64 or not isinstance(alpha, (int, float)) or not math.isfinite(alpha) or not 0 < alpha <= 256:
+        raise ValueError("configuração LoRA inválida")
+    if not isinstance(targets, list) or not targets or len(targets) != len(set(targets)):
+        raise ValueError("camadas-alvo inválidas")
+    if set(state) != {f"{name}.{part}" for name in targets for part in ("lora_A", "lora_B")}:
+        raise ValueError("lista de pesos incompatível")
+    for name in targets:
+        if not (DECODER_TARGET_PATTERN.match(name) or ENCODER_TARGET_PATTERN.match(name)):
+            raise ValueError("camada não suportada")
+        module = _get_submodule(model, name)
+        base = module.base if isinstance(module, LoRALinear) else module
+        if not isinstance(base, nn.Linear):
+            raise ValueError("camada incompatível")
+        for part, shape in (("lora_A", (rank, base.in_features)), ("lora_B", (base.out_features, rank))):
+            tensor = state[f"{name}.{part}"]
+            if not isinstance(tensor, torch.Tensor) or tuple(tensor.shape) != shape or not torch.isfinite(tensor).all():
+                raise ValueError(f"peso incompatível: {name}.{part}")
+
+
 def apply_adapter(model: Any, metadata: dict[str, Any], state: dict[str, Any]) -> None:
     """Remove qualquer LoRA atual e aplica este, conferindo forma por forma."""
     lora = metadata.get("lora") or {}
     targets = lora.get("targets") or []
     if not targets:
         raise ValueError("adaptador sem camadas-alvo")
+    validate_adapter(model, metadata, state)
     remove_lora(model)
     try:
         inject_lora(model, targets, int(lora["rank"]), float(lora["alpha"]), 0.0)
@@ -3247,6 +3342,8 @@ class AdaptiveService:
             "status": record.get("status"),
             "activation": record.get("activation", "inactive"),
             "base_model_id": (record.get("base_model") or {}).get("model_id"),
+            "name": record.get("name"),
+            "imported": bool(record.get("imported")),
             "best_epoch": record.get("best_epoch"),
             "epochs_run": record.get("epochs_run"),
             "diagnosis": (record.get("diagnosis") or {}).get("state"),
@@ -3259,6 +3356,50 @@ class AdaptiveService:
         }
 
     # --- ativação --------------------------------------------------------------
+
+    def export_adapter(self, project_id: str, run_id: str, name: str = "") -> bytes:
+        store = self.store(project_id)
+        record = store.read_run(run_id) if RUN_ID_PATTERN.fullmatch(run_id) else None
+        if record is None or not (record.get("adapter") or {}).get("sha256"):
+            raise AdaptiveError(404, "adapter_missing", "não há pesos salvos nesta rodada")
+        path = store.run_dir(run_id) / "adapter.pt"
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != record["adapter"]["sha256"]:
+            raise AdaptiveError(409, "adapter_corrupt", "os pesos não conferem com o registro")
+        metadata, state = load_adapter(path)
+        try:
+            return portable_adapter(metadata, state, name.strip() or record.get("name") or run_id)
+        except ValueError as error:
+            raise AdaptiveError(400, "invalid_adapter", str(error)) from error
+
+    def import_adapter(self, project_id: str, data: bytes) -> dict[str, Any]:
+        live = self._live()
+        store = self.store(project_id)
+        try:
+            metadata, state, name = read_portable_adapter(data)
+            base = metadata["base_model"]
+            if base.get("model_id") != live.model_id or base.get("family") != live.family or base.get("fingerprint") != self.fingerprint(live):
+                raise AdaptiveError(409, "incompatible_base", "carregue o mesmo modelo base usado para treinar este adaptador")
+            with self.predictor_lock:
+                validate_adapter(live.model, metadata, state)
+        except AdaptiveError:
+            raise
+        except Exception as error:
+            raise AdaptiveError(400, "invalid_adapter", "arquivo de adaptador inválido ou corrompido") from error
+        run_id = new_run_id()
+        metadata.update(project_id=project_id, run_id=run_id)
+        directory = store.run_dir(run_id)
+        try:
+            digest = save_adapter(directory / "adapter.pt", metadata, state)
+            record = {"run_id": run_id, "project_id": project_id, "name": name, "imported": True,
+                      "created_at": _now_iso(), "finished_at": _now_iso(), "status": "completed", "activation": "inactive",
+                      "base_model": metadata["base_model"], "config": {}, "epochs": [], "lora": metadata["lora"],
+                      "adapter": {"sha256": digest, "bytes": (directory / "adapter.pt").stat().st_size}}
+            store.write_run(record)
+            store.log_history({"action": "import", "run_id": run_id, "name": name})
+        except Exception:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
+        return record
 
     def _load_compatible(self, store: ProjectStore, record: dict[str, Any], live: LiveModel) -> tuple[dict[str, Any], dict[str, Any], str]:
         fingerprint = self.fingerprint(live)
@@ -3278,6 +3419,7 @@ class AdaptiveService:
 
     def _apply_live(self, live: LiveModel, metadata: dict[str, Any], state: dict[str, Any], project_id: str, run_id: str) -> None:
         with self.predictor_lock:
+            validate_adapter(live.model, metadata, state)
             try:
                 apply_adapter(live.model, metadata, state)
             except Exception:
@@ -3425,7 +3567,7 @@ class AdaptiveService:
 def create_router(service: AdaptiveService) -> Any:
     """Rotas /adaptive/* para o FastAPI do conector."""
     from fastapi import APIRouter, Body, HTTPException
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, Response
 
     router = APIRouter(prefix="/adaptive")
 
@@ -3494,6 +3636,15 @@ def create_router(service: AdaptiveService) -> Any:
     def adaptive_activate(project_id: str, run_id: str, payload: dict = Body(default={})):
         override = bool(payload.get("override")) if isinstance(payload, dict) else False
         return call(service.activate, project_id, run_id, override)
+
+    @router.get("/projects/{project_id}/runs/{run_id}/export")
+    def adaptive_export(project_id: str, run_id: str, name: str = ""):
+        data = call(service.export_adapter, project_id, run_id, name)
+        return Response(data, media_type="application/octet-stream", headers={"Cache-Control": "no-store", "Content-Disposition": f'attachment; filename="{run_id}.plora"'})
+
+    @router.post("/projects/{project_id}/adapters/import")
+    def adaptive_import(project_id: str, payload: bytes = Body(..., media_type="application/octet-stream")):
+        return call(service.import_adapter, project_id, payload)
 
     @router.post("/projects/{project_id}/runs/{run_id}/reject")
     def adaptive_reject(project_id: str, run_id: str):

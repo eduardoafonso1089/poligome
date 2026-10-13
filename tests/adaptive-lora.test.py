@@ -131,6 +131,105 @@ class LoraTests(unittest.TestCase):
         self.assertEqual(adaptive.lora_modules(fresh), {})
 
 
+class PortableAdapterTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = Path(tempfile.mkdtemp())
+        self.harness = ServiceHarness(self.folder)
+        self.service = self.harness.service
+        model = ToySam(seed=0)
+        targets = adaptive.resolve_lora_targets(model, "decoder")
+        adaptive.inject_lora(model, targets, 4, 8, 0.0)
+        with torch.no_grad():
+            for module in adaptive.lora_modules(model).values():
+                module.lora_B.fill_(0.025)
+        self.expected = toy_output(model)
+        self.metadata = {"project_id": "source-project", "run_id": "run-20260101t000000z-abcdef",
+                         "base_model": {"model_id": self.harness.model_id, "family": "sam2", "fingerprint": f"id:{self.harness.model_id}", "checkpoint_path": "PRIVATE"},
+                         "lora": {"strategy": "decoder", "targets": targets, "rank": 4, "alpha": 8},
+                         "created_at": "2026-01-01T00:00:00Z", "best_epoch": 3, "images": "PRIVATE"}
+        self.weights = adaptive.lora_state_dict(model)
+        self.bundle = adaptive.portable_adapter(self.metadata, self.weights, "Meus núcleos v1")
+
+    def tearDown(self):
+        shutil.rmtree(self.folder)
+
+    def test_new_dataset_roundtrip_and_next_day_restore_without_source_project(self):
+        self.assertNotIn(b"PRIVATE", self.bundle)
+        record = self.service.import_adapter("target-project", self.bundle)
+        self.assertEqual(record["name"], "Meus núcleos v1")
+        self.assertTrue(record["imported"])
+        self.assertNotIn("comparison", record)
+        self.assertIsNone(self.service.status()["active"])
+        with self.assertRaises(adaptive.AdaptiveError) as context:
+            self.service.activate("target-project", record["run_id"])
+        self.assertEqual(context.exception.code, "needs_confirmation")
+        self.service.activate("target-project", record["run_id"], override=True)
+        self.assertTrue(torch.equal(self.expected, toy_output(self.harness.live_model)))
+        exported = self.service.export_adapter("target-project", record["run_id"])
+        restored = ServiceHarness(self.folder)
+        restored.service.on_model_loaded()
+        self.assertTrue(restored.service.status()["active"]["applied"])
+        self.assertTrue(torch.equal(self.expected, toy_output(restored.live_model)))
+        with tempfile.TemporaryDirectory() as other:
+            fresh = ServiceHarness(Path(other))
+            imported = fresh.service.import_adapter("another-dataset", exported)
+            fresh.service.activate("another-dataset", imported["run_id"], override=True)
+            self.assertTrue(torch.equal(self.expected, toy_output(fresh.live_model)))
+
+    def test_incompatible_corrupt_and_wrong_shape_preserve_active_predictions(self):
+        record = self.service.import_adapter("target-project", self.bundle)
+        self.service.activate("target-project", record["run_id"], override=True)
+        active = self.service.status()["active"]
+        bad_base = dict(self.metadata, base_model=dict(self.metadata["base_model"], fingerprint="wrong"))
+        bad_shape = dict(self.weights)
+        first = next(iter(bad_shape))
+        bad_shape[first] = torch.zeros((1, 1))
+        invalid = [b"not a zip", self.bundle[:-10], adaptive.portable_adapter(bad_base, self.weights, "wrong"), adaptive.portable_adapter(self.metadata, bad_shape, "wrong")]
+        for data in invalid:
+            with self.subTest(size=len(data)), self.assertRaises(adaptive.AdaptiveError):
+                self.service.import_adapter("another-dataset", data)
+            self.assertEqual(active, self.service.status()["active"])
+            self.assertTrue(torch.equal(self.expected, toy_output(self.harness.live_model)))
+
+    def test_tampering_and_unexpected_zip_paths_are_refused(self):
+        import io
+        import zipfile
+        for extra in ("../escape.npy", "images/private.png"):
+            buffer = io.BytesIO(self.bundle)
+            with zipfile.ZipFile(buffer, "a") as archive:
+                archive.writestr(extra, "extra")
+            with self.assertRaises(adaptive.AdaptiveError):
+                self.service.import_adapter("target-project", buffer.getvalue())
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(self.bundle)) as source, zipfile.ZipFile(buffer, "w") as target:
+            for name in source.namelist():
+                data = bytearray(source.read(name))
+                if name == "tensors/0.npy":
+                    data[-1] ^= 1
+                target.writestr(name, data)
+        with self.assertRaises(adaptive.AdaptiveError):
+            self.service.import_adapter("target-project", buffer.getvalue())
+
+    def test_http_binary_import_export_and_invalid_file(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        app = FastAPI()
+        app.include_router(adaptive.create_router(self.service))
+        client = TestClient(app)
+        response = client.post("/adaptive/projects/target-project/adapters/import", content=self.bundle, headers={"Content-Type": "application/octet-stream"})
+        self.assertEqual(response.status_code, 200, response.text)
+        run_id = response.json()["run_id"]
+        response = client.get(f"/adaptive/projects/target-project/runs/{run_id}/export?name=Exported")
+        self.assertEqual(response.status_code, 200, response.text)
+        metadata, weights, name = adaptive.read_portable_adapter(response.content)
+        self.assertEqual(name, "Exported")
+        self.assertEqual(metadata["base_model"], {key: self.metadata["base_model"][key] for key in ("model_id", "family", "fingerprint")})
+        self.assertEqual(set(weights), set(self.weights))
+        response = client.post("/adaptive/projects/target-project/adapters/import", content=b"bad", headers={"Content-Type": "application/octet-stream"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"]["code"], "invalid_adapter")
+
+
 class MaskAndPromptTests(unittest.TestCase):
     def test_polygon_with_hole_rasterizes_to_ring(self):
         outer = [10, 10, 50, 10, 50, 50, 10, 50]

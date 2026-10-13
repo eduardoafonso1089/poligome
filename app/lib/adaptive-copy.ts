@@ -10,6 +10,20 @@ import type { Language } from "./i18n";
  * alvos de referência, não probabilidade de sucesso.
  */
 const pt = {
+  activeNamedAdapter: "Em uso: {name}",
+  next_imported: "Revise o adaptador importado e confirme se deseja usá-lo neste projeto. Não é necessário treinar de novo.",
+  portableTitle: "Salvar e reutilizar o adaptador",
+  exportAdapter: "Exportar LoRA",
+  importAdapter: "Importar LoRA",
+  adapterName: "Nome do adaptador",
+  portableNote: "O arquivo .plora guarda apenas os pesos LoRA e requer o mesmo modelo SAM base. Guarde também seu projeto .plgm para continuar as anotações amanhã. O conector reaplica o adaptador ativo quando reinicia com o mesmo modelo base.",
+  importedAdapter: "Importado: {name}",
+  importedNote: "Este adaptador não foi avaliado neste dataset. Ativar não inicia um treino nem comprova melhora; revise algumas segmentações antes de usá-lo em todo o projeto.",
+  confirmImported: "Quero usar este adaptador neste projeto.",
+  err_invalid_adapter: "Arquivo inválido, corrompido ou incompatível. O modelo em uso foi mantido.",
+  adapterTooLarge: "O adaptador pode ter no máximo 64 MiB.",
+  usingOtherAdapter: "Em uso: adaptador de outro projeto",
+
   pendingSync: "Imagens com anotações aprovadas mudaram desde o último envio: {n}. Envie de novo para a análise e o treino usarem a versão atual.",
   stepData: "Dados",
   stepTraining: "Treino",
@@ -324,6 +338,20 @@ export type AdaptiveCopyKey = keyof typeof pt;
 export type AdaptiveCopy = Record<AdaptiveCopyKey, string>;
 
 const en: AdaptiveCopy = {
+
+  activeNamedAdapter: "In use: {name}",
+  next_imported: "Review the imported adapter and confirm whether to use it in this project. No retraining is required.",  portableTitle: "Save and reuse the adapter",
+  exportAdapter: "Export LoRA",
+  importAdapter: "Import LoRA",
+  adapterName: "Adapter name",
+  portableNote: "The .plora file contains only LoRA weights and requires the same SAM base model. Also save your .plgm project to continue annotating tomorrow. The connector restores the active adapter when restarted with the same base model.",
+  importedAdapter: "Imported: {name}",
+  importedNote: "This adapter has not been evaluated on this dataset. Activation neither starts training nor demonstrates improvement; review a few segmentations before using it across the project.",
+  confirmImported: "I want to use this adapter in this project.",
+  err_invalid_adapter: "Invalid, corrupted or incompatible file. The model in use was preserved.",
+  adapterTooLarge: "The adapter must be at most 64 MiB.",
+  usingOtherAdapter: "In use: adapter from another project",
+
   pendingSync: "Images whose approved annotations changed since the last send: {n}. Send again so analysis and training use the current version.",
   stepData: "Data",
   stepTraining: "Training",
@@ -636,6 +664,20 @@ const en: AdaptiveCopy = {
 
 const fr: AdaptiveCopy = {
   ...en,
+  activeNamedAdapter: "Utilisé : {name}",
+  next_imported: "Examinez l’adaptateur importé et confirmez son utilisation dans ce projet. Aucun réentraînement n’est nécessaire.",
+  portableTitle: "Enregistrer et réutiliser l’adaptateur",
+  exportAdapter: "Exporter LoRA",
+  importAdapter: "Importer LoRA",
+  adapterName: "Nom de l’adaptateur",
+  portableNote: "Le fichier .plora contient uniquement les poids LoRA et nécessite le même modèle SAM de base. Enregistrez aussi votre projet .plgm pour reprendre les annotations demain. Le connecteur réapplique l’adaptateur actif au redémarrage avec le même modèle de base.",
+  importedAdapter: "Importé : {name}",
+  importedNote: "Cet adaptateur n’a pas été évalué sur ce jeu de données. L’activation ne lance aucun entraînement et ne prouve aucune amélioration ; vérifiez quelques segmentations avant de l’utiliser sur tout le projet.",
+  confirmImported: "Je souhaite utiliser cet adaptateur dans ce projet.",
+  err_invalid_adapter: "Fichier invalide, corrompu ou incompatible. Le modèle utilisé a été conservé.",
+  adapterTooLarge: "L’adaptateur doit faire au maximum 64 Mio.",
+  usingOtherAdapter: "Utilisé : adaptateur d’un autre projet",
+
   pendingSync: "Images dont les annotations approuvées ont changé depuis le dernier envoi : {n}. Renvoyez pour que l’analyse et l’entraînement utilisent la version actuelle.",
   stepData: "Données",
   stepTraining: "Entraînement",
@@ -936,6 +978,20 @@ const fr: AdaptiveCopy = {
 
 const es: AdaptiveCopy = {
   ...en,
+  activeNamedAdapter: "En uso: {name}",
+  next_imported: "Revisa el adaptador importado y confirma si deseas usarlo en este proyecto. No es necesario volver a entrenar.",
+  portableTitle: "Guardar y reutilizar el adaptador",
+  exportAdapter: "Exportar LoRA",
+  importAdapter: "Importar LoRA",
+  adapterName: "Nombre del adaptador",
+  portableNote: "El archivo .plora contiene solo los pesos LoRA y requiere el mismo modelo SAM base. Guarda también tu proyecto .plgm para continuar las anotaciones mañana. El conector restaura el adaptador activo al reiniciar con el mismo modelo base.",
+  importedAdapter: "Importado: {name}",
+  importedNote: "Este adaptador no se ha evaluado en este dataset. Activarlo no inicia un entrenamiento ni demuestra una mejora; revisa algunas segmentaciones antes de usarlo en todo el proyecto.",
+  confirmImported: "Quiero usar este adaptador en este proyecto.",
+  err_invalid_adapter: "Archivo inválido, corrupto o incompatible. Se conservó el modelo en uso.",
+  adapterTooLarge: "El adaptador debe tener como máximo 64 MiB.",
+  usingOtherAdapter: "En uso: adaptador de otro proyecto",
+
   pendingSync: "Imágenes cuyas anotaciones aprobadas cambiaron desde el último envío: {n}. Envía de nuevo para que el análisis y el entrenamiento usen la versión actual.",
   stepData: "Datos",
   stepTraining: "Entrenamiento",

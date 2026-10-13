@@ -1180,6 +1180,8 @@ class PredictionRequestGuard:
         # /byom/annotate carrega a mesma imagem inteira que /predict, então
         # precisa do mesmo teto de corpo e do mesmo limite de concorrência.
         path = str(scope.get("path", "")).rstrip("/")
+        is_adapter_import = re.fullmatch(r"/adaptive/projects/[^/]+/adapters/import", path) is not None
+        body_limit = 64 * 1024 * 1024 if is_adapter_import else self.max_body_bytes
         is_prediction = (
             scope.get("type") == "http"
             and scope.get("method") == "POST"
@@ -1188,6 +1190,7 @@ class PredictionRequestGuard:
                 # O envio de uma imagem aprovada ao Adaptive AI carrega a mesma
                 # imagem inteira de /predict.
                 or re.fullmatch(r"/adaptive/projects/[^/]+/(items|candidates)/[^/]+", path) is not None
+                or is_adapter_import
             )
         )
         if not is_prediction:
@@ -1205,7 +1208,7 @@ class PredictionRequestGuard:
             if declared_size < 0:
                 await self._reject(scope, receive, send, 400, "Content-Length inválido.")
                 return
-            if declared_size > self.max_body_bytes:
+            if declared_size > body_limit:
                 await self._reject(
                     scope,
                     receive,
@@ -1224,7 +1227,7 @@ class PredictionRequestGuard:
                 message = await receive()
                 if message.get("type") == "http.request":
                     received_bytes += len(message.get("body", b""))
-                    if received_bytes > self.max_body_bytes:
+                    if received_bytes > body_limit:
                         raise _RequestBodyTooLarge
                 return message
 
