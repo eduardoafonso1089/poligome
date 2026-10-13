@@ -753,6 +753,32 @@ class LearningCurveAndSuggestionTests(unittest.TestCase):
         finally:
             shutil.rmtree(folder)
 
+    def test_round_can_be_activated_and_cancelled_during_the_curve(self):
+        folder = Path(tempfile.mkdtemp())
+        try:
+            harness = ServiceHarness(folder)
+            harness.fill("project-curvecancel", 32)
+            run = harness.service.start_training("project-curvecancel", dict(FAST, max_epochs=6))
+            deadline = time.time() + 300
+            while harness.service.get_run("project-curvecancel", run["run_id"]).get("stage") != "learning_curve" and time.time() < deadline:
+                time.sleep(0.05)
+            store = harness.service.store("project-curvecancel")
+            record = store.read_run(run["run_id"])
+            self.assertEqual(record["stage"], "learning_curve")
+            self.assertIn("comparison", record)
+            record["comparison"]["decision"]["outcome"] = "improved"
+            store.write_run(record)
+            harness.service.activate("project-curvecancel", run["run_id"])
+            self.assertEqual(harness.service.active_summary()["run_id"], run["run_id"])
+            harness.service.cancel("project-curvecancel", run["run_id"])
+            harness.service.wait_for_training(300)
+            final = harness.service.get_run("project-curvecancel", run["run_id"])
+            self.assertEqual(final["status"], "completed", final.get("error"))
+            self.assertEqual(final["learning_curve"], {"skipped": "cancelled"})
+            self.assertEqual(final["activation"], "active", "the training thread must not overwrite an activation")
+        finally:
+            shutil.rmtree(folder)
+
     def test_learning_curve_can_be_turned_off(self):
         folder = Path(tempfile.mkdtemp())
         try:

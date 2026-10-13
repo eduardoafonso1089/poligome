@@ -8,7 +8,7 @@ import {
 import { getCopy, fill, type Language } from "../lib/i18n";
 import { getAdaptiveCopy, type AdaptiveCopy } from "../lib/adaptive-copy";
 import { connectorBaseUrl } from "../lib/sam-connector";
-import { planAdaptiveCandidates, planAdaptiveDataset, SELECT_ASSET_EVENT } from "../lib/adaptive-dataset";
+import { diffAgainstConnector, planAdaptiveCandidates, planAdaptiveDataset, SELECT_ASSET_EVENT } from "../lib/adaptive-dataset";
 import {
   AdaptiveRequestError, adaptiveApi, syncAdaptiveCandidates, syncAdaptiveDataset,
   type AdaptiveReason, type AdaptiveStatus, type ComparisonSummary, type EpochMetrics, type LearningCurve, type ReadinessReport, type RunRecord, type RunSummary, type Suggestion,
@@ -372,10 +372,11 @@ export type NextStep = { stage: 0 | 1 | 2 | 3; key: "analyze" | "annotate" | "tr
  * caso corresponde a um estado que o conector devolveu.
  */
 export function nextStep({ report, record, activeHere }: { report: ReadinessReport | null; record: RunRecord | null; activeHere: boolean }): NextStep {
-  if (record && RUNNING.has(record.status)) return { stage: 1, key: "training" };
+  const compared = Boolean(record?.comparison) && (record?.status === "completed" || record?.stage === "learning_curve");
+  if (record && RUNNING.has(record.status) && !compared) return { stage: 1, key: "training" };
   if (activeHere && (!record || record.activation === "active")) return { stage: 3, key: "active" };
   if (record && ["failed", "interrupted"].includes(record.status)) return { stage: 1, key: "failed" };
-  const outcome = record?.status === "completed" ? record.comparison?.decision.outcome : undefined;
+  const outcome = compared ? record?.comparison?.decision.outcome : undefined;
   if (outcome === "improved" && record?.activation !== "rejected") return { stage: 2, key: "activate" };
   if (outcome === "insufficient_evidence") return { stage: 0, key: "more_evidence" };
   if (outcome === "not_improved") return { stage: 0, key: "kept" };
@@ -443,6 +444,29 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
   }, [base, projectId]);
 
   useEffect(() => { void refreshStatus().then((next) => { if (next) void refreshRuns(); }); }, [refreshStatus, refreshRuns]);
+
+  // Reabrir o painel não pode apagar a análise: ela está no conector. Busca o
+  // que já foi enviado e a avaliação correspondente, sem reenviar nada.
+  const [remoteItems, setRemoteItems] = useState<Record<string, string> | null>(null);
+  useEffect(() => {
+    if (connector !== "ready" || !projectId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const remote = await adaptiveApi.items(base, projectId);
+        if (cancelled) return;
+        setRemoteItems(remote.items);
+        if (Object.keys(remote.items).length) {
+          const assessed = await adaptiveApi.assess(base, projectId);
+          if (!cancelled) setReport((current) => current ?? assessed);
+        }
+      } catch {
+        // Sem análise anterior: o botão de enviar continua sendo o caminho.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [base, projectId, connector]);
+  const pendingSync = plan && remoteItems ? (() => { const diff = diffAgainstConnector(plan, remoteItems); return diff.upload.length + diff.remove.length; })() : 0;
   useEffect(() => () => { syncAbort.current?.abort(); }, []);
 
   useEffect(() => {
@@ -519,6 +543,7 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
       setSyncNote(fill(t.syncResult, { uploaded: result.uploaded, removed: result.removed, unchanged: result.unchanged })
         + (result.failed.length ? ` ${fill(t.syncFailed, { n: result.failed.length, names: result.failed.slice(0, 3).map((entry) => entry.name).join(", ") })}` : ""));
       setReport(await adaptiveApi.assess(base, project.id));
+      setRemoteItems((await adaptiveApi.items(base, project.id)).items);
     } finally {
       setSyncProgress(null);
     }
@@ -605,6 +630,7 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
           </div>
           {syncProgress && syncProgress.total > 0 && <progress className="adaptive-progress" max={syncProgress.total} value={syncProgress.done} aria-label={t.syncingLabel} />}
           {syncNote && <p className="adaptive-note">{syncNote}</p>}
+          {report && pendingSync > 0 && <p className="adaptive-callout warn"><AlertTriangle size={14} />{fill(t.pendingSync, { n: pendingSync })}</p>}
           {report && <ReadinessView t={t} report={report} />}
         </section>
 
