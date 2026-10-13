@@ -72,7 +72,10 @@ except Exception:  # pragma: no cover - ambiente sem torch
 ADAPTIVE_API_VERSION = 1
 LORA_FORMAT = "poligome-lora"
 LORA_FORMAT_VERSION = 1
-SUPPORTED_FAMILIES = ("sam2",)
+SUPPORTED_FAMILIES = ("sam2", "sam3")
+# No SAM 3 só o mask decoder do modo interativo (pontos e caixas) recebe LoRA:
+# o backbone de ~840 M de parâmetros fica congelado e compartilhado.
+DECODER_ONLY_FAMILIES = ("sam3",)
 
 PROJECT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{7,63}$")
 ITEM_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,96}$")
@@ -114,6 +117,10 @@ class ReadinessConfig:
     redundancy_warning: float = 0.4
     holdout_fraction: float = 0.25
     dhash_max_distance: int = 6
+    # O dHash sozinho é enganado por gradientes de iluminação (comuns em
+    # microscopia): imagens diferentes com a mesma luz caem a ≤ 6 bits. Por isso
+    # ele só vale junto com uma miniatura minimamente parecida.
+    dhash_min_thumb_correlation: float = 0.9
     thumb_min_correlation: float = 0.97
     # Desligado por padrão: o cosseno entre embeddings agregados do SAM não é
     # calibrado (com pesos aleatórios, todas as imagens passam de 0,985), então
@@ -147,6 +154,12 @@ class TrainConfig:
     augment_color: bool = True
     seed: int = 1234
     max_clicks: int = 8
+    # Curva de aprendizado: refaz o treino em frações dos grupos de treino para
+    # estimar quanto rende anotar mais. Custa cerca de 1,5x o treino principal.
+    learning_curve: bool = True
+    # Precisão mista bfloat16 em GPU NVIDIA que a suporta (como no treino
+    # oficial do SAM 2). Em CPU e MPS o treino fica em float32.
+    mixed_precision: bool = True
     bootstrap_samples: int = 2000
     min_effect: float = 0.01
 
@@ -261,7 +274,7 @@ def new_run_id() -> str:
 # Projeções de atenção do mask decoder do SAM 2 (self-attention dos tokens,
 # atenção cruzada token→imagem e imagem→token, e a atenção final).
 DECODER_TARGET_PATTERN = re.compile(
-    r"^sam_mask_decoder\.transformer\.(layers\.\d+\.(self_attn|cross_attn_token_to_image|cross_attn_image_to_token)"
+    r"^(?:inst_interactive_predictor\.model\.)?sam_mask_decoder\.transformer\.(layers\.\d+\.(self_attn|cross_attn_token_to_image|cross_attn_image_to_token)"
     r"|final_attn_token_to_image)\.(q_proj|k_proj|v_proj|out_proj)$"
 )
 ENCODER_TARGET_PATTERN = re.compile(r"^image_encoder\.trunk\.blocks\.(\d+)\.attn\.(qkv|proj)$")
@@ -706,6 +719,20 @@ class _UnionFind:
                 self.parent[ra] = rb
 
 
+def near_duplicate_reason(a: dict[str, Any], b: dict[str, Any], config: ReadinessConfig) -> str | None:
+    """Por que dois descritores indicam a mesma imagem (recodificada, com ruído), ou None."""
+    thumb_a = np.asarray(a.get("thumb") or [], dtype=np.float32)
+    thumb_b = np.asarray(b.get("thumb") or [], dtype=np.float32)
+    correlation = float(thumb_a @ thumb_b) if thumb_a.size and thumb_a.size == thumb_b.size else None
+    if correlation is not None and correlation >= config.thumb_min_correlation:
+        return "thumbnail"
+    hash_a, hash_b = a.get("dhash"), b.get("dhash")
+    if hash_a and hash_b and _hamming(hash_a, hash_b) <= config.dhash_max_distance:
+        if correlation is None or correlation >= config.dhash_min_thumb_correlation:
+            return "dhash"
+    return None
+
+
 def group_items(items: list[dict[str, Any]], config: ReadinessConfig) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Agrupa imagens correlacionadas. Devolve (grupo por item, pares duplicados).
 
@@ -727,17 +754,11 @@ def group_items(items: list[dict[str, Any]], config: ReadinessConfig) -> tuple[d
 
     duplicates: list[dict[str, Any]] = []
     descriptors = [item.get("descriptor") or {} for item in items]
-    thumbs = [np.asarray(desc.get("thumb") or [], dtype=np.float32) for desc in descriptors]
     embeddings = [item.get("embedding") for item in items]
     for i in range(len(items)):
         for j in range(i + 1, len(items)):
-            reason = None
-            hash_i, hash_j = descriptors[i].get("dhash"), descriptors[j].get("dhash")
-            if hash_i and hash_j and _hamming(hash_i, hash_j) <= config.dhash_max_distance:
-                reason = "dhash"
-            elif thumbs[i].size and thumbs[i].size == thumbs[j].size and float(thumbs[i] @ thumbs[j]) >= config.thumb_min_correlation:
-                reason = "thumbnail"
-            elif config.embedding_min_cosine is not None and embeddings[i] is not None and embeddings[j] is not None:
+            reason = near_duplicate_reason(descriptors[i], descriptors[j], config)
+            if reason is None and config.embedding_min_cosine is not None and embeddings[i] is not None and embeddings[j] is not None:
                 a, b = embeddings[i], embeddings[j]
                 cosine = float(a @ b / max(1e-9, np.linalg.norm(a) * np.linalg.norm(b)))
                 if cosine >= config.embedding_min_cosine:
@@ -977,12 +998,14 @@ class Sam2Segmenter:
     def __init__(self, model: Any, device: str):
         _require_torch()
         self.model = model
+        self.sam = model
         self.device = torch.device(device)
         self.resolution = int(getattr(model, "image_size", 1024))
         self.mean = torch.tensor(self.MEAN, device=self.device).view(1, 3, 1, 1)
         self.std = torch.tensor(self.STD, device=self.device).view(1, 3, 1, 1)
         sizes = [self.resolution // 4, self.resolution // 8, self.resolution // 16]
         self.feature_sizes = [(size, size) for size in sizes]
+        self.low_res_size = self.resolution // 4
 
     def preprocess(self, pixels: np.ndarray) -> Any:
         # Redimensiona em CPU: o bilinear com antialias não existe em todo
@@ -1005,7 +1028,7 @@ class Sam2Segmenter:
 
     def decode(self, features: dict[str, Any], coords: Any, labels: Any, mask_input: Any = None) -> tuple[Any, Any]:
         """Uma máscara por prompt (multimask desligado, como o editor pede)."""
-        model = self.model
+        model = self.sam
         sparse, dense = model.sam_prompt_encoder(points=(coords, labels), boxes=None, masks=mask_input)
         batch = coords.shape[0]
         low_res, iou, _, _ = model.sam_mask_decoder(
@@ -1049,6 +1072,76 @@ class Sam2Segmenter:
         return F.interpolate(low_res.float(), size=(height, width), mode="bilinear", align_corners=False)
 
 
+class Sam3TrainingModel(nn.Module if TORCH_AVAILABLE else object):  # type: ignore[misc]
+    """O que o treino do SAM 3 precisa: uma cópia só do preditor interativo.
+
+    O backbone do modelo vivo é usado por referência, sem entrar na árvore de
+    módulos (não é copiado, não é congelado de novo, não aparece nos nomes).
+    Os nomes das camadas do decoder ficam iguais aos do modelo vivo, então o
+    adaptador treinado aqui se aplica lá sem tradução.
+    """
+
+    def __init__(self, live_model: Any, encode_lock: Any):
+        super().__init__()
+        self.inst_interactive_predictor = copy.deepcopy(live_model.inst_interactive_predictor)
+        object.__setattr__(self, "live_model", live_model)
+        object.__setattr__(self, "encode_lock", encode_lock)
+
+
+class Sam3Segmenter(Sam2Segmenter):
+    """O modo interativo do SAM 3: backbone do SAM 3, decoder no estilo SAM 2.
+
+    Reproduz `Sam3Processor.set_image` e `Sam3Image.predict_inst`, mas sem
+    `inference_mode`, para que as features possam alimentar um decoder com
+    gradiente. O backbone roda sob o lock do preditor quando é o do modelo vivo.
+    """
+
+    def __init__(self, model: Any, device: str):
+        _require_torch()
+        from sam3.model.sam3_image_processor import Sam3Processor
+
+        source = getattr(model, "live_model", model)
+        self.model = model
+        self.device = torch.device(device)
+        self.predictor = model.inst_interactive_predictor
+        self.sam = self.predictor.model
+        self.processor = Sam3Processor(source, device=device)
+        self._source = source
+        self._lock = getattr(model, "encode_lock", None)
+        self.resolution = int(self.sam.image_size)
+        self.feature_sizes = [tuple(size) for size in self.predictor._bb_feat_sizes]
+        self.low_res_size = int(self.feature_sizes[-1][0]) * 4
+
+    def _autocast(self):
+        if self.device.type == "cuda":
+            return torch.autocast("cuda", dtype=torch.bfloat16)
+        return contextlib.nullcontext()
+
+    def preprocess(self, pixels: np.ndarray) -> Any:
+        from torchvision.transforms import v2
+
+        image = v2.functional.to_image(Image.fromarray(np.ascontiguousarray(pixels))).to(self.device)
+        return self.processor.transform(image).unsqueeze(0)
+
+    def encode(self, image_tensor: Any) -> dict[str, Any]:
+        lock = self._lock if self._lock is not None else contextlib.nullcontext()
+        with lock, torch.no_grad(), self._autocast():
+            backbone_out = self._source.backbone.forward_image(image_tensor)["sam2_backbone_out"]
+            backbone_out["backbone_fpn"][0] = self.sam.sam_mask_decoder.conv_s0(backbone_out["backbone_fpn"][0])
+            backbone_out["backbone_fpn"][1] = self.sam.sam_mask_decoder.conv_s1(backbone_out["backbone_fpn"][1])
+            _, vision_feats, _, _ = self.sam._prepare_backbone_features(backbone_out)
+            vision_feats[-1] = vision_feats[-1] + self.sam.no_mem_embed
+            feats = [
+                feat.permute(1, 2, 0).reshape(1, -1, *size).float().clone()
+                for feat, size in zip(vision_feats[::-1], self.feature_sizes[::-1])
+            ][::-1]
+        return {"image_embed": feats[-1], "high_res_feats": feats[:-1]}
+
+
+def segmenter_for_family(family: str) -> Callable[[Any, str], Any]:
+    return Sam3Segmenter if family == "sam3" else Sam2Segmenter
+
+
 def pooled_embedding(segmenter: Sam2Segmenter, pixels: np.ndarray) -> np.ndarray:
     """Média e desvio espaciais do image_embed: descritor de diversidade do domínio."""
     with torch.inference_mode(), lora_disabled(segmenter.model):
@@ -1083,6 +1176,7 @@ class ProjectStore:
         self.root = root / "projects" / project_id
         self.items_dir = self.root / "items"
         self.runs_dir = self.root / "runs"
+        self.candidates_dir = self.root / "candidates"
 
     def ensure(self) -> dict[str, Any]:
         meta_path = self.root / "project.json"
@@ -1132,6 +1226,25 @@ class ProjectStore:
         if mask is None:
             raise FileNotFoundError(f"máscara ausente: {item['key']}/{instance['mask_file']}")
         return mask > 127
+
+    # --- candidatas (imagens ainda sem anotação) -------------------------
+
+    def candidate_path(self, key: str) -> Path:
+        if not ITEM_KEY_PATTERN.fullmatch(key):
+            raise ValueError("chave de imagem inválida")
+        return self.candidates_dir / f"{key}.json"
+
+    def list_candidates(self) -> list[dict[str, Any]]:
+        found = []
+        try:
+            paths = sorted(self.candidates_dir.glob("*.json"))
+        except OSError:
+            return found
+        for path in paths:
+            record = _read_json(path)
+            if isinstance(record, dict) and record.get("key") == path.stem:
+                found.append(record)
+        return found
 
     # --- divisão, snapshots e execuções ---------------------------------
 
@@ -1311,6 +1424,120 @@ def ingest_item(
                     path.parent.mkdir(parents=True, exist_ok=True)
                     np.save(path, vector)
     return {"key": key, "instances": len(record["instances"]), "rejected": record["rejected"]}
+
+
+def ingest_candidate(
+    store: ProjectStore,
+    key: str,
+    payload: dict[str, Any],
+    decode: Callable[[str], tuple[np.ndarray, bytes, str]] = decode_data_url,
+    embed: Callable[[np.ndarray], tuple[str, np.ndarray] | None] | None = None,
+) -> dict[str, Any]:
+    """Guarda só o que a sugestão precisa de uma imagem sem anotação: descritores.
+
+    A imagem em si não fica no disco; o embedding vai para o mesmo cache por
+    sha256 das imagens aprovadas.
+    """
+    store.ensure()
+    path = store.candidate_path(key)
+    if not path.exists() and len(store.list_candidates()) >= MAX_ITEMS_PER_PROJECT:
+        raise ValueError("limite de imagens do projeto atingido")
+    pixels, raw, _ = decode(payload.get("image", ""))
+    digest = hashlib.sha256(raw).hexdigest()
+    model_key = None
+    if embed is not None:
+        with contextlib.suppress(Exception):
+            result = embed(pixels)
+            if result is not None:
+                model_key, vector = result
+                target = store.root / "embeddings" / model_key / f"{digest}.npy"
+                if not target.exists():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    np.save(target, vector)
+    record = {
+        "key": key,
+        "image_sha256": digest,
+        "fingerprint": str(payload.get("fingerprint", ""))[:128],
+        "descriptor": image_descriptor(pixels),
+        "updated_at": _now_iso(),
+    }
+    _write_json_atomic(path, record)
+    return {"key": key, "embedded": model_key is not None}
+
+
+def suggest_next(store: ProjectStore, config: ReadinessConfig, model_key: str | None, limit: int = 10) -> dict[str, Any]:
+    """Quais imagens anotar primeiro: as que mais aumentam a cobertura do dataset.
+
+    Seleção gulosa de k-centros (core-set, Sener & Savarese 2018) no espaço dos
+    embeddings do SAM padronizados pelo projeto: a cada passo escolhe a imagem
+    mais distante de tudo que já está anotado ou já foi sugerido. Quase
+    duplicatas de imagens anotadas vão para o fim. O "quão nova" é a distância
+    dividida pela distância típica entre vizinhos já anotados.
+    """
+    items = store.list_items()
+    candidates = store.list_candidates()
+    if not candidates:
+        return {"method": None, "suggestions": [], "annotated": len(items)}
+    all_records = items + candidates
+    embeddings = load_embeddings(store, all_records, model_key)
+    use_embeddings = bool(model_key) and len(embeddings) == len(all_records)
+
+    def vector(record: dict[str, Any]) -> np.ndarray:
+        if use_embeddings:
+            return np.asarray(embeddings[record["key"]], dtype=np.float32)
+        descriptor = record.get("descriptor") or {}
+        return np.concatenate([
+            np.asarray(descriptor.get("thumb") or [0.0], dtype=np.float32),
+            np.sqrt(np.asarray(descriptor.get("color") or [0.0], dtype=np.float32)),
+        ])
+
+    stack = np.stack([vector(record) for record in all_records])
+    stack = (stack - stack.mean(axis=0)) / (stack.std(axis=0) + 1e-6)
+    annotated = stack[: len(items)]
+    pool = stack[len(items):]
+
+    duplicate = set()
+    for index, candidate in enumerate(candidates):
+        for item in items:
+            if near_duplicate_reason(candidate.get("descriptor") or {}, item.get("descriptor") or {}, config):
+                duplicate.add(index)
+                break
+
+    if len(annotated) >= 2:
+        pairwise = np.linalg.norm(annotated[:, None, :] - annotated[None, :, :], axis=-1)
+        np.fill_diagonal(pairwise, np.inf)
+        typical = float(np.median(pairwise.min(axis=1)))
+    else:
+        typical = float(np.median(np.linalg.norm(pool - pool.mean(axis=0), axis=1))) or 1.0
+    typical = max(typical, 1e-6)
+
+    if len(annotated):
+        nearest = np.linalg.norm(pool[:, None, :] - annotated[None, :, :], axis=-1).min(axis=1)
+    else:
+        nearest = np.full(len(pool), np.inf)
+    order = []
+    remaining = [index for index in range(len(pool)) if index not in duplicate]
+    distances = nearest.copy()
+    while remaining and len(order) < limit:
+        pick = max(remaining, key=lambda index: (distances[index], -index))
+        order.append((pick, float(distances[pick])))
+        remaining.remove(pick)
+        distances = np.minimum(distances, np.linalg.norm(pool - pool[pick], axis=1))
+    suggestions = []
+    for rank, (index, distance) in enumerate(order, start=1):
+        novelty = None if not np.isfinite(distance) else distance / typical
+        reason = "first_examples" if novelty is None else "novel" if novelty >= 1.5 else "typical" if novelty >= 0.5 else "similar"
+        suggestions.append({"key": candidates[index]["key"], "rank": rank, "novelty": novelty, "reason": reason})
+    for index in sorted(duplicate):
+        if len(suggestions) >= limit:
+            break
+        suggestions.append({"key": candidates[index]["key"], "rank": len(suggestions) + 1, "novelty": 0.0, "reason": "near_duplicate"})
+    return {
+        "method": "sam2_embedding" if use_embeddings else "low_level",
+        "suggestions": suggestions,
+        "annotated": len(items),
+        "candidates": len(candidates),
+    }
 
 
 def load_embeddings(store: ProjectStore, items: list[dict[str, Any]], model_key: str | None) -> dict[str, np.ndarray]:
@@ -1743,6 +1970,16 @@ class TrainingJob:
         if self.cancel_event.is_set():
             raise TrainingCancelled()
 
+    def precision(self) -> str:
+        if self.config.mixed_precision and str(self.device).startswith("cuda") and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+            return "bfloat16"
+        return "float32"
+
+    def _autocast(self):
+        if self.precision() == "bfloat16":
+            return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        return contextlib.nullcontext()
+
     # --- execução --------------------------------------------------------
 
     def run(self) -> dict[str, Any]:
@@ -1755,7 +1992,8 @@ class TrainingJob:
             self._train(model, data)
             self._check_cancel()
             self._save(status="evaluating", stage="evaluating")
-            self._compare(model, data)
+            evaluations = self._compare(model, data)
+            self._learning_curve(model, data, evaluations)
             self._save(status="completed", stage="completed", finished_at=_now_iso(), timing={**self.record.get("timing", {}), "total_seconds": round(time.monotonic() - started, 1)})
             self._event("completed", "rodada concluída")
         except TrainingCancelled:
@@ -1822,6 +2060,7 @@ class TrainingJob:
         learning_rate = config.learning_rate or (3e-4 if strategy == "decoder" else 2e-4)
         max_epochs = config.max_epochs or (40 if strategy == "decoder" else 20)
         targets = resolve_lora_targets(model, strategy, config.encoder_blocks)
+        torch.manual_seed(config.seed)
         inject_lora(model, targets, config.rank, config.alpha, config.dropout)
         trainable, total = freeze_base_parameters(model)
         segmenter = self.segmenter_factory(model, self.device)
@@ -1839,7 +2078,7 @@ class TrainingJob:
                 "encoder_blocks": config.encoder_blocks if strategy == "encoder_decoder" else 0,
                 "targets": targets, "trainable_params": trainable, "total_params": total,
             },
-            resolved={"learning_rate": learning_rate, "max_epochs": max_epochs},
+            resolved={"learning_rate": learning_rate, "max_epochs": max_epochs, "device": self.device, "precision": self.precision()},
         )
         self._event("prepared", "dados e modelo prontos", fit=len(fit), val=len(val), holdout=len(holdout), trainable=trainable)
         return model, {
@@ -1853,6 +2092,35 @@ class TrainingJob:
         context = contextlib.nullcontext() if grad else torch.no_grad()
         with context:
             return segmenter.encode(segmenter.preprocess(pixels))
+
+    def _encoder_is_frozen(self, data: dict[str, Any]) -> bool:
+        """Verdade quando nenhum modelo comparado mexe no encoder: as features valem para todos."""
+        if data["strategy"] != "decoder":
+            return False
+        if self.reference is None:
+            return True
+        targets = (self.reference[1].get("lora") or {}).get("targets") or []
+        return all(DECODER_TARGET_PATTERN.match(name) for name in targets)
+
+    def _holdout_features(self, data: dict[str, Any], sample: Sample) -> dict[str, Any]:
+        """Features de uma imagem de avaliação, calculadas uma vez quando o encoder é o mesmo.
+
+        No SAM 3 em CPU cada codificação leva perto de um minuto; sem isto o
+        holdout seria codificado de novo para o modelo base, o adaptador ativo, o
+        candidato, os exemplos e cada ponto da curva.
+        """
+        if not self._encoder_is_frozen(data):
+            return self._features(data["segmenter"], sample.pixels, False)
+        cache = data.setdefault("holdout_cache", {})
+        if sample.key not in cache:
+            # float32 de propósito: as métricas do holdout ficam iguais às da
+            # inferência ao vivo, e o holdout é pequeno.
+            features = self._features(data["segmenter"], sample.pixels, False)
+            cache[sample.key] = {
+                "image_embed": features["image_embed"].detach().float().cpu(),
+                "high_res_feats": [feat.detach().float().cpu() for feat in features["high_res_feats"]],
+            }
+        return self._from_storage(cache[sample.key])
 
     @staticmethod
     def _to_storage(features: dict[str, Any]) -> dict[str, Any]:
@@ -1897,6 +2165,7 @@ class TrainingJob:
         cache_flips = config.augment_hflip and len(fit) * 2 * per_image_mb <= budget_mb
         use_cache = decoder_only and len(fit) * per_image_mb <= budget_mb
         data["cache"] = {"enabled": use_cache, "flips": use_cache and cache_flips}
+        data["cached"] = cached
         if use_cache:
             # Com o encoder congelado, as features de cada imagem (e da versão
             # espelhada) são calculadas uma vez só: o treino fica centenas de
@@ -1940,7 +2209,8 @@ class TrainingJob:
                 self.progress = {"phase": "training", "epoch": epoch, "max_epochs": data["max_epochs"], "done": position, "total": len(fit)}
                 for attempt in range(2):
                     try:
-                        loss, dice = self._train_step(segmenter, sample, cached, rng, max_instances, decoder_only, data["cache"])
+                        with self._autocast():
+                            loss, dice = self._train_step(segmenter, sample, cached, rng, max_instances, decoder_only, data["cache"])
                         break
                     except Exception as error:
                         if not _is_oom(error) or attempt == 1 or max_instances == 1:
@@ -2023,7 +2293,7 @@ class TrainingJob:
 
     def _train_step(self, segmenter: Any, sample: Sample, cached: dict, rng: np.random.Generator, max_instances: int, decoder_only: bool, cache: dict[str, bool]) -> tuple[float, float]:
         config = self.config
-        size = segmenter.resolution // 4
+        size = segmenter.low_res_size
         if decoder_only:
             flipped = config.augment_hflip and rng.random() < 0.5
             masks = [instance["mask"][:, ::-1] if flipped else instance["mask"] for instance in sample.instances]
@@ -2057,9 +2327,9 @@ class TrainingJob:
     def _validate(self, model: Any, data: dict[str, Any]) -> dict[str, Any]:
         """Loss e métricas na validação interna, com prompts determinísticos."""
         segmenter = data["segmenter"]
-        size = segmenter.resolution // 4
+        size = segmenter.low_res_size
         image_dice, image_iou, image_biou, losses = [], [], [], []
-        with torch.no_grad():
+        with torch.no_grad(), self._autocast():
             for sample in data["val"]:
                 self._check_cancel()
                 if "val_cache" in data:
@@ -2113,8 +2383,8 @@ class TrainingJob:
         for position, sample in enumerate(data["holdout"]):
             self._check_cancel()
             self.progress = {"phase": "comparing", "model": label, "done": position, "total": len(data["holdout"])}
-            with torch.no_grad():
-                features = self._features(segmenter, sample.pixels, False)
+            with torch.no_grad(), self._autocast():
+                features = self._holdout_features(data, sample)
                 for instance in sample.instances:
                     variants = eval_prompts(instance, sample.width, sample.height, f"{sample.key}:{instance['index']}")
                     names = list(variants)
@@ -2147,7 +2417,7 @@ class TrainingJob:
                     results[(sample.key, instance["index"])] = entry
         return results
 
-    def _compare(self, model: Any, data: dict[str, Any]) -> None:
+    def _compare(self, model: Any, data: dict[str, Any]) -> dict[str, dict]:
         candidate = (self._adapter_metadata(data), data["best_state"])
         variants: list[tuple[str, Any]] = [("base", None)]
         if self.reference is not None:
@@ -2168,6 +2438,109 @@ class TrainingJob:
         self._use_variant(model, candidate)
         self._save(comparison=summary)
         _write_json_atomic(self.run_dir / "comparison.json", summary)
+        return evaluations
+
+    # --- curva de aprendizado --------------------------------------------------
+
+    def _holdout_primary(self, model: Any, data: dict[str, Any]) -> dict[str, float]:
+        """Dice por imagem no holdout (média de caixa e clique), sem cliques simulados."""
+        segmenter = data["segmenter"]
+        scores: dict[str, float] = {}
+        with torch.no_grad(), self._autocast():
+            for sample in data["holdout"]:
+                self._check_cancel()
+                features = self._holdout_features(data, sample)
+                values = []
+                for instance in sample.instances:
+                    prompts = eval_prompts(instance, sample.width, sample.height, f"{sample.key}:{instance['index']}")
+                    coords, labels = segmenter.prompt_tensors([prompts["box"], prompts["point"]], sample.width, sample.height)
+                    low_res, _ = segmenter.decode(features, coords, labels)
+                    predictions = (segmenter.upsample(low_res, sample.height, sample.width)[:, 0] > 0).cpu().numpy()
+                    values.append((dice_score(predictions[0], instance["mask"]) + dice_score(predictions[1], instance["mask"])) / 2)
+                if values:
+                    scores[sample.key] = float(np.mean(values))
+        return scores
+
+    def _fit_fixed(self, model: Any, data: dict[str, Any], subset: list[Sample], epochs: int, seed: int, label: str) -> None:
+        """Treino com orçamento fixo de épocas, para os pontos da curva."""
+        config = self.config
+        segmenter = data["segmenter"]
+        decoder_only = data["strategy"] == "decoder"
+        parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
+        optimizer = torch.optim.AdamW(parameters, lr=data["learning_rate"], weight_decay=config.weight_decay)
+        total_steps = max(1, math.ceil(len(subset) / config.batch_size) * epochs)
+        warmup = max(1, int(0.1 * total_steps))
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda step: (step + 1) / warmup if step < warmup else 0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * min(1.0, (step - warmup) / max(1, total_steps - warmup)))))
+        for epoch in range(1, epochs + 1):
+            rng = np.random.default_rng(seed * 1000 + epoch)
+            for module in lora_modules(model).values():
+                module.train()
+            optimizer.zero_grad(set_to_none=True)
+            order = rng.permutation(len(subset))
+            for position, index in enumerate(order):
+                self._check_cancel()
+                self.progress = {"phase": "learning_curve", "model": label, "epoch": epoch, "max_epochs": epochs, "done": position, "total": len(subset)}
+                with self._autocast():
+                    self._train_step(segmenter, subset[int(index)], data.get("cached", {}), rng, config.max_instances_per_image, decoder_only, data["cache"])
+                if (position + 1) % config.batch_size == 0 or position + 1 == len(subset):
+                    torch.nn.utils.clip_grad_norm_(parameters, 1.0)
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad(set_to_none=True)
+            for module in lora_modules(model).values():
+                module.eval()
+
+    def _learning_curve(self, model: Any, data: dict[str, Any], evaluations: dict[str, dict]) -> None:
+        """Quanto rende anotar mais: o mesmo treino em frações aninhadas dos grupos.
+
+        Cada ponto treina um LoRA novo, com as mesmas épocas da melhor época da
+        rodada, em 25%, 50% e 75% dos grupos de treino, e mede o holdout. Com o
+        modelo base (0 grupos) e o candidato (100%), ajusta uma lei de potência
+        ao erro e extrapola com bootstrap por grupo do holdout.
+        """
+        config = self.config
+        if not config.learning_curve:
+            return
+        if data["best_epoch"] == 0:
+            self._save(learning_curve={"skipped": "no_improvement"})
+            return
+        fit: list[Sample] = data["fit"]
+        groups = sorted({sample.group_id for sample in fit}, key=lambda group: _stable_hash(str(config.seed), "curve", group))
+        total = len(groups)
+        sizes = sorted({max(2, int(round(fraction * total))) for fraction in (0.25, 0.5, 0.75)})
+        sizes = [size for size in sizes if size < total]
+        if len(sizes) < 2:
+            self._save(learning_curve={"skipped": "too_few_groups", "groups": total})
+            return
+        candidate = (self._adapter_metadata(data), data["best_state"])
+        epochs = max(config.min_epochs, int(data["best_epoch"]))
+        self._save(stage="learning_curve")
+        try:
+            per_image: dict[int, dict[str, float]] = {
+                0: _primary_by_image(data["holdout"], evaluations["base"]),
+                total: _primary_by_image(data["holdout"], evaluations["candidate"]),
+            }
+            lora = self.record["lora"]
+            for size in sizes:
+                chosen = set(groups[:size])
+                subset = [sample for sample in fit if sample.group_id in chosen]
+                remove_lora(model)
+                torch.manual_seed(config.seed + size)
+                inject_lora(model, data["targets"], lora["rank"], lora["alpha"], lora["dropout"])
+                freeze_base_parameters(model)
+                self._fit_fixed(model, data, subset, epochs, config.seed + size, f"{size}/{total}")
+                per_image[size] = self._holdout_primary(model, data)
+            curve = summarize_learning_curve(data["holdout"], per_image, total, config)
+            curve["epochs"] = epochs
+            self._save(learning_curve=curve)
+            self._event("learning_curve", "curva de aprendizado calculada", sizes=sizes)
+        except TrainingCancelled:
+            raise
+        except Exception as error:  # noqa: BLE001 - a curva é um extra; a rodada continua válida
+            self._save(learning_curve={"skipped": "error", "message": f"{type(error).__name__}: {error}"})
+            self._event("learning_curve_failed", traceback.format_exc(limit=6))
+        finally:
+            self._use_variant(model, candidate)
 
     def _render_examples(self, model: Any, data: dict[str, Any], reference: dict, candidate: dict, reference_variant: Any, candidate_variant: Any) -> list[dict[str, Any]]:
         """Até seis recortes lado a lado: maiores ganhos, maiores perdas e casos típicos."""
@@ -2187,11 +2560,11 @@ class TrainingJob:
         for name, variant in (("reference", reference_variant), ("candidate", candidate_variant)):
             self._use_variant(model, variant)
             masks[name] = {}
-            with torch.no_grad():
+            with torch.no_grad(), self._autocast():
                 for key in picks:
                     sample = samples[key[0]]
                     instance = sample.instances[key[1]]
-                    features = self._features(segmenter, sample.pixels, False)
+                    features = self._holdout_features(data, sample)
                     prompt = eval_prompts(instance, sample.width, sample.height, f"{sample.key}:{instance['index']}")["box"]
                     coords, labels = segmenter.prompt_tensors([prompt], sample.width, sample.height)
                     low_res, _ = segmenter.decode(features, coords, labels)
@@ -2212,6 +2585,121 @@ class TrainingJob:
                 "prompt": "box",
             })
         return examples
+
+
+def _primary_by_image(holdout: list[Sample], results: dict) -> dict[str, float]:
+    scores = {}
+    for sample in holdout:
+        values = [
+            (results[(sample.key, instance["index"])]["box"]["dice"] + results[(sample.key, instance["index"])]["point"]["dice"]) / 2
+            for instance in sample.instances if (sample.key, instance["index"]) in results
+        ]
+        if values:
+            scores[sample.key] = float(np.mean(values))
+    return scores
+
+
+def fit_power_law(sizes: list[float], dice: list[float]) -> tuple[float, float, float] | None:
+    """Ajusta erro(n) = a·n^(−b) + c, com erro = 1 − Dice (Hestness et al., 2017).
+
+    Grade em b e c, a por mínimos quadrados fechado. c é o erro que nenhum
+    volume de dados remove; fica limitado ao menor erro observado.
+    """
+    points = [(float(n), 1.0 - float(d)) for n, d in zip(sizes, dice) if n > 0]
+    if len(points) < 3:
+        return None
+    n = np.asarray([p[0] for p in points])
+    err = np.asarray([p[1] for p in points])
+    best = None
+    for b in np.linspace(0.05, 1.5, 59):
+        x = n ** (-b)
+        for c in np.linspace(0.0, max(0.0, float(err.min())), 41):
+            y = err - c
+            a = float((x * y).sum() / max(1e-12, (x * x).sum()))
+            if a < 0:
+                continue
+            sse = float(((a * x + c - err) ** 2).sum())
+            if best is None or sse < best[0]:
+                best = (sse, a, float(b), float(c))
+    return None if best is None else best[1:]
+
+
+def _predict_dice(params: tuple[float, float, float], n: float) -> float:
+    a, b, c = params
+    return float(1.0 - (a * n ** (-b) + c))
+
+
+def summarize_learning_curve(holdout: list[Sample], per_image: dict[int, dict[str, float]], total: int, config: TrainConfig) -> dict[str, Any]:
+    """Pontos da curva, projeções e "quantos grupos a mais para +1 ponto".
+
+    A incerteza vem de bootstrap por grupo do holdout (os mesmos grupos
+    reamostrados para todos os pontos). Não inclui a variação de uma semente de
+    treino para outra: cada ponto é um treino só, e o texto da interface diz isso.
+    """
+    group_of = {sample.key: sample.group_id for sample in holdout}
+    sizes = sorted(per_image)
+    keys = sorted(set.intersection(*(set(scores) for scores in per_image.values())))
+    clusters = [group_of[key] for key in keys]
+    points = []
+    for size in sizes:
+        values = [per_image[size][key] for key in keys]
+        mean, low, high = cluster_bootstrap(values, clusters, 1000, config.seed + size)
+        points.append({"groups": size, "mean": mean, "ci_low": low, "ci_high": high, "kind": "base" if size == 0 else "full" if size == total else "subset"})
+    fitted_sizes = [size for size in sizes if size > 0]
+    params = fit_power_law(fitted_sizes, [points[sizes.index(size)]["mean"] for size in fitted_sizes])
+
+    unique_groups = sorted(set(clusters))
+    rng = np.random.default_rng(config.seed + 101)
+    double, plus10, needed, gains = [], [], [], []
+    largest_subset = max(size for size in fitted_sizes if size < total)
+    for _ in range(300):
+        picked = rng.choice(len(unique_groups), size=len(unique_groups), replace=True)
+        chosen_keys = [key for index in picked for key in keys if group_of[key] == unique_groups[index]]
+        means = {size: float(np.mean([per_image[size][key] for key in chosen_keys])) for size in sizes}
+        gains.append(means[total] - means[largest_subset])
+        sample_params = fit_power_law(fitted_sizes, [means[size] for size in fitted_sizes])
+        if sample_params is None:
+            continue
+        current = _predict_dice(sample_params, total)
+        double.append(_predict_dice(sample_params, 2 * total))
+        plus10.append(_predict_dice(sample_params, total + 10))
+        target = current + 0.01
+        found = None
+        for extra in range(1, 20 * total + 1):
+            if _predict_dice(sample_params, total + extra) >= target:
+                found = extra
+                break
+        needed.append(found)
+
+    def interval(values: list[float]) -> dict[str, float] | None:
+        if not values:
+            return None
+        return {"median": float(np.median(values)), "low": float(np.percentile(values, 10)), "high": float(np.percentile(values, 90))}
+
+    reachable = [value for value in needed if value is not None]
+    gain_interval = interval(gains)
+    if gain_interval and gain_interval["low"] > 0 and gain_interval["median"] >= 0.01:
+        trend = "rising"
+    elif gain_interval and abs(gain_interval["median"]) < 0.005 and gain_interval["high"] < 0.01:
+        trend = "plateau"
+    else:
+        trend = "uncertain"
+    return {
+        "points": points,
+        "fit": None if params is None else {"a": params[0], "b": params[1], "c": params[2], "ceiling": 1.0 - params[2]},
+        "projection": {
+            "double": {"groups": 2 * total, **(interval(double) or {})} if double else None,
+            "plus10": {"groups": total + 10, **(interval(plus10) or {})} if plus10 else None,
+        },
+        "additional_groups_for_one_point": {
+            **(interval([float(value) for value in reachable]) or {}),
+            "share_beyond_range": 1.0 - len(reachable) / max(1, len(needed)),
+        } if needed else None,
+        "last_step_gain": gain_interval,
+        "trend": trend,
+        "single_seed": True,
+        "train_groups": total,
+    }
 
 
 def render_comparison_panel(pixels: np.ndarray, target: np.ndarray, reference: np.ndarray, candidate: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray:
@@ -2417,7 +2905,7 @@ class AdaptiveService:
         model_factory: Callable[[], Any],
         decode_image: Callable[[str], tuple[np.ndarray, bytes, str]] = decode_data_url,
         readiness: ReadinessConfig | None = None,
-        segmenter_factory: Callable[[Any, str], Any] = Sam2Segmenter,
+        segmenter_factory: Callable[[Any, str], Any] | None = None,
         compute_embeddings: bool = True,
     ):
         self.root = root
@@ -2534,6 +3022,9 @@ class AdaptiveService:
     def list_items(self, project_id: str) -> dict[str, Any]:
         return {"items": self.store(project_id).fingerprints()}
 
+    def _segmenter_factory(self, family: str) -> Callable[[Any, str], Any]:
+        return self.segmenter_factory or segmenter_for_family(family)
+
     def _embed(self, pixels: np.ndarray) -> tuple[str, np.ndarray] | None:
         if not self.compute_embeddings:
             return None
@@ -2541,7 +3032,7 @@ class AdaptiveService:
         if live is None or live.family not in SUPPORTED_FAMILIES:
             return None
         with self.predictor_lock:
-            vector = pooled_embedding(self.segmenter_factory(live.model, live.device), pixels)
+            vector = pooled_embedding(self._segmenter_factory(live.family)(live.model, live.device), pixels)
         return live.model_id, vector
 
     def put_item(self, project_id: str, key: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -2559,6 +3050,31 @@ class AdaptiveService:
             raise AdaptiveError(400, "invalid_item", str(error)) from error
         return {"key": key, "removed": removed}
 
+    def list_candidates(self, project_id: str) -> dict[str, Any]:
+        return {"items": {record["key"]: record.get("fingerprint", "") for record in self.store(project_id).list_candidates()}}
+
+    def put_candidate(self, project_id: str, key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        store = self.store(project_id)
+        try:
+            return ingest_candidate(store, key, payload, self.decode_image, self._embed)
+        except ValueError as error:
+            raise AdaptiveError(400, "invalid_item", str(error)) from error
+
+    def delete_candidate(self, project_id: str, key: str) -> dict[str, Any]:
+        store = self.store(project_id)
+        try:
+            path = store.candidate_path(key)
+        except ValueError as error:
+            raise AdaptiveError(400, "invalid_item", str(error)) from error
+        removed = path.is_file()
+        if removed:
+            path.unlink()
+        return {"key": key, "removed": removed}
+
+    def suggestions(self, project_id: str, limit: int = 10) -> dict[str, Any]:
+        live = self.get_live_model()
+        return suggest_next(self.store(project_id), self.readiness, live.model_id if live else None, max(1, min(50, int(limit))))
+
     def assess(self, project_id: str) -> dict[str, Any]:
         live = self.get_live_model()
         supported = live is not None and live.family in SUPPORTED_FAMILIES
@@ -2575,6 +3091,10 @@ class AdaptiveService:
             config = TrainConfig.from_mapping(raw_config)
         except ValueError as error:
             raise AdaptiveError(400, "invalid_config", str(error)) from error
+        if live.family in DECODER_ONLY_FAMILIES:
+            if config.strategy == "encoder_decoder":
+                raise AdaptiveError(400, "strategy_unsupported", "neste modelo o LoRA só entra no mask decoder", model_id=live.model_id)
+            config.strategy = "decoder"
         store = self.store(project_id)
         report = assess_readiness(store, self.readiness, live.model_id, True)
         if not report["can_train"]:
@@ -2614,7 +3134,7 @@ class AdaptiveService:
                 device=live.device,
                 reference=reference,
                 model_key=live.model_id,
-                segmenter_factory=self.segmenter_factory,
+                segmenter_factory=self._segmenter_factory(live.family),
             )
             self._job = job
             thread = threading.Thread(target=job.run, name=f"poligome-adaptive-{run_id}", daemon=True)
@@ -2875,6 +3395,22 @@ def create_router(service: AdaptiveService) -> Any:
     @router.delete("/projects/{project_id}/items/{key}")
     def adaptive_delete_item(project_id: str, key: str):
         return call(service.delete_item, project_id, key)
+
+    @router.get("/projects/{project_id}/candidates")
+    def adaptive_candidates(project_id: str):
+        return call(service.list_candidates, project_id)
+
+    @router.post("/projects/{project_id}/candidates/{key}")
+    def adaptive_put_candidate(project_id: str, key: str, payload: dict = Body(...)):
+        return call(service.put_candidate, project_id, key, payload)
+
+    @router.delete("/projects/{project_id}/candidates/{key}")
+    def adaptive_delete_candidate(project_id: str, key: str):
+        return call(service.delete_candidate, project_id, key)
+
+    @router.get("/projects/{project_id}/suggestions")
+    def adaptive_suggestions(project_id: str, limit: int = 10):
+        return call(service.suggestions, project_id, limit)
 
     @router.post("/projects/{project_id}/assess")
     def adaptive_assess(project_id: str):

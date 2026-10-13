@@ -1037,6 +1037,8 @@ class Sam3Adapter:
         self.device = device
         self._torch = torch
         self._model = model
+        # Exposto para o Adaptive AI: o LoRA entra no decoder do modo interativo.
+        self.model = model
         self._processor = Sam3Processor(
             model,
             device=device,
@@ -1183,7 +1185,7 @@ class PredictionRequestGuard:
                 path in ("/predict", "/byom/annotate")
                 # O envio de uma imagem aprovada ao Adaptive AI carrega a mesma
                 # imagem inteira de /predict.
-                or re.fullmatch(r"/adaptive/projects/[^/]+/items/[^/]+", path) is not None
+                or re.fullmatch(r"/adaptive/projects/[^/]+/(items|candidates)/[^/]+", path) is not None
             )
         )
         if not is_prediction:
@@ -1507,10 +1509,18 @@ def _runtime_snapshot_status() -> str:
 
 
 def _adaptive_model_factory() -> Any:
-    """Uma cópia nova do modelo base para treinar sem tocar no que serve o editor."""
+    """Uma cópia do modelo base para treinar sem tocar no que serve o editor.
+
+    No SAM 2 o modelo inteiro é reconstruído do checkpoint. No SAM 3 só o
+    preditor interativo é copiado; o backbone (~3,4 GB) é o do modelo vivo,
+    usado sob o lock do preditor.
+    """
     config = _startup_config
+    if config is not None and config.spec.family == "sam3" and _adapter is not None:
+        module = sys.modules["poligome_adaptive"]
+        return module.Sam3TrainingModel(_adapter.model, _predictor_lock)
     if config is None or config.spec.family != "sam2":
-        raise RuntimeError("Adaptive AI só treina modelos da família SAM 2.")
+        raise RuntimeError("Adaptive AI só treina modelos das famílias SAM 2 e SAM 3.")
     from sam2.build_sam import build_sam2
 
     checkpoint = Path(config.checkpoint).expanduser().resolve()

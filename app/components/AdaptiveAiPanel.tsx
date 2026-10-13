@@ -2,16 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, BarChart3, Check, CircleSlash, Database, GitCompare, History, LoaderCircle,
-  Play, Power, RefreshCw, RotateCcw, ShieldCheck, Square, Undo2, X,
+  AlertTriangle, BarChart3, Check, CircleSlash, Compass, Cpu, Database, GitCompare, History, LoaderCircle,
+  Play, Power, RefreshCw, RotateCcw, ShieldCheck, Square, TrendingUp, Undo2, X,
 } from "lucide-react";
 import { getCopy, fill, type Language } from "../lib/i18n";
 import { getAdaptiveCopy, type AdaptiveCopy } from "../lib/adaptive-copy";
 import { connectorBaseUrl } from "../lib/sam-connector";
-import { planAdaptiveDataset } from "../lib/adaptive-dataset";
+import { planAdaptiveCandidates, planAdaptiveDataset, SELECT_ASSET_EVENT } from "../lib/adaptive-dataset";
 import {
-  AdaptiveRequestError, adaptiveApi, syncAdaptiveDataset,
-  type AdaptiveReason, type AdaptiveStatus, type ComparisonSummary, type EpochMetrics, type ReadinessReport, type RunRecord, type RunSummary,
+  AdaptiveRequestError, adaptiveApi, syncAdaptiveCandidates, syncAdaptiveDataset,
+  type AdaptiveReason, type AdaptiveStatus, type ComparisonSummary, type EpochMetrics, type LearningCurve, type ReadinessReport, type RunRecord, type RunSummary, type Suggestion,
 } from "../lib/adaptive-client";
 import type { Asset, Label } from "../lib/types";
 import type { EditorAnnotation } from "../editor/models/annotation-model";
@@ -113,7 +113,23 @@ export function MetricChart({ title, epochs, series, best, percent }: {
   </figure>;
 }
 
+/**
+ * Quantas imagens de origens novas faltam para as referências de independência e
+ * de avaliação. Um grupo novo vai para a avaliação com a fração do holdout, então
+ * faltar k grupos lá pede k ÷ fração grupos novos no total.
+ */
+export function imagesStillNeeded(report: ReadinessReport): number {
+  const thresholds = report.thresholds ?? {};
+  const fraction = Number(thresholds.holdout_fraction) || 0.25;
+  const independent = Math.max(0, (thresholds.target_independent ?? 24) - report.counts.independent_groups);
+  const holdout = report.split_frozen
+    ? Math.ceil(Math.max(0, (thresholds.target_holdout_groups ?? 6) - report.counts.holdout.groups) / fraction)
+    : 0;
+  return Math.max(independent, holdout);
+}
+
 export function ReadinessView({ t, report }: { t: AdaptiveCopy; report: ReadinessReport }) {
+  const needed = imagesStillNeeded(report);
   const stateTitle = t[`state_${report.state}` as keyof AdaptiveCopy] ?? report.state;
   const stateBody = t[`state_${report.state}_body` as keyof AdaptiveCopy] ?? "";
   return <div className="adaptive-readiness">
@@ -121,6 +137,7 @@ export function ReadinessView({ t, report }: { t: AdaptiveCopy; report: Readines
       <b>{stateTitle}</b>
       <p>{stateBody}</p>
       <ul>{report.reasons.map((reason, index) => <li key={index}>{reasonText(t, reason)}</li>)}</ul>
+      {report.state !== "unsupported_model" && <p className="adaptive-need"><b>{needed > 0 ? fill(t.needMoreImages, { n: needed }) : t.reachedTargets}</b></p>}
     </div>
     <table className="adaptive-components">
       <caption>{t.componentsCaption}</caption>
@@ -264,6 +281,117 @@ export function ComparisonView({ t, comparison, examples }: { t: AdaptiveCopy; c
   </div>;
 }
 
+function LearningCurveChart({ t, curve }: { t: AdaptiveCopy; curve: LearningCurve }) {
+  const points = curve.points ?? [];
+  const projection = curve.projection?.double ?? null;
+  if (points.length < 2) return null;
+  const width = 320;
+  const height = 150;
+  const pad = { left: 36, right: 12, top: 12, bottom: 24 };
+  const maxGroups = Math.max(...points.map((point) => point.groups), projection?.groups ?? 0, 1);
+  const values = points.flatMap((point) => [point.ci_low, point.ci_high]).concat(projection ? [projection.low, projection.high] : []);
+  let low = Math.min(...values);
+  let high = Math.max(...values);
+  if (high - low < 0.02) { low -= 0.01; high += 0.01; }
+  const x = (groups: number) => pad.left + (groups / maxGroups) * (width - pad.left - pad.right);
+  const y = (value: number) => pad.top + (1 - (value - low) / (high - low)) * (height - pad.top - pad.bottom);
+  const measured = points.filter((point) => point.kind !== "base");
+  const base = points.find((point) => point.kind === "base");
+  return <figure className="adaptive-chart">
+    <figcaption>{t.curveChart}</figcaption>
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${t.curveChart}: ${points.map((point) => `${point.groups} ${pct(point.mean)}`).join(", ")}${projection ? `; ${projection.groups} ${pct(projection.median)}` : ""}`}>
+      <line x1={pad.left} x2={width - pad.right} y1={height - pad.bottom} y2={height - pad.bottom} className="axis" />
+      <line x1={pad.left} x2={pad.left} y1={pad.top} y2={height - pad.bottom} className="axis" />
+      <text x={pad.left - 4} y={pad.top + 4} textAnchor="end" className="tick">{pct(high, 0)}</text>
+      <text x={pad.left - 4} y={height - pad.bottom} textAnchor="end" className="tick">{pct(low, 0)}</text>
+      <text x={pad.left} y={height - 8} className="tick">0</text>
+      <text x={width - pad.right} y={height - 8} textAnchor="end" className="tick">{maxGroups} {t.curveAxis}</text>
+      {base && <g className="baseline"><line x1={pad.left} x2={width - pad.right} y1={y(base.mean)} y2={y(base.mean)} /><text x={width - pad.right} y={y(base.mean) - 3} textAnchor="end">{t.referenceBase}</text></g>}
+      <g className="series-b">
+        <polyline fill="none" points={measured.map((point) => `${x(point.groups).toFixed(1)},${y(point.mean).toFixed(1)}`).join(" ")} />
+        {measured.map((point) => <g key={point.groups}>
+          <line x1={x(point.groups)} x2={x(point.groups)} y1={y(point.ci_low)} y2={y(point.ci_high)} />
+          <circle cx={x(point.groups)} cy={y(point.mean)} r={2.6} />
+        </g>)}
+      </g>
+      {projection && measured.length > 0 && <g className="projection">
+        <line x1={x(measured[measured.length - 1].groups)} y1={y(measured[measured.length - 1].mean)} x2={x(projection.groups)} y2={y(projection.median)} />
+        <line x1={x(projection.groups)} x2={x(projection.groups)} y1={y(projection.low)} y2={y(projection.high)} />
+        <circle cx={x(projection.groups)} cy={y(projection.median)} r={2.6} />
+      </g>}
+    </svg>
+  </figure>;
+}
+
+export function LearningCurveView({ t, curve }: { t: AdaptiveCopy; curve: LearningCurve }) {
+  if (curve.skipped) {
+    return <p className="adaptive-note">{fill(t[`curveSkipped_${curve.skipped}` as keyof AdaptiveCopy] ?? curve.skipped, { message: curve.message ?? "" })}</p>;
+  }
+  const points = curve.points ?? [];
+  const full = points.find((point) => point.kind === "full");
+  const base = points.find((point) => point.kind === "base");
+  const need = curve.additional_groups_for_one_point;
+  return <div className="adaptive-curve">
+    <div className={`adaptive-diagnosis ${curve.trend === "rising" ? "improving" : curve.trend === "plateau" ? "converged" : "inconclusive"}`}>
+      <b>{t[`curveTrend_${curve.trend ?? "uncertain"}` as keyof AdaptiveCopy]}</b>
+      {full && <p>{fill(t.curveNow, { n: full.groups, dice: pct(full.mean), base: pct(base?.mean) })}</p>}
+      {curve.projection?.double && <p>{fill(t.curveProjection, { groups: curve.projection.double.groups, median: pct(curve.projection.double.median), low: pct(curve.projection.double.low), high: pct(curve.projection.double.high) })}</p>}
+      {need && need.median !== undefined && <p>{fill(t.curveNeed, { median: Math.round(need.median), low: Math.round(need.low ?? need.median), high: Math.round(need.high ?? need.median) })}</p>}
+      {need && need.share_beyond_range >= 0.25 && <p>{fill(t.curveNeedBeyond, { share: pct(need.share_beyond_range, 0) })}</p>}
+    </div>
+    <LearningCurveChart t={t} curve={curve} />
+    <p className="adaptive-note">{fill(t.curveNote, { points: points.filter((point) => point.kind !== "base").length })}</p>
+  </div>;
+}
+
+export function SuggestionsView({ t, suggestions, names, method, analyzed }: {
+  t: AdaptiveCopy;
+  suggestions: readonly Suggestion[];
+  names: ReadonlyMap<string, { id: string; name: string }>;
+  method: string | null;
+  analyzed: number;
+}) {
+  return <div className="adaptive-suggestions">
+    {method && <p className="adaptive-note">{fill(t.suggestMethod, { count: analyzed, method: t[`method_${method}` as keyof AdaptiveCopy] ?? method })}</p>}
+    <ol>{suggestions.map((suggestion) => {
+      const asset = names.get(suggestion.key);
+      if (!asset) return null;
+      return <li key={suggestion.key} className={suggestion.reason}>
+        <span><b>{asset.name}</b><small>{t[`suggestReason_${suggestion.reason}` as keyof AdaptiveCopy]}{suggestion.novelty !== null && suggestion.reason !== "near_duplicate" ? ` · ${suggestion.novelty.toFixed(1)}×` : ""}</small></span>
+        <button onClick={() => window.dispatchEvent(new CustomEvent(SELECT_ASSET_EVENT, { detail: { assetId: asset.id } }))}>{t.suggestOpen}</button>
+      </li>;
+    })}</ol>
+  </div>;
+}
+
+export type NextStep = { stage: 0 | 1 | 2 | 3; key: "analyze" | "annotate" | "train" | "training" | "activate" | "more_evidence" | "kept" | "active" | "failed"; n?: number };
+
+/**
+ * Uma ação por vez: o que a pessoa deveria fazer agora, derivado do estado real
+ * (dados, rodada selecionada, adaptador ativo). Nada aqui é inventado: cada
+ * caso corresponde a um estado que o conector devolveu.
+ */
+export function nextStep({ report, record, activeHere }: { report: ReadinessReport | null; record: RunRecord | null; activeHere: boolean }): NextStep {
+  if (record && RUNNING.has(record.status)) return { stage: 1, key: "training" };
+  if (activeHere && (!record || record.activation === "active")) return { stage: 3, key: "active" };
+  if (record && ["failed", "interrupted"].includes(record.status)) return { stage: 1, key: "failed" };
+  const outcome = record?.status === "completed" ? record.comparison?.decision.outcome : undefined;
+  if (outcome === "improved" && record?.activation !== "rejected") return { stage: 2, key: "activate" };
+  if (outcome === "insufficient_evidence") return { stage: 0, key: "more_evidence" };
+  if (outcome === "not_improved") return { stage: 0, key: "kept" };
+  if (!report) return { stage: 0, key: "analyze" };
+  if (!report.can_train) return { stage: 0, key: "annotate", n: Math.max(1, imagesStillNeeded(report)) };
+  return { stage: 1, key: "train" };
+}
+
+export function NextStepCard({ t, step }: { t: AdaptiveCopy; step: NextStep }) {
+  const stages = [t.stepData, t.stepTraining, t.stepComparison, t.stepUse];
+  return <section className="adaptive-next" aria-live="polite">
+    <ol className="adaptive-steps">{stages.map((label, index) => <li key={label} className={index < step.stage ? "done" : index === step.stage ? "current" : ""} aria-current={index === step.stage ? "step" : undefined}><i>{index + 1}</i>{label}</li>)}</ol>
+    <p><b>{t.nextTitle}:</b> {fill(t[`next_${step.key}` as keyof AdaptiveCopy], { n: step.n ?? 0 })}</p>
+  </section>;
+}
+
 export function AdaptiveAiPanel({ language, endpoint, project }: { language: Language; endpoint: string; project: AdaptiveProject | null }) {
   const t = getAdaptiveCopy(language);
   const copy = getCopy(language);
@@ -285,7 +413,8 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmOverride, setConfirmOverride] = useState(false);
-  const [settings, setSettings] = useState({ strategy: "auto", rank: 8, alpha: 16, learning_rate: 0, max_epochs: 0, batch_size: 4 });
+  const [settings, setSettings] = useState({ strategy: "auto", rank: 8, alpha: 16, learning_rate: 0, max_epochs: 0, batch_size: 4, learning_curve: true });
+  const [suggested, setSuggested] = useState<{ items: Suggestion[]; method: string | null; analyzed: number } | null>(null);
   const syncAbort = useRef<AbortController | null>(null);
 
   const refreshStatus = useCallback(async () => {
@@ -397,13 +526,26 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
 
   const startTraining = () => act("train", async () => {
     if (!project) return;
-    const config: Record<string, unknown> = { strategy: settings.strategy, rank: settings.rank, alpha: settings.alpha, batch_size: settings.batch_size };
+    const config: Record<string, unknown> = { strategy: settings.strategy, rank: settings.rank, alpha: settings.alpha, batch_size: settings.batch_size, learning_curve: settings.learning_curve };
     if (settings.learning_rate > 0) config.learning_rate = settings.learning_rate;
     if (settings.max_epochs > 0) config.max_epochs = settings.max_epochs;
     const started = await adaptiveApi.start(base, project.id, config);
     setRecord(started);
     setSelectedRunId(started.run_id);
     await refreshRuns();
+  });
+
+  const candidates = useMemo(() => project && plan ? planAdaptiveCandidates(project.assets, plan) : [], [project, plan]);
+  const candidateNames = useMemo(() => new Map(candidates.map((candidate) => [candidate.key, { id: candidate.asset.id, name: candidate.asset.name }])), [candidates]);
+  const suggest = () => act("suggest", async () => {
+    if (!project) return;
+    try {
+      const result = await syncAdaptiveCandidates({ base, projectId: project.id, candidates, copy, onProgress: (done, total) => setSyncProgress({ done, total }) });
+      const response = await adaptiveApi.suggestions(base, project.id, 8);
+      setSuggested({ items: response.suggestions, method: response.method, analyzed: candidates.length - result.failed });
+    } finally {
+      setSyncProgress(null);
+    }
   });
 
   const activeHere = status?.active && project && status.active.project_id === project.id ? status.active : null;
@@ -415,7 +557,7 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
 
   return <div className="byom-panel adaptive-panel">
     <section className="sam-model-hero">
-      <div><span className="family sam2">SAM 2.1 · LoRA</span><span className="experimental">{t.badge}</span></div>
+      <div><span className={`family ${status?.model?.family === "sam3" ? "sam3" : "sam2"}`}>{status?.model?.family === "sam3" ? "SAM 3" : "SAM 2.1"} · LoRA</span><span className="experimental">{t.badge}</span></div>
       <h3>{t.title}</h3>
       <p>{t.intro}</p>
     </section>
@@ -427,7 +569,8 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
       : connector === "not_installed" ? <p className="adaptive-callout warn"><AlertTriangle size={14} />{t.notInstalled}</p>
       : <>
         {!status?.model ? <p className="adaptive-callout warn"><AlertTriangle size={14} />{t.modelLoading}</p>
-          : !modelSupported ? <p className="adaptive-callout warn"><AlertTriangle size={14} />{fill(t.unsupportedModel, { model: status.model.model_id })}</p> : null}
+          : !modelSupported ? <p className="adaptive-callout warn"><AlertTriangle size={14} />{fill(t.unsupportedModel, { model: status.model.model_id })}</p>
+          : status.model.family === "sam3" ? <p className="adaptive-callout">{t.sam3Note}</p> : null}
 
         <section className="adaptive-active">
           <Power size={14} />
@@ -438,6 +581,8 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
           {(activeHere || activeElsewhere) && <button disabled={busy !== null} onClick={() => act("deactivate", async () => { setStatus(await adaptiveApi.deactivate(base)); await refreshRuns(); await reloadRecord(); })}><X size={12} />{t.deactivate}</button>}
           {activeHere && <button disabled={busy !== null} onClick={() => act("rollback", async () => { setStatus(await adaptiveApi.rollback(base, project.id)); await refreshRuns(); await reloadRecord(); })}><Undo2 size={12} />{t.rollback}</button>}
         </section>
+
+        <NextStepCard t={t} step={nextStep({ report, record, activeHere: Boolean(activeHere) })} />
 
         <section className="adaptive-section">
           <h4><Database size={13} />{t.datasetTitle}</h4>
@@ -464,7 +609,23 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
         </section>
 
         <section className="adaptive-section">
+          <h4><Compass size={13} />{t.suggestTitle}</h4>
+          <p className="adaptive-note">{t.suggestBody}</p>
+          {candidates.length === 0 ? <p className="adaptive-note">{t.suggestNone}</p> : <div className="adaptive-actions">
+            <button disabled={busy !== null || !modelSupported} onClick={() => void suggest()}>
+              {busy === "suggest" ? <LoaderCircle className="spin" size={13} /> : <Compass size={13} />}{t.suggestButton}
+            </button>
+            {busy === "suggest" && syncProgress && <span>{fill(t.syncing, syncProgress)}</span>}
+          </div>}
+          {suggested && <SuggestionsView t={t} suggestions={suggested.items} names={candidateNames} method={suggested.method} analyzed={suggested.analyzed} />}
+        </section>
+
+        <section className="adaptive-section">
           <h4><BarChart3 size={13} />{t.trainingTitle}</h4>
+          {status?.model && <p className="adaptive-device"><Cpu size={13} /><span><b>{fill(t.deviceLine, {
+            device: t[`device_${status.model.device}` as keyof AdaptiveCopy] ?? status.model.device,
+            precision: record?.resolved?.precision ? t[`precision_${record.resolved.precision}`] : "",
+          })}</b><small>{status.model.device === "cpu" ? t.cpuNote : status.model.family === "sam3" ? t.sam3Note : t.gpuNote}</small></span></p>}
           {!report && <p className="adaptive-note">{t.analyzeFirst}</p>}
           {report && !report.can_train && <p className="adaptive-note">{t.cannotTrain}</p>}
           {report?.can_train && !report.recommend_training && <p className="adaptive-note">{t.notRecommended}</p>}
@@ -474,13 +635,14 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
             <p>{t.settingsBody}</p>
             <div className="adaptive-settings-grid">
               <label>{t.settingStrategy}<select value={settings.strategy} onChange={(event) => setSettings({ ...settings, strategy: event.target.value })}>
-                <option value="auto">{t.strategy_auto}</option><option value="decoder">{t.strategy_decoder}</option><option value="encoder_decoder">{t.strategy_encoder_decoder}</option>
+                <option value="auto">{t.strategy_auto}</option><option value="decoder">{t.strategy_decoder}</option><option value="encoder_decoder" disabled={status?.model?.family === "sam3"}>{t.strategy_encoder_decoder}</option>
               </select></label>
               <label>{t.settingRank}<input type="number" min={1} max={64} value={settings.rank} onChange={(event) => setSettings({ ...settings, rank: Number(event.target.value) || 8 })} /></label>
               <label>{t.settingAlpha}<input type="number" min={1} max={256} value={settings.alpha} onChange={(event) => setSettings({ ...settings, alpha: Number(event.target.value) || 16 })} /></label>
               <label>{t.settingLearningRate}<input type="number" min={0} max={0.01} step={0.0001} value={settings.learning_rate} onChange={(event) => setSettings({ ...settings, learning_rate: Number(event.target.value) || 0 })} /></label>
               <label>{t.settingMaxEpochs}<input type="number" min={0} max={300} value={settings.max_epochs} onChange={(event) => setSettings({ ...settings, max_epochs: Number(event.target.value) || 0 })} /></label>
               <label>{t.settingBatch}<input type="number" min={1} max={64} value={settings.batch_size} onChange={(event) => setSettings({ ...settings, batch_size: Number(event.target.value) || 4 })} /></label>
+              <label className="adaptive-check"><input type="checkbox" checked={settings.learning_curve} onChange={(event) => setSettings({ ...settings, learning_curve: event.target.checked })} />{t.settingLearningCurve}</label>
             </div>
           </details>
           <div className="adaptive-actions">
@@ -505,6 +667,11 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
               {record.activation !== "rejected" && <button disabled={busy !== null} onClick={() => act("reject", async () => { await adaptiveApi.reject(base, project.id, record.run_id); await refreshRuns(); const next = await adaptiveApi.run(base, project.id, record.run_id); setRecord(next); })}><X size={13} />{t.reject}</button>}
             </>}
           </div>
+        </section>}
+
+        {record?.learning_curve && <section className="adaptive-section">
+          <h4><TrendingUp size={13} />{t.curveTitle}</h4>
+          <LearningCurveView t={t} curve={record.learning_curve} />
         </section>}
 
         {runs.length > 0 && <section className="adaptive-section">

@@ -10,7 +10,7 @@ import { translateErrorCode } from "../../lib/error-message";
 import type { EditorAnnotation } from "../models/annotation-model";
 import type { BoxCorner } from "../layers/box-layer";
 import { createEditorDemo, openEditorProject, saveEditorProject } from "../session/editor-session-io";
-import { newAdaptiveProjectId } from "../../lib/adaptive-dataset";
+import { newAdaptiveProjectId, SELECT_ASSET_EVENT } from "../../lib/adaptive-dataset";
 import { loadLocalImageAssets, relinkMissingAssets } from "../session/image-assets";
 import { CocoImportControl, type CocoImportHandle } from "../import/coco-import-control";
 import { RasterImportControl, type RasterImportResult } from "../import/raster-import-control";
@@ -1532,6 +1532,16 @@ export function CanonicalEditorWorkbench() {
       finishActiveDraft();
     }
   }
+
+  // O Adaptive AI sugere imagens para anotar; escolher uma abre a imagem aqui.
+  useEffect(() => {
+    const select = (event: Event) => {
+      const assetId = (event as CustomEvent<{ assetId?: string }>).detail?.assetId;
+      if (assetId && assets.some((item) => item.id === assetId)) setCurrent(assetId);
+    };
+    window.addEventListener(SELECT_ASSET_EVENT, select);
+    return () => window.removeEventListener(SELECT_ASSET_EVENT, select);
+  }, [assets]);
 
   const adaptiveProject = useMemo(
     () => ({ id: adaptiveProjectId, name: projectName, assets, labels, annotations: editor.annotations }),
