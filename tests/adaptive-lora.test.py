@@ -768,6 +768,44 @@ class ActivationTests(unittest.TestCase):
         self.assertTrue(any(event["action"] == "reject" for event in history))
 
 
+class CheckpointSelectionTests(unittest.TestCase):
+    def test_subthreshold_gains_keep_the_identity_checkpoint(self):
+        with tempfile.TemporaryDirectory() as folder:
+            harness = ServiceHarness(Path(folder))
+            harness.fill("project-identity")
+            values = [0.5, 0.501, 0.502, 0.503]
+            metrics = [{"val_dice": value, "val_loss": 1 - value,
+                        "val_iou": value, "val_boundary_iou": value} for value in values]
+            with mock.patch.object(adaptive.TrainingJob, "_validate", side_effect=metrics):
+                run = harness.service.start_training("project-identity", dict(FAST,
+                    max_epochs=8, min_epochs=1, patience=3, min_delta=0.01, learning_curve=False))
+                harness.service.wait_for_training(120)
+            record = harness.service.get_run("project-identity", run["run_id"])
+            self.assertEqual(record["status"], "completed", record.get("error"))
+            self.assertEqual(record["best_epoch"], 0)
+            self.assertEqual(record["epochs_run"], 3)
+            metadata, _ = adaptive.load_adapter(harness.service.store("project-identity").run_dir(run["run_id"]) / "adapter.pt")
+            self.assertEqual(metadata["best_epoch"], 0)
+
+    def test_small_improvements_are_saved_without_resetting_patience(self):
+        with tempfile.TemporaryDirectory() as folder:
+            harness = ServiceHarness(Path(folder))
+            harness.fill("project-best")
+            values = [0.5, 0.52, 0.521, 0.522]
+            metrics = [{"val_dice": value, "val_loss": 1 - value,
+                        "val_iou": value, "val_boundary_iou": value} for value in values]
+            with mock.patch.object(adaptive.TrainingJob, "_validate", side_effect=metrics):
+                run = harness.service.start_training("project-best", dict(FAST,
+                    max_epochs=8, min_epochs=1, patience=2, min_delta=0.01, learning_curve=False))
+                harness.service.wait_for_training(120)
+            record = harness.service.get_run("project-best", run["run_id"])
+            self.assertEqual(record["status"], "completed", record.get("error"))
+            self.assertEqual(len(record["epochs"]), 4)  # small gains did not reset patience
+            self.assertEqual(record["best_epoch"], 3)
+            metadata, _ = adaptive.load_adapter(harness.service.store("project-best").run_dir(run["run_id"]) / "adapter.pt")
+            self.assertEqual(metadata["best_epoch"], 3)
+
+
 class FailureTests(unittest.TestCase):
     project = "project-failure"
 

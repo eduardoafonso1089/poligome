@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -16,6 +17,24 @@ import tempfile
 import time
 import urllib.request
 from pathlib import Path
+
+
+def stop_connector(connector: subprocess.Popen) -> None:
+    """Close the connector, including the Windows venv redirector's child."""
+    if connector.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(connector.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+    else:
+        connector.terminate()
+    try:
+        connector.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        connector.kill()
+        connector.wait()
 
 
 def main() -> int:
@@ -36,8 +55,9 @@ def main() -> int:
         port = listener.getsockname()[1]
     base = f"http://127.0.0.1:{port}"
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    child_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     with tempfile.TemporaryDirectory(prefix="poligome-sam3-check-") as app_dir, (out / "connector.log").open("w", encoding="utf-8") as log:
-        connector = subprocess.Popen([sys.executable, str(root / "public/poligome-sam-local.py"), "--model", "sam3-concepts", "--checkpoint", str(checkpoint), "--device", args.device, "--port", str(port), "--app-dir", app_dir], stdout=log, stderr=subprocess.STDOUT)
+        connector = subprocess.Popen([sys.executable, str(root / "public/poligome-sam-local.py"), "--model", "sam3-concepts", "--checkpoint", str(checkpoint), "--device", args.device, "--port", str(port), "--app-dir", app_dir], stdout=log, stderr=subprocess.STDOUT, env=child_env)
         try:
             deadline = time.monotonic() + args.startup_timeout
             while time.monotonic() < deadline:
@@ -58,14 +78,9 @@ def main() -> int:
                 time.sleep(2)
             else:
                 raise TimeoutError("SAM 3 não ficou pronto no prazo; veja connector.log")
-            return subprocess.call([sys.executable, str(root / "scripts/adaptive-smoke.py"), "--base", base, "--expect-family", "sam3", "--domain", "nuclei", "--images", "24", "--max-epochs", "6", "--strategy", "decoder", "--report", str(out / "sam3-smoke.json")], cwd=root)
+            return subprocess.call([sys.executable, str(root / "scripts/adaptive-smoke.py"), "--base", base, "--expect-family", "sam3", "--domain", "nuclei", "--images", "24", "--max-epochs", "6", "--strategy", "decoder", "--report", str(out / "sam3-smoke.json")], cwd=root, env=child_env)
         finally:
-            connector.terminate()
-            try:
-                connector.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                connector.kill()
-                connector.wait()
+            stop_connector(connector)
 
 
 if __name__ == "__main__":

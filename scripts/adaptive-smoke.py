@@ -40,6 +40,10 @@ def call(base: str, method: str, path: str, body: dict | None = None, timeout: f
 
 
 def main() -> int:
+    # Windows redirects default to cp1252, which cannot print the result arrow.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="http://127.0.0.1:7860")
     parser.add_argument("--images", type=int, default=24)
@@ -153,7 +157,7 @@ def main() -> int:
 
     summary["total_seconds"] = round(time.monotonic() - started, 1)
     if args.report:
-        Path(args.report).write_text(json.dumps(summary, indent=1, ensure_ascii=False))
+        Path(args.report).write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding="utf-8")
     print(f"smoke test concluído em {summary['total_seconds']} s")
     return 0
 

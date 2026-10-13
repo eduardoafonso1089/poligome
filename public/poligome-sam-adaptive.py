@@ -2303,6 +2303,7 @@ class TrainingJob:
         max_instances = config.max_instances_per_image
         epoch_times = []
         since_improvement = 0
+        patience_best_dice = baseline["val_dice"]
 
         for epoch in range(1, data["max_epochs"] + 1):
             epoch_started = time.monotonic()
@@ -2355,11 +2356,19 @@ class TrainingJob:
             }
             epochs.append(entry)
             _append_jsonl(self.run_dir / "metrics.jsonl", entry)
-            if metrics["val_dice"] >= best["dice"] + config.min_delta:
-                best = {"epoch": epoch, "dice": metrics["val_dice"], "loss": metrics["val_loss"], "state": lora_state_dict(model)}
+            # Track patience separately from the selected candidate checkpoint.
+            # A smaller improvement can still be its highest validation Dice.
+            if metrics["val_dice"] >= patience_best_dice + config.min_delta:
+                patience_best_dice = metrics["val_dice"]
                 since_improvement = 0
             else:
                 since_improvement += 1
+            # Keep the identity adapter when no epoch reaches the baseline's
+            # minimum gain. Once a candidate does, retain its actual maximum.
+            if metrics["val_dice"] > best["dice"] and (
+                best["epoch"] > 0 or metrics["val_dice"] >= baseline["val_dice"] + config.min_delta
+            ):
+                best = {"epoch": epoch, "dice": metrics["val_dice"], "loss": metrics["val_loss"], "state": lora_state_dict(model)}
             diagnosis = diagnose_convergence(epochs, config)
             self._save(
                 epochs=epochs,
