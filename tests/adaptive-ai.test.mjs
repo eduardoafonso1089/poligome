@@ -15,14 +15,14 @@ import { render, text, countClass } from "./helpers/render.mjs";
 import { polygon, box } from "./helpers/editor-fixtures.mjs";
 import {
   buildItemPayload, classifyAnnotation, diffAgainstConnector, itemKeyFor, newAdaptiveProjectId,
-  planAdaptiveDataset, sequenceGroup,
+  planAdaptiveCandidates, planAdaptiveDataset, sequenceGroup,
 } from "../app/lib/adaptive-dataset.ts";
 import { markRuntimePredictions } from "../app/lib/runtime-annotations.ts";
 import { ADAPTIVE_PROJECT_ID_PATTERN, openPoligomeProjectV4, savePoligomeProjectV4 } from "../app/lib/project.ts";
 import { getCopy } from "../app/lib/i18n.ts";
 import { getAdaptiveCopy } from "../app/lib/adaptive-copy.ts";
 import {
-  AdaptiveAiPanel, ComparisonView, MetricChart, ReadinessView, TrainingView, reasonText, runLabel,
+  AdaptiveAiPanel, ComparisonView, LearningCurveView, MetricChart, NextStepCard, ReadinessView, SuggestionsView, TrainingView, imagesStillNeeded, nextStep, reasonText, runLabel,
 } from "../app/components/AdaptiveAiPanel.tsx";
 import SamSetupModal from "../app/components/SamSetupModal.tsx";
 
@@ -132,7 +132,7 @@ test("every language carries every string with the same placeholders", () => {
     const copy = getAdaptiveCopy(language);
     for (const [key, value] of Object.entries(pt)) {
       assert.equal(typeof copy[key], "string", `${language}.${key} missing`);
-      assert.ok(copy[key].length > 0 || key === "activation_inactive", `${language}.${key} empty`);
+      assert.ok(copy[key].length > 0 || ["activation_inactive", "precision_float32"].includes(key), `${language}.${key} empty`);
       assert.equal(placeholders(copy[key]), placeholders(value), `${language}.${key} placeholders differ`);
     }
   }
@@ -225,4 +225,66 @@ test("installers pin the adaptive module they download", async () => {
   const powershell = readFileSync(new URL("../public/poligome-sam-windows-native.ps1", import.meta.url), "utf8");
   assert.match(bash, new RegExp(`^DEFAULT_ADAPTIVE_SHA256="${digest}"$`, "m"), "bash installer pin is stale: run the pin update");
   assert.match(powershell, new RegExp(`^\\$DefaultAdaptiveSha256 = '${digest}'\\r?$`, "m"), "PowerShell installer pin is stale");
+});
+
+test("readiness says how many more independent images to annotate", () => {
+  const t = getAdaptiveCopy("en");
+  const report = backend.readiness;
+  const needed = imagesStillNeeded(report);
+  assert.equal(needed, Math.max(0, report.thresholds.target_independent - report.counts.independent_groups));
+  const short = { ...report, counts: { ...report.counts, independent_groups: 10 } };
+  assert.equal(imagesStillNeeded(short), report.thresholds.target_independent - 10);
+  assert.match(text(render(ReadinessView, { t, report: short })), new RegExp(`annotate about ${report.thresholds.target_independent - 10} images from new sources`));
+  const frozen = { ...report, split_frozen: true, counts: { ...report.counts, independent_groups: 40, holdout: { ...report.counts.holdout, groups: 4 } } };
+  assert.equal(imagesStillNeeded(frozen), Math.ceil((report.thresholds.target_holdout_groups - 4) / report.thresholds.holdout_fraction));
+});
+
+test("learning curve view answers how many images, with its caveats", () => {
+  const t = getAdaptiveCopy("en");
+  const curve = backend.run.learning_curve;
+  assert.ok(curve.points.length >= 4, "fixture must carry a real curve");
+  const markup = render(LearningCurveView, { t, curve });
+  const content = text(markup);
+  assert.match(content, new RegExp(t[`curveTrend_${curve.trend}`]));
+  assert.match(content, /With \d+ training groups/);
+  assert.match(content, /order of magnitude/);
+  assert.equal(countClass(markup, "adaptive-chart"), 1);
+  assert.match(text(render(LearningCurveView, { t, curve: { skipped: "too_few_groups" } })), /too few training groups/);
+});
+
+test("suggestions list the most novel unannotated image first and open it", () => {
+  const t = getAdaptiveCopy("en");
+  const names = new Map(backend.suggestions.suggestions.map((entry, index) => [entry.key, { id: `asset-${index}`, name: `image-${index}.png` }]));
+  const markup = render(SuggestionsView, { t, suggestions: backend.suggestions.suggestions, names, method: backend.suggestions.method, analyzed: 2 });
+  const content = text(markup);
+  assert.match(content, /image-0\.png.*very different/s);
+  assert.match(content, /near-copy of an annotated image/);
+  assert.equal((markup.match(/<button/g) ?? []).length, 2);
+});
+
+test("candidates are the available images without approved masks", () => {
+  const assets = [asset, { ...asset, id: "img-2", name: "b.png" }, { ...asset, id: "img-3", missing: true, src: "" }];
+  const plan = planAdaptiveDataset(assets, [], [square()], { groupSequences: true });
+  const candidates = planAdaptiveCandidates(assets, plan);
+  assert.deepEqual(candidates.map((candidate) => candidate.asset.id), ["img-2"]);
+  assert.equal(candidates[0].key, itemKeyFor("img-2"));
+});
+
+test("the next step follows the real state, one action at a time", () => {
+  const ready = backend.readiness;
+  const run = backend.run;
+  const with_ = (outcome, extra = {}) => ({ ...run, comparison: { ...run.comparison, decision: { outcome, reasons: [] } }, ...extra });
+  assert.deepEqual(nextStep({ report: null, record: null, activeHere: false }), { stage: 0, key: "analyze" });
+  const notReady = { ...ready, can_train: false, counts: { ...ready.counts, independent_groups: 5 } };
+  assert.deepEqual(nextStep({ report: notReady, record: null, activeHere: false }), { stage: 0, key: "annotate", n: ready.thresholds.target_independent - 5 });
+  assert.equal(nextStep({ report: ready, record: null, activeHere: false }).key, "train");
+  assert.equal(nextStep({ report: ready, record: { ...run, status: "training" }, activeHere: false }).key, "training");
+  assert.equal(nextStep({ report: ready, record: with_("improved"), activeHere: false }).key, "activate");
+  assert.equal(nextStep({ report: ready, record: with_("improved", { activation: "active" }), activeHere: true }).key, "active");
+  assert.equal(nextStep({ report: ready, record: with_("insufficient_evidence"), activeHere: false }).key, "more_evidence");
+  assert.equal(nextStep({ report: ready, record: with_("not_improved"), activeHere: false }).key, "kept");
+  assert.equal(nextStep({ report: ready, record: { ...run, status: "failed" }, activeHere: false }).key, "failed");
+  const markup = render(NextStepCard, { t: getAdaptiveCopy("en"), step: { stage: 0, key: "annotate", n: 7 } });
+  assert.match(text(markup), /Annotate about 7 images from new sources/);
+  assert.match(markup, /aria-current="step"/);
 });

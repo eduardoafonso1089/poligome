@@ -15,6 +15,7 @@ when the `sam2` package is not installed. No test downloads anything.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -235,6 +236,18 @@ class GroupingAndSplitTests(unittest.TestCase):
         self.assertEqual(groups["item-0003"], groups["item-0004"])
         self.assertNotEqual(groups["item-0000"], groups["item-0002"])
         self.assertTrue(any({pair["a"], pair["b"]} == {"item-0000", "item-0001"} for pair in duplicates))
+
+    def test_illumination_gradient_alone_does_not_make_duplicates(self):
+        # Found with microscopy-like fields: dHash encodes the light gradient, so
+        # different slides with similar lighting used to merge into one group.
+        from adaptive_fixtures import nuclei_image
+
+        items = []
+        for slide in range(16):
+            image, _ = nuclei_image(slide * 100, slide)
+            items.append({"key": f"item-{slide:04d}", "group": None, "descriptor": adaptive.image_descriptor(image)})
+        groups, duplicates = adaptive.group_items(items, self.config)
+        self.assertEqual(len(set(groups.values())), 16, duplicates)
 
     def test_distinct_images_stay_independent(self):
         groups, _ = adaptive.group_items(self.items(range(20, 40)), self.config)
@@ -683,11 +696,95 @@ class FailureTests(unittest.TestCase):
 
     def test_unsupported_family_is_refused(self):
         harness = ServiceHarness(self.folder)
-        harness.service.get_live_model = lambda: adaptive.LiveModel(None, "sam3-concepts", "sam3", "cpu", None)
+        harness.service.get_live_model = lambda: adaptive.LiveModel(None, "byom-detector", "byom", "cpu", None)
         self.assertEqual(harness.service.assess(self.project)["state"], "unsupported_model")
         with self.assertRaises(adaptive.AdaptiveError) as caught:
             harness.service.start_training(self.project, FAST)
         self.assertEqual(caught.exception.code, "unsupported_model")
+
+    def test_sam3_trains_the_decoder_only(self):
+        harness = ServiceHarness(self.folder)
+        harness.fill(self.project)
+        live = harness.live_model
+        harness.service.get_live_model = lambda: adaptive.LiveModel(live, "sam3-concepts", "sam3", "cpu", None)
+        with self.assertRaises(adaptive.AdaptiveError) as caught:
+            harness.service.start_training(self.project, dict(FAST, strategy="encoder_decoder"))
+        self.assertEqual(caught.exception.code, "strategy_unsupported")
+        run = harness.service.start_training(self.project, dict(FAST, strategy="auto", max_epochs=2, min_epochs=1, learning_curve=False))
+        harness.service.wait_for_training(300)
+        record = harness.service.get_run(self.project, run["run_id"])
+        self.assertEqual(record["status"], "completed", record.get("error"))
+        self.assertEqual(record["lora"]["strategy"], "decoder")
+
+
+class LearningCurveAndSuggestionTests(unittest.TestCase):
+    def test_power_law_recovers_a_known_curve(self):
+        sizes = [4, 8, 16, 32]
+        dice = [1 - (0.6 * n ** -0.5 + 0.1) for n in sizes]
+        a, b, c = adaptive.fit_power_law(sizes, dice)
+        self.assertAlmostEqual(b, 0.5, delta=0.05)
+        self.assertAlmostEqual(c, 0.1, delta=0.02)
+        self.assertAlmostEqual(adaptive._predict_dice((a, b, c), 64), 1 - (0.6 * 64 ** -0.5 + 0.1), delta=0.01)
+        self.assertIsNone(adaptive.fit_power_law([4, 8], [0.5, 0.6]))
+
+    def test_round_reports_a_learning_curve(self):
+        folder = Path(tempfile.mkdtemp())
+        try:
+            harness = ServiceHarness(folder)
+            harness.fill("project-curve", 32)
+            run = harness.service.start_training("project-curve", dict(FAST, max_epochs=6))
+            harness.service.wait_for_training(600)
+            record = harness.service.get_run("project-curve", run["run_id"])
+            self.assertEqual(record["status"], "completed", record.get("error"))
+            curve = record["learning_curve"]
+            self.assertNotIn("skipped", curve, curve)
+            kinds = [point["kind"] for point in curve["points"]]
+            self.assertEqual(kinds[0], "base")
+            self.assertEqual(kinds[-1], "full")
+            self.assertGreaterEqual(kinds.count("subset"), 2)
+            self.assertEqual(curve["points"][-1]["groups"], curve["train_groups"])
+            full = curve["points"][-1]["mean"]
+            self.assertAlmostEqual(full, record["comparison"]["primary"]["candidate_mean"], places=6)
+            self.assertIn(curve["trend"], ("rising", "plateau", "uncertain"))
+            self.assertTrue(curve["single_seed"])
+            # The adapter that is kept is still the round's best, not a curve point.
+            metadata, _ = adaptive.load_adapter(folder / "projects" / "project-curve" / "runs" / run["run_id"] / "adapter.pt")
+            self.assertEqual(metadata["best_epoch"], record["best_epoch"])
+        finally:
+            shutil.rmtree(folder)
+
+    def test_learning_curve_can_be_turned_off(self):
+        folder = Path(tempfile.mkdtemp())
+        try:
+            harness = ServiceHarness(folder)
+            harness.fill("project-nocurve", 24)
+            run = harness.service.start_training("project-nocurve", dict(FAST, max_epochs=3, learning_curve=False))
+            harness.service.wait_for_training(600)
+            self.assertNotIn("learning_curve", harness.service.get_run("project-nocurve", run["run_id"]))
+        finally:
+            shutil.rmtree(folder)
+
+    def test_suggestions_prefer_new_kinds_of_image_and_skip_duplicates(self):
+        folder = Path(tempfile.mkdtemp())
+        try:
+            harness = ServiceHarness(folder)
+            for seed in range(8):
+                harness.service.put_item("project-suggest", f"item-{seed:04d}", item_payload(1200 + seed))
+            from adaptive_fixtures import data_url, nuclei_image
+
+            harness.service.put_candidate("project-suggest", "cand-dup-0001", {"image": item_payload(1200)["image"], "fingerprint": "d"})
+            harness.service.put_candidate("project-suggest", "cand-same-0001", {"image": item_payload(1300)["image"], "fingerprint": "s"})
+            harness.service.put_candidate("project-suggest", "cand-new-00001", {"image": data_url(nuclei_image(1, 1)[0]), "fingerprint": "n"})
+            result = harness.service.suggestions("project-suggest", 5)
+            order = [entry["key"] for entry in result["suggestions"]]
+            self.assertEqual(order[0], "cand-new-00001", result)
+            self.assertEqual(order[-1], "cand-dup-0001")
+            self.assertEqual(result["suggestions"][-1]["reason"], "near_duplicate")
+            self.assertEqual(set(harness.service.list_candidates("project-suggest")["items"]), {"cand-dup-0001", "cand-same-0001", "cand-new-00001"})
+            harness.service.delete_candidate("project-suggest", "cand-dup-0001")
+            self.assertEqual(len(harness.service.suggestions("project-suggest")["suggestions"]), 2)
+        finally:
+            shutil.rmtree(folder)
 
 
 class ReadinessTests(unittest.TestCase):
@@ -821,6 +918,92 @@ class Sam2IntegrationTests(unittest.TestCase):
             self.assertTrue(adaptive.lora_modules(live))
             service.deactivate()
             self.assertEqual(adaptive.lora_modules(live), {})
+        finally:
+            shutil.rmtree(folder)
+
+
+try:
+    import sam3  # noqa: F401
+
+    HAS_SAM3 = True
+except Exception:
+    HAS_SAM3 = False
+
+
+@unittest.skipUnless(HAS_SAM3 and os.environ.get("POLIGOME_TEST_SAM3") == "1", "set POLIGOME_TEST_SAM3=1 with the sam3 package installed (slow: ~1 min per image on CPU)")
+class Sam3IntegrationTests(unittest.TestCase):
+    """The real SAM 3 architecture (random weights), interactive point/box path, CPU."""
+
+    @classmethod
+    def setUpClass(cls):
+        from adaptive_fixtures import apply_connector_sam3_cpu_patches
+
+        connector = apply_connector_sam3_cpu_patches()
+        from sam3.model_builder import build_sam3_image_model
+
+        torch.manual_seed(0)
+        cls.model = build_sam3_image_model(device="cpu", checkpoint_path=None, load_from_HF=False, enable_inst_interactivity=True)
+        connector._move_rope_caches(cls.model, "cpu")
+        cls.model.eval()
+
+    def test_segmenter_matches_predict_inst_and_lora_starts_as_identity(self):
+        from sam3.model.sam3_image_processor import Sam3Processor
+        from PIL import Image as PILImage
+
+        image, objects = synthetic_image(11, size=(200, 150))
+        box = np.asarray([20, 20, 120, 100], dtype=np.float32)
+        processor = Sam3Processor(self.model, device="cpu")
+        state = processor.set_image(PILImage.fromarray(image))
+        with torch.inference_mode():
+            _, _, official = self.model.predict_inst(state, box=box, multimask_output=False, return_logits=True)
+        segmenter = adaptive.Sam3Segmenter(self.model, "cpu")
+        with torch.no_grad():
+            features = segmenter.encode(segmenter.preprocess(image))
+            coords, labels = segmenter.prompt_tensors([{"box": tuple(box), "points": []}], 200, 150)
+            ours, _ = segmenter.decode(features, coords, labels)
+        self.assertEqual(ours.shape[-1], segmenter.low_res_size)
+        self.assertLess(float(np.abs(np.asarray(official)[0] - ours[0, 0].numpy()).max()), 1e-3)
+        targets = adaptive.resolve_lora_targets(self.model, "decoder")
+        self.assertTrue(targets and all(name.startswith("inst_interactive_predictor.model.sam_mask_decoder.") for name in targets))
+        with self.assertRaises(ValueError):
+            adaptive.resolve_lora_targets(self.model, "encoder_decoder")
+        adaptive.inject_lora(self.model, targets, 8, 16, 0.0)
+        try:
+            with torch.no_grad():
+                adapted, _ = segmenter.decode(features, coords, labels)
+            self.assertTrue(torch.allclose(ours, adapted, atol=1e-5))
+        finally:
+            adaptive.remove_lora(self.model)
+
+    def test_short_decoder_training_on_sam3_with_shared_backbone(self):
+        folder = Path(tempfile.mkdtemp())
+        lock = threading.Lock()
+        try:
+            readiness = adaptive.ReadinessConfig(min_approved_images=5, min_instances=8, min_independent_experimental=5, min_holdout_groups=1, min_holdout_instances=2, target_holdout_groups=1, holdout_fraction=0.2)
+            service = adaptive.AdaptiveService(
+                root=folder,
+                get_live_model=lambda: adaptive.LiveModel(self.model, "sam3-concepts", "sam3", "cpu", None),
+                predictor_lock=lock,
+                invalidate_embedding=lambda: None,
+                model_factory=lambda: adaptive.Sam3TrainingModel(self.model, lock),
+                readiness=readiness,
+                compute_embeddings=False,
+            )
+            for seed in range(6):
+                service.put_item("project-sam3", f"item-{seed:04d}", item_payload(1500 + seed, size=(128, 96), shapes=2))
+            run = service.start_training("project-sam3", {"max_epochs": 2, "min_epochs": 1, "bootstrap_samples": 200, "max_clicks": 2, "learning_curve": False, "augment_hflip": False, "min_internal_val_groups": 1})
+            service.wait_for_training(7200)
+            record = service.get_run("project-sam3", run["run_id"])
+            self.assertEqual(record["status"], "completed", record.get("error"))
+            self.assertEqual(record["lora"]["strategy"], "decoder")
+            self.assertEqual(len(record["epochs"]), 3)
+            stored = service.store("project-sam3").read_run(run["run_id"])
+            stored["comparison"]["decision"]["outcome"] = "improved"
+            service.store("project-sam3").write_run(stored)
+            service.activate("project-sam3", run["run_id"])
+            self.assertTrue(adaptive.lora_modules(self.model))
+            service.deactivate()
+            self.assertEqual(adaptive.lora_modules(self.model), {})
         finally:
             shutil.rmtree(folder)
 

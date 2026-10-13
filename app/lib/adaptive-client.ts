@@ -8,7 +8,7 @@
 
 import type { Copy } from "./i18n";
 import { assetAsDataUrl } from "./sam";
-import { buildItemPayload, diffAgainstConnector, type AdaptiveDatasetPlan } from "./adaptive-dataset";
+import { buildItemPayload, diffAgainstConnector, type AdaptiveCandidate, type AdaptiveDatasetPlan } from "./adaptive-dataset";
 
 export type AdaptiveErrorDetail = { code: string; message: string; params?: Record<string, unknown> };
 
@@ -57,6 +57,7 @@ export type ReadinessReport = {
   continual: { previous_runs: number; recommend: boolean; new_groups?: number; required_new_groups?: number; backoff?: boolean } | null;
   split_frozen: boolean;
   model_id: string | null;
+  thresholds?: Record<string, number | null>;
 };
 
 export type EpochMetrics = {
@@ -92,6 +93,24 @@ export type ComparisonSummary = {
   examples: Array<{ file: string; label_name: string; reference_dice: number; candidate_dice: number; delta: number; prompt: string }>;
 };
 
+export type Interval = { median: number; low: number; high: number };
+
+export type LearningCurve = {
+  skipped?: "no_improvement" | "too_few_groups" | "error";
+  message?: string;
+  points?: Array<{ groups: number; mean: number; ci_low: number; ci_high: number; kind: "base" | "subset" | "full" }>;
+  fit?: { a: number; b: number; c: number; ceiling: number } | null;
+  projection?: { double: ({ groups: number } & Interval) | null; plus10: ({ groups: number } & Interval) | null };
+  additional_groups_for_one_point?: (Partial<Interval> & { share_beyond_range: number }) | null;
+  last_step_gain?: Interval | null;
+  trend?: "rising" | "plateau" | "uncertain";
+  single_seed?: boolean;
+  train_groups?: number;
+  epochs?: number;
+};
+
+export type Suggestion = { key: string; rank: number; novelty: number | null; reason: "first_examples" | "novel" | "typical" | "similar" | "near_duplicate" };
+
 export type RunRecord = {
   run_id: string;
   project_id: string;
@@ -102,7 +121,7 @@ export type RunRecord = {
   activation: "inactive" | "active" | "rejected" | "superseded";
   base_model: { model_id: string; family: string; device: string };
   config: Record<string, unknown>;
-  resolved?: { learning_rate: number; max_epochs: number };
+  resolved?: { learning_rate: number; max_epochs: number; device?: string; precision?: "bfloat16" | "float32" };
   lora?: { strategy: string; rank: number; alpha: number; target_count: number; trainable_params: number; total_params: number; encoder_blocks: number };
   data?: Record<"fit" | "internal_val" | "holdout", { images: number; groups: number; instances: number }>;
   epochs: EpochMetrics[];
@@ -110,6 +129,7 @@ export type RunRecord = {
   epochs_run?: number;
   diagnosis?: { state: "in_progress" | "improving" | "converged" | "overfitting" | "inconclusive"; best_epoch: number; stopped_early?: boolean; no_improvement_over_base?: boolean };
   comparison?: ComparisonSummary;
+  learning_curve?: LearningCurve;
   timing?: { seconds_per_epoch?: number; total_seconds?: number };
   error?: { code: string; message: string };
   progress?: AdaptiveProgress;
@@ -164,6 +184,8 @@ export const adaptiveApi = {
     request<AdaptiveStatus>(base, `${project(id)}/runs/${encodeURIComponent(runId)}/activate`, { method: "POST", body: JSON.stringify({ override }), timeoutMs: 120_000 }),
   reject: (base: string, id: string, runId: string) => request(base, `${project(id)}/runs/${encodeURIComponent(runId)}/reject`, { method: "POST" }),
   rollback: (base: string, id: string) => request<AdaptiveStatus>(base, `${project(id)}/rollback`, { method: "POST", timeoutMs: 120_000 }),
+  suggestions: (base: string, id: string, limit = 10) =>
+    request<{ method: string | null; suggestions: Suggestion[]; annotated: number; candidates?: number }>(base, `${project(id)}/suggestions?limit=${limit}`),
   deactivate: (base: string) => request<AdaptiveStatus>(base, "/adaptive/deactivate", { method: "POST", timeoutMs: 60_000 }),
   /** Busca o PNG como blob: `<img>` direto no localhost esbarra no Private Network Access. */
   async example(base: string, id: string, runId: string, file: string): Promise<string> {
@@ -219,4 +241,47 @@ export async function syncAdaptiveDataset({
     onProgress?.(++done, total);
   }
   return { uploaded: diff.upload.length - failed.length, removed: diff.remove.length, unchanged: diff.unchanged, failed };
+}
+
+/**
+ * Envia as imagens ainda sem anotação aprovada, só para medir quais acrescentam
+ * mais cobertura. O conector guarda descritores e embedding, não a imagem.
+ */
+export async function syncAdaptiveCandidates({
+  base, projectId, candidates, copy, onProgress, signal,
+}: {
+  base: string;
+  projectId: string;
+  candidates: AdaptiveCandidate[];
+  copy: Copy;
+  onProgress?: (done: number, total: number) => void;
+  signal?: AbortSignal;
+}): Promise<{ failed: number }> {
+  const remote = await request<{ items: Record<string, string> }>(base, `${project(projectId)}/candidates`);
+  const wanted = new Map(candidates.map((candidate) => [candidate.key, candidate]));
+  const upload = candidates.filter((candidate) => remote.items[candidate.key] !== candidate.fingerprint);
+  const remove = Object.keys(remote.items).filter((key) => !wanted.has(key));
+  const total = upload.length + remove.length;
+  let done = 0;
+  let failed = 0;
+  onProgress?.(done, total);
+  for (const key of remove) {
+    if (signal?.aborted) throw new DOMException("Cancelado", "AbortError");
+    await request(base, `${project(projectId)}/candidates/${encodeURIComponent(key)}`, { method: "DELETE" });
+    onProgress?.(++done, total);
+  }
+  for (const candidate of upload) {
+    if (signal?.aborted) throw new DOMException("Cancelado", "AbortError");
+    try {
+      const image = await assetAsDataUrl(candidate.asset, copy, signal);
+      await request(base, `${project(projectId)}/candidates/${encodeURIComponent(candidate.key)}`, {
+        method: "POST", body: JSON.stringify({ image: image.url, fingerprint: candidate.fingerprint }), timeoutMs: 120_000, signal,
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
+      failed += 1;
+    }
+    onProgress?.(++done, total);
+  }
+  return { failed };
 }

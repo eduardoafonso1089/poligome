@@ -160,6 +160,7 @@ def make_toy_classes(torch, nn, F):
             self.model = model
             self.device = torch.device(device)
             self.resolution = model.image_size
+            self.low_res_size = self.resolution // 4
 
         def preprocess(self, pixels):
             tensor = torch.from_numpy(np.ascontiguousarray(pixels)).permute(2, 0, 1)[None].float() / 255.0
@@ -231,3 +232,96 @@ def make_toy_classes(torch, nn, F):
             return F.interpolate(low_res.float(), size=(height, width), mode="bilinear", align_corners=False)
 
     return ToySam, ToySegmenter
+
+
+def nuclei_image(seed: int, slide: int, size: int = 256):
+    """A microscopy-like field: touching nuclei, blur, uneven light, noise.
+
+    `slide` fixes the staining, illumination and nucleus size, so images of the
+    same slide are correlated the way crops of one exam are. Objects touch on
+    purpose: a single click on a cluster is ambiguous for SAM, and the dataset's
+    convention — one nucleus per instance — is what an adapter should learn.
+    Returns (image, list of (label, flat polygon, mask)).
+    """
+    slide_rng = np.random.default_rng(10_000 + slide)
+    rng = np.random.default_rng(seed)
+    background = slide_rng.uniform([200, 175, 205], [235, 210, 240])
+    stain = slide_rng.uniform([70, 35, 110], [120, 70, 160])
+    radius = slide_rng.uniform(9, 15)
+    blur = slide_rng.uniform(0.8, 2.0)
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
+    angle = slide_rng.uniform(0, 2 * np.pi)
+    light = 1.0 + 0.12 * ((np.cos(angle) * xx + np.sin(angle) * yy) / size - 0.5)
+    canvas = np.ones((size, size, 3), np.float32) * background
+    labels = np.zeros((size, size), np.int32)
+    centers: list[tuple[float, float, float]] = []
+    clusters = int(rng.integers(3, 6))
+    for _ in range(clusters):
+        cx, cy = rng.uniform(30, size - 30, size=2)
+        for _ in range(int(rng.integers(2, 5))):
+            r = radius * rng.uniform(0.75, 1.25)
+            if centers:
+                px, py, pr = centers[-1] if rng.random() < 0.7 else centers[int(rng.integers(len(centers)))]
+                theta = rng.uniform(0, 2 * np.pi)
+                distance = (pr + r) * rng.uniform(0.82, 0.98)
+                cx, cy = px + distance * np.cos(theta), py + distance * np.sin(theta)
+            if not (r < cx < size - r and r < cy < size - r):
+                continue
+            centers.append((cx, cy, r))
+    for index, (cx, cy, r) in enumerate(centers, start=1):
+        axes = (r * rng.uniform(0.85, 1.15), r * rng.uniform(0.7, 1.0))
+        rotation = rng.uniform(0, np.pi)
+        dx, dy = xx - cx, yy - cy
+        u = (dx * np.cos(rotation) + dy * np.sin(rotation)) / axes[0]
+        v = (-dx * np.sin(rotation) + dy * np.cos(rotation)) / axes[1]
+        inside = (u * u + v * v) <= 1.0
+        labels[inside] = index
+        shade = stain * rng.uniform(0.85, 1.15)
+        texture = rng.normal(1.0, 0.08, size=(size, size, 1))
+        canvas[inside] = (shade * texture[inside]).astype(np.float32)
+    canvas = cv2.GaussianBlur(canvas, (0, 0), blur) * light[..., None]
+    canvas += rng.normal(0, 6, size=canvas.shape)
+    image = np.clip(canvas, 0, 255).astype(np.uint8)
+    objects = []
+    for index in range(1, len(centers) + 1):
+        mask = labels == index
+        if mask.sum() < 30:
+            continue
+        contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        contour = max(contours, key=cv2.contourArea)[:, 0, :]
+        if len(contour) < 3:
+            continue
+        # The polygon is what an annotator would draw; the mask is what it rasterizes to.
+        objects.append(("nucleus", contour.astype(float).reshape(-1).tolist(), mask))
+    return image, objects
+
+
+def nuclei_payload(seed: int, slide: int, size: int = 256):
+    image, objects = nuclei_image(seed, slide, size)
+    return {
+        "image": data_url(image),
+        "width": size,
+        "height": size,
+        "name": f"slide{slide:02d}_field_{seed:04d}.png",
+        "group": None,
+        "fingerprint": f"nuc-{slide}-{seed}",
+        "instances": [
+            {"id": f"n{seed}-{index}", "label": "nucleus", "label_name": "Nucleus", "origin": "manual", "polygons": [flat], "holes": []}
+            for index, (_, flat, _) in enumerate(objects)
+        ],
+    }
+
+
+def apply_connector_sam3_cpu_patches():
+    """Run the connector's own SAM 3 CPU patches (no server, no model load)."""
+    import types
+
+    if "poligome_connector_patches" in sys.modules:
+        return sys.modules["poligome_connector_patches"]
+    source = (ROOT / "public/poligome-sam-local.py").read_text(encoding="utf-8").split("def _configured_origins")[0]
+    module = types.ModuleType("poligome_connector_patches")
+    sys.modules[module.__name__] = module
+    exec(compile(source, "poligome-sam-local.py", "exec"), module.__dict__)
+    module._provide_sam3_edt_without_triton()
+    module._patch_sam3_for_cpu()
+    return module

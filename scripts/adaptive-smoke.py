@@ -24,7 +24,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests" / "helpers"))
-from adaptive_fixtures import item_payload, synthetic_image, data_url  # noqa: E402
+from adaptive_fixtures import item_payload, nuclei_image, nuclei_payload, synthetic_image, data_url  # noqa: E402
 
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -45,6 +45,7 @@ def main() -> int:
     parser.add_argument("--images", type=int, default=24)
     parser.add_argument("--strategy", default="decoder", choices=["auto", "decoder", "encoder_decoder"])
     parser.add_argument("--max-epochs", type=int, default=3)
+    parser.add_argument("--domain", default="shapes", choices=["shapes", "nuclei"], help="nuclei: núcleos que se tocam, onde o SAM original erra com um clique")
     parser.add_argument("--report", help="grava o resumo em JSON neste caminho")
     args = parser.parse_args()
     base = args.base.rstrip("/")
@@ -60,7 +61,11 @@ def main() -> int:
 
     t0 = time.monotonic()
     for index in range(args.images):
-        payload = item_payload(4000 + index, size=(256, 192), shapes=3)
+        if args.domain == "nuclei":
+            payload = nuclei_payload(4000 + index, slide=index)
+            payload["group"] = f"name:slide{index:02d}_field"
+        else:
+            payload = item_payload(4000 + index, size=(256, 192), shapes=3)
         status, result = call(base, "POST", f"/adaptive/projects/{project}/items/item-{index:04d}", payload)
         assert status == 200, result
     summary["upload_seconds"] = round(time.monotonic() - t0, 1)
@@ -72,7 +77,7 @@ def main() -> int:
     print(f"prontidão: {report['state']} · {report['counts']['independent_groups']} independentes · holdout {report['counts']['holdout']}")
     assert report["can_train"], report["reasons"]
 
-    image, objects = synthetic_image(4000, size=(256, 192))
+    image, objects = nuclei_image(4000, 0) if args.domain == "nuclei" else synthetic_image(4000, size=(256, 192))
     mask = objects[0][2]
     import numpy as np
 

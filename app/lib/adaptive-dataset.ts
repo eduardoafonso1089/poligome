@@ -206,3 +206,23 @@ export function newAdaptiveProjectId(): string {
     : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
   return `p-${random.toLowerCase()}`;
 }
+
+export type AdaptiveCandidate = { key: string; asset: Asset; fingerprint: string };
+
+/**
+ * Imagens do projeto que ainda não ensinam nada: sem máscara aprovada, mas
+ * disponíveis. São as candidatas a "anote esta a seguir".
+ */
+export function planAdaptiveCandidates(assets: readonly Asset[], plan: AdaptiveDatasetPlan): AdaptiveCandidate[] {
+  const annotated = new Set(plan.items.map((item) => item.asset.id));
+  return assets
+    .filter((asset) => !annotated.has(asset.id) && !asset.missing && Boolean(asset.src) && !asset.raster)
+    .map((asset) => ({
+      key: itemKeyFor(asset.id),
+      asset,
+      fingerprint: stableHash(JSON.stringify([PAYLOAD_VERSION, asset.id, asset.name, asset.width, asset.height, asset.byteSize ?? null])),
+    }));
+}
+
+/** Evento que o editor escuta para abrir uma imagem pelo id. */
+export const SELECT_ASSET_EVENT = "poligome:select-asset";
