@@ -884,7 +884,7 @@ def decide_promotion(summary: dict[str, Any], config: TrainConfig, readiness: Re
     A regra olha o intervalo de confiança do ganho por imagem no holdout, não a
     loss de treino:
       * holdout pequeno demais → evidência insuficiente;
-      * IC inteiro acima de zero, média ≥ efeito mínimo, sem regressão
+      * IC inteiro acima de zero e com limite inferior ≥ efeito mínimo, sem regressão
         significativa em subgrupo, poucas imagens pioradas e cliques simulados
         não piores → melhorou;
       * IC inteiro abaixo do efeito mínimo, ou regressão significativa → não
@@ -902,7 +902,8 @@ def decide_promotion(summary: dict[str, Any], config: TrainConfig, readiness: Re
     noc_delta = summary.get("interactive", {}).get("noc90_delta")
     if regressions:
         reasons.append({"code": "subgroup_regression", "params": {"subgroups": [sub["name"] for sub in regressions]}})
-    if primary["ci_low"] > 0 and primary["mean_delta"] >= config.min_effect and not regressions and worsened <= 0.25 and (noc_delta is None or noc_delta <= 0.5):
+    fail90_delta = summary.get("interactive", {}).get("candidate", {}).get("fail90", 0) - summary.get("interactive", {}).get("reference", {}).get("fail90", 0)
+    if primary["ci_low"] >= config.min_effect and primary["ci_low"] > 0 and not regressions and worsened <= 0.25 and (noc_delta is None or noc_delta <= 0.5) and fail90_delta <= 0.05:
         reasons.append({"code": "ci_above_zero", "params": {"low": primary["ci_low"], "high": primary["ci_high"]}})
         return {"outcome": "improved", "reasons": reasons}
     if regressions:
@@ -914,7 +915,10 @@ def decide_promotion(summary: dict[str, Any], config: TrainConfig, readiness: Re
         reasons.append({"code": "many_worsened", "params": {"share": worsened}})
     if noc_delta is not None and noc_delta > 0.5:
         reasons.append({"code": "more_clicks", "params": {"delta": noc_delta}})
-    reasons.append({"code": "ci_crosses_min_effect", "params": {"low": primary["ci_low"], "high": primary["ci_high"], "min_effect": config.min_effect}})
+    if fail90_delta > 0.05:
+        reasons.append({"code": "more_failures", "params": {"delta": fail90_delta}})
+    if primary["ci_low"] < config.min_effect:
+        reasons.append({"code": "ci_crosses_min_effect", "params": {"low": primary["ci_low"], "high": primary["ci_high"], "min_effect": config.min_effect}})
     return {"outcome": "insufficient_evidence", "reasons": reasons}
 
 
@@ -964,10 +968,11 @@ def diagnose_convergence(epochs: list[dict[str, Any]], config: TrainConfig) -> d
     if best - baseline <= max(noise, config.min_delta):
         return {"state": "inconclusive", "best_epoch": best_epoch}
     if len(train_losses) >= 3:
-        reference = max(1e-9, abs(train_losses[-3]))
-        if abs(train_losses[-1] - train_losses[-3]) / reference < 0.02:
+        recent_losses = train_losses[-3:]
+        reference = max(1e-9, abs(float(np.mean(recent_losses))))
+        if max(recent_losses) - min(recent_losses) < 0.02 * reference and evaluated[-1]["epoch"] - best_epoch >= config.patience:
             return {"state": "converged", "best_epoch": best_epoch}
-    return {"state": "converged", "best_epoch": best_epoch}
+    return {"state": "inconclusive", "best_epoch": best_epoch}
 
 
 def _best_epoch(evaluated: list[dict[str, Any]]) -> int:
@@ -1114,7 +1119,11 @@ class Sam3Segmenter(Sam2Segmenter):
 
     def _autocast(self):
         if self.device.type == "cuda":
-            return torch.autocast("cuda", dtype=torch.bfloat16)
+            if torch.cuda.is_bf16_supported(including_emulation=False):
+                return torch.autocast("cuda", dtype=torch.bfloat16)
+            # Only the frozen backbone uses FP16. Decoder training falls back
+            # to FP32, so this does not introduce unscaled FP16 gradients.
+            return torch.autocast("cuda", dtype=torch.float16)
         return contextlib.nullcontext()
 
     def preprocess(self, pixels: np.ndarray) -> Any:
@@ -1976,7 +1985,7 @@ class TrainingJob:
             raise TrainingCancelled()
 
     def precision(self) -> str:
-        if self.config.mixed_precision and str(self.device).startswith("cuda") and torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        if self.config.mixed_precision and str(self.device).startswith("cuda") and torch.cuda.is_available() and torch.cuda.is_bf16_supported(including_emulation=False):
             return "bfloat16"
         return "float32"
 
@@ -2215,7 +2224,9 @@ class TrainingJob:
                 for attempt in range(2):
                     try:
                         with self._autocast():
-                            loss, dice = self._train_step(segmenter, sample, cached, rng, max_instances, decoder_only, data["cache"])
+                            batch_start = (position // config.batch_size) * config.batch_size
+                            batch_images = min(config.batch_size, len(fit) - batch_start)
+                            loss, dice = self._train_step(segmenter, sample, cached, rng, max_instances, decoder_only, data["cache"], batch_images)
                         break
                     except Exception as error:
                         if not _is_oom(error) or attempt == 1 or max_instances == 1:
@@ -2296,7 +2307,7 @@ class TrainingJob:
             "created_at": _now_iso(),
         }
 
-    def _train_step(self, segmenter: Any, sample: Sample, cached: dict, rng: np.random.Generator, max_instances: int, decoder_only: bool, cache: dict[str, bool]) -> tuple[float, float]:
+    def _train_step(self, segmenter: Any, sample: Sample, cached: dict, rng: np.random.Generator, max_instances: int, decoder_only: bool, cache: dict[str, bool], batch_images: int | None = None) -> tuple[float, float]:
         config = self.config
         size = segmenter.low_res_size
         if decoder_only:
@@ -2326,7 +2337,7 @@ class TrainingJob:
         target_tensor = torch.from_numpy(np.stack(targets)).to(low_res.device)
         loss, dice = _segmentation_loss(low_res, iou_pred, target_tensor)
         # Média por imagem dentro do lote: cada imagem pesa igual no gradiente.
-        (loss / config.batch_size).backward()
+        (loss / (batch_images if batch_images is not None else config.batch_size)).backward()
         return float(loss.detach().cpu()), float(dice.cpu())
 
     def _validate(self, model: Any, data: dict[str, Any]) -> dict[str, Any]:
@@ -2486,7 +2497,9 @@ class TrainingJob:
                 self._check_cancel()
                 self.progress = {"phase": "learning_curve", "model": label, "epoch": epoch, "max_epochs": epochs, "done": position, "total": len(subset)}
                 with self._autocast():
-                    self._train_step(segmenter, subset[int(index)], data.get("cached", {}), rng, config.max_instances_per_image, decoder_only, data["cache"])
+                    batch_start = (position // config.batch_size) * config.batch_size
+                    batch_images = min(config.batch_size, len(subset) - batch_start)
+                    self._train_step(segmenter, subset[int(index)], data.get("cached", {}), rng, config.max_instances_per_image, decoder_only, data["cache"], batch_images)
                 if (position + 1) % config.batch_size == 0 or position + 1 == len(subset):
                     torch.nn.utils.clip_grad_norm_(parameters, 1.0)
                     optimizer.step()
@@ -2661,7 +2674,8 @@ def summarize_learning_curve(holdout: list[Sample], per_image: dict[int, dict[st
     # Cada ponto é um treino só, então o bootstrap do holdout sozinho ignora a
     # variação de treino e o erro do próprio ajuste, e devolvia intervalos como
     # "4 a 4". Somar os resíduos do ajuste com sinal aleatório (wild bootstrap)
-    # leva essa incerteza para o intervalo.
+    # aproxima a incerteza do ajuste. Isso NÃO mede a variação entre sementes
+    # ou novos subconjuntos de treino; seriam necessárias repetições reais.
     residuals = np.zeros(len(fitted_sizes))
     if params is not None:
         residuals = np.asarray([points[sizes.index(size)]["mean"] - _predict_dice(params, size) for size in fitted_sizes])
@@ -2714,6 +2728,8 @@ def summarize_learning_curve(holdout: list[Sample], per_image: dict[int, dict[st
         "last_step_gain": gain_interval,
         "trend": trend,
         "single_seed": True,
+        "projection_interval_level": 0.8,
+        "training_variance_measured": False,
         "fit_residual_rms": float(np.sqrt(np.mean(residuals ** 2))) if len(residuals) else None,
         "train_groups": total,
     }
@@ -2770,6 +2786,7 @@ def summarize_comparison(holdout: list[Sample], reference: dict, candidate: dict
         for key, ref_value, cand_value in zip(keys, ref_values, cand_values):
             instance = sample.instances[key[1]]
             instance_rows.append({
+                "image": sample.key,
                 "group": sample.group_id,
                 "label": instance["label"],
                 "label_name": instance["label_name"],
@@ -2818,17 +2835,29 @@ def summarize_comparison(holdout: list[Sample], reference: dict, candidate: dict
         names = sorted({row[attribute] for row in instance_rows})
         for name in names:
             rows = [row for row in instance_rows if row[attribute] == name]
-            values = [row["candidate"] - row["reference"] for row in rows]
-            mean, low, high = cluster_bootstrap(values, [row["group"] for row in rows], config.bootstrap_samples, seed + 7)
+            groups = len({row["group"] for row in rows})
+            image_rows = {}
+            for row in rows:
+                image_rows.setdefault(row["image"], []).append(row)
+            image_values = list(image_rows.values())
+            reference_values = [float(np.mean([row["reference"] for row in entries])) for entries in image_values]
+            candidate_values = [float(np.mean([row["candidate"] for row in entries])) for entries in image_values]
+            values = [c - r for c, r in zip(candidate_values, reference_values)]
+            mean, low, high = cluster_bootstrap(values, [entries[0]["group"] for entries in image_values], config.bootstrap_samples, seed + 7)
             regression = "none"
             if len(rows) >= 3 and mean <= -0.02:
-                regression = "significant" if high < 0 else "possible"
+                # Three objects from one slide are not three independent
+                # observations. Subgroup intervals are exploratory and cannot
+                # support a significant regression with a single source.
+                regression = "significant" if high < 0 and groups >= 4 else "possible"
             subgroups.append({
                 "kind": kind,
                 "name": rows[0]["label_name"] if kind == "class" else name,
                 "instances": len(rows),
-                "reference_mean": float(np.mean([row["reference"] for row in rows])),
-                "candidate_mean": float(np.mean([row["candidate"] for row in rows])),
+                "groups": groups,
+                "images": len(image_values),
+                "reference_mean": float(np.mean(reference_values)),
+                "candidate_mean": float(np.mean(candidate_values)),
                 "mean_delta": mean,
                 "ci_low": low,
                 "ci_high": high,
@@ -3275,10 +3304,8 @@ class AdaptiveService:
         if not comparable:
             raise AdaptiveError(409, "not_completed", "só uma rodada concluída e comparada pode ser ativada")
         outcome = ((record.get("comparison") or {}).get("decision") or {}).get("outcome")
-        if outcome == "not_improved":
-            raise AdaptiveError(409, "not_improved", "a comparação não mostrou melhora; o modelo anterior foi mantido")
-        if outcome == "insufficient_evidence" and not override:
-            raise AdaptiveError(409, "needs_confirmation", "a evidência é insuficiente; confirme para ativar mesmo assim")
+        if outcome != "improved" and not override:
+            raise AdaptiveError(409, "needs_confirmation", "a comparação não comprovou melhora; revise os resultados e confirme para experimentar")
         metadata, state, fingerprint = self._load_compatible(store, record, live)
         with self._state_lock:
             previous = self._active()

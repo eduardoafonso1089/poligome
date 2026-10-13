@@ -1,5 +1,9 @@
 # Adaptive AI — validação experimental
 
+> Relatório histórico do commit `683f35a`. A interface e alguns critérios foram
+> revisados depois desta medição; veja [a revisão atual](adaptive-ai-review.md).
+> Os números abaixo não são uma nova medição do código revisado.
+
 Este relatório responde, com medições, às perguntas que importam antes de
 confiar no Adaptive AI:
 

@@ -1058,7 +1058,9 @@ class Sam3Adapter:
         torna o resultado igual em qualquer thread.
         """
         if self.device == "cuda":
-            return self._torch.autocast("cuda", dtype=self._torch.bfloat16)
+            if self._torch.cuda.is_bf16_supported(including_emulation=False):
+                return self._torch.autocast("cuda", dtype=self._torch.bfloat16)
+            return self._torch.autocast("cuda", dtype=self._torch.float16)
         return contextlib.nullcontext()
 
     def set_image(self, image: np.ndarray) -> None:

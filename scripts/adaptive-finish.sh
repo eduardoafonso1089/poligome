@@ -20,19 +20,19 @@ case "${1:-}" in
     out="${3:-resultados-adaptive}"
     mkdir -p "$out"
     "$PYTHON" scripts/adaptive-experiments.py --checkpoint "$checkpoint" --out "$out" \
-      --only main half overfit encoder 2>&1 | tee "$out/experiments.log"
+      --device "${POLIGOME_ADAPTIVE_DEVICE:-cpu}" --only main half overfit encoder 2>&1 | tee "$out/experiments.log"
     printf 'Resultados em %s/results.json\n' "$out"
     ;;
   sam3-smoke)
     base="${2:-http://127.0.0.1:7860}"
     out="${3:-resultados-adaptive}"
     mkdir -p "$out"
-    "$PYTHON" scripts/adaptive-smoke.py --base "$base" --domain nuclei --images 24 \
+    "$PYTHON" scripts/adaptive-smoke.py --base "$base" --expect-family sam3 --domain nuclei --images 24 \
       --max-epochs 6 --strategy decoder --report "$out/sam3-smoke.json" 2>&1 | tee "$out/sam3-smoke.log"
     ;;
   tests)
-    bash tests/adaptive.test.sh
-    if "$PYTHON" -c "import sam3" >/dev/null 2>&1; then
+    POLIGOME_ADAPTIVE_PYTHON="$PYTHON" bash tests/adaptive.test.sh
+    if "$PYTHON" -c "import importlib.util, sys; sys.exit(importlib.util.find_spec('sam3') is None)" >/dev/null 2>&1; then
       POLIGOME_TEST_SAM3=1 "$PYTHON" tests/adaptive-lora.test.py -k Sam3IntegrationTests
     else
       printf 'skip - pacote sam3 ausente; testes do SAM 3 não rodaram.\n'

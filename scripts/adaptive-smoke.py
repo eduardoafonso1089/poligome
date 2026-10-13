@@ -47,6 +47,7 @@ def main() -> int:
     parser.add_argument("--max-epochs", type=int, default=3)
     parser.add_argument("--domain", default="shapes", choices=["shapes", "nuclei"], help="nuclei: núcleos que se tocam, onde o SAM original erra com um clique")
     parser.add_argument("--report", help="grava o resumo em JSON neste caminho")
+    parser.add_argument("--expect-family", choices=["sam2", "sam3"], help="recusa outro modelo; evita registrar um SAM 2 como validação do SAM 3")
     args = parser.parse_args()
     base = args.base.rstrip("/")
     project = f"p-smoke-{uuid.uuid4().hex[:12]}"
@@ -58,6 +59,9 @@ def main() -> int:
     print(f"conector: {health['model_id']} em {health['device']}; adaptive={health.get('adaptive')}")
     status, adaptive = call(base, "GET", "/adaptive/status")
     assert status == 200 and adaptive["model"]["supported"], adaptive
+    if args.expect_family:
+        assert adaptive["model"]["family"] == args.expect_family, f"esperado {args.expect_family}, carregado {adaptive['model']['family']}"
+    summary["model"] = {"model_id": health["model_id"], "family": adaptive["model"]["family"], "device": health["device"]}
 
     t0 = time.monotonic()
     for index in range(args.images):
@@ -125,14 +129,9 @@ def main() -> int:
             assert response.read(8) == b"\x89PNG\r\n\x1a\n"
 
     outcome = comparison["decision"]["outcome"]
-    if outcome == "not_improved":
-        status, refused = call(base, "POST", f"/adaptive/projects/{project}/runs/{run_id}/activate", {"override": True})
-        assert status == 409 and refused["detail"]["code"] == "not_improved", refused
-        summary["activation"] = "refused (not_improved), as required"
-        print("ativação recusada: não melhorou (correto)")
-    else:
+    if outcome:
         status, refused = call(base, "POST", f"/adaptive/projects/{project}/runs/{run_id}/activate", {"override": False})
-        if outcome == "insufficient_evidence":
+        if outcome != "improved":
             assert status == 409 and refused["detail"]["code"] == "needs_confirmation", refused
         status, active = call(base, "POST", f"/adaptive/projects/{project}/runs/{run_id}/activate", {"override": outcome != "improved"})
         assert status == 200 and active["active"]["run_id"] == run_id, active

@@ -175,7 +175,6 @@ export function TrainingView({ t, record, onCancel, busy }: { t: AdaptiveCopy; r
   const maxEpochs = record.resolved?.max_epochs;
   const epochNumbers = epochs.map((entry) => entry.epoch);
   const pick = (key: keyof EpochMetrics) => epochs.map((entry) => entry[key] as number | undefined);
-  const diagnosis = record.diagnosis?.state;
   return <div className="adaptive-training">
     <div className={`adaptive-run-status ${record.status}`}>
       {running ? <LoaderCircle className="spin" size={15} /> : record.status === "completed" ? <Check size={15} /> : <CircleSlash size={15} />}
@@ -210,9 +209,9 @@ export function TrainingView({ t, record, onCancel, busy }: { t: AdaptiveCopy; r
       ]} />
     </div>}
     {epochs.length > 0 && <p className="adaptive-note">{t.chartNote}</p>}
-    {diagnosis && <div className={`adaptive-diagnosis ${diagnosis}`}>
-      <b>{t[`diag_${diagnosis}` as keyof AdaptiveCopy] ?? diagnosis}</b>
-      <p>{t[`diag_${diagnosis}_body` as keyof AdaptiveCopy] ?? ""}</p>
+    {epochs.length > 0 && <div className="adaptive-diagnosis">
+      <b>{t.trainingEvidenceTitle}</b>
+      <p>{t.trainingEvidenceBody}</p>
       {record.best_epoch !== undefined && <p>{fill(t.bestEpochLine, { epoch: record.best_epoch, dice: pct(epochs.find((entry) => entry.epoch === record.best_epoch)?.val_dice), base: pct(epochs[0]?.val_dice) })}</p>}
       {record.diagnosis?.no_improvement_over_base && <p>{t.noImprovementOverBase}</p>}
     </div>}
@@ -221,13 +220,11 @@ export function TrainingView({ t, record, onCancel, busy }: { t: AdaptiveCopy; r
 
 export function ComparisonView({ t, comparison, examples }: { t: AdaptiveCopy; comparison: ComparisonSummary; examples: Record<string, string> }) {
   const primary = comparison.primary;
-  const outcome = comparison.decision.outcome;
   const reference = comparison.reference.kind === "adapter" ? t.referenceAdapter : t.referenceBase;
   return <div className="adaptive-comparison">
-    <div className={`adaptive-verdict ${outcome}`}>
-      <b>{t[`outcome_${outcome}` as keyof AdaptiveCopy]}</b>
-      <p>{t[`outcome_${outcome}_body` as keyof AdaptiveCopy]}</p>
-      <ul>{comparison.decision.reasons.map((reason, index) => <li key={index}>{reasonText(t, reason)}</li>)}</ul>
+    <div className="adaptive-verdict">
+      <b>{t.comparisonEvidenceTitle}</b>
+      <p>{t.comparisonEvidenceBody}</p>
     </div>
     <div className="adaptive-headline">
       <article><small>{reference}</small><b>{pct(primary.reference_mean)}</b><span>{t.diceLabel}</span></article>
@@ -236,6 +233,7 @@ export function ComparisonView({ t, comparison, examples }: { t: AdaptiveCopy; c
       <article><small>{t.imagesChangedLabel}</small><b>{pct(primary.share_improved, 0)} ↑ · {pct(primary.share_worsened, 0)} ↓</b><span>{fill(t.imagesOf, { n: primary.images })}</span></article>
     </div>
     <p className="adaptive-note">{fill(t.comparisonMethod, { images: comparison.holdout.images, groups: comparison.holdout.groups, instances: comparison.holdout.instances, relative: primary.relative_gain === null ? "—" : pct(primary.relative_gain) })}</p>
+    <p className="adaptive-note">{t.statisticalNote}</p>
     {comparison.versus_base && <p className="adaptive-note">{fill(t.versusBaseLine, { delta: points(comparison.versus_base.mean_delta), low: points(comparison.versus_base.ci_low), high: points(comparison.versus_base.ci_high) })}</p>}
     <table className="adaptive-table">
       <caption>{t.protocolsCaption}</caption>
@@ -251,11 +249,11 @@ export function ComparisonView({ t, comparison, examples }: { t: AdaptiveCopy; c
     </table>
     {comparison.subgroups.length > 0 && <table className="adaptive-table">
       <caption>{t.subgroupsCaption}</caption>
-      <thead><tr><th>{t.subgroupColumn}</th><th>{t.instancesColumn}</th><th>{reference}</th><th>{t.candidateLabel}</th><th>{t.deltaLabel}</th><th /></tr></thead>
+      <thead><tr><th>{t.subgroupColumn}</th><th>{t.instancesColumn}</th><th>{t.sourcesColumn}</th><th>{reference}</th><th>{t.candidateLabel}</th><th>{t.deltaLabel}</th><th /></tr></thead>
       <tbody>{comparison.subgroups.map((sub) => <tr key={`${sub.kind}-${sub.name}`} className={sub.regression}>
         <th>{sub.kind === "size" ? t[`size_${sub.name}` as keyof AdaptiveCopy] ?? sub.name : sub.name}</th>
-        <td>{sub.instances}</td><td>{pct(sub.reference_mean)}</td><td>{pct(sub.candidate_mean)}</td>
-        <td>{points(sub.mean_delta)} <small>[{points(sub.ci_low)}, {points(sub.ci_high)}]</small></td>
+        <td>{sub.instances}</td><td>{sub.groups ?? "—"}</td><td>{pct(sub.reference_mean)}</td><td>{pct(sub.candidate_mean)}</td>
+        <td>{points(sub.mean_delta)} <small>{sub.groups !== undefined && sub.groups < 4 ? t.fewIndependentGroups : `[${points(sub.ci_low)}, ${points(sub.ci_high)}]`}</small></td>
         <td>{sub.regression !== "none" ? t[`regression_${sub.regression}` as keyof AdaptiveCopy] : sub.instances < 3 ? t.fewInstances : ""}</td>
       </tr>)}</tbody>
     </table>}
@@ -274,7 +272,7 @@ export function ComparisonView({ t, comparison, examples }: { t: AdaptiveCopy; c
         {/* Blob local do conector: next/image não otimiza object URLs. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {examples[example.file] ? <img src={examples[example.file]} alt={fill(t.exampleAlt, { label: example.label_name })} /> : <span className="adaptive-example-placeholder" />}
-        <figcaption>{example.label_name} · {pct(example.reference_dice)} → {pct(example.candidate_dice)} ({points(example.delta)})</figcaption>
+        <figcaption>{example.label_name} · {t[`prompt_${example.prompt}` as keyof AdaptiveCopy] ?? example.prompt} · {pct(example.reference_dice)} → {pct(example.candidate_dice)} ({points(example.delta)})</figcaption>
       </figure>)}</div>
     </section>}
     <p className="adaptive-note">{t.limitationsNote}</p>
@@ -371,15 +369,14 @@ export type NextStep = { stage: 0 | 1 | 2 | 3; key: "analyze" | "annotate" | "tr
  * (dados, rodada selecionada, adaptador ativo). Nada aqui é inventado: cada
  * caso corresponde a um estado que o conector devolveu.
  */
-export function nextStep({ report, record, activeHere }: { report: ReadinessReport | null; record: RunRecord | null; activeHere: boolean }): NextStep {
+export function nextStep({ report, record, activeHere, pendingSync = 0 }: { report: ReadinessReport | null; record: RunRecord | null; activeHere: boolean; pendingSync?: number }): NextStep {
   const compared = Boolean(record?.comparison) && (record?.status === "completed" || record?.stage === "learning_curve");
   if (record && RUNNING.has(record.status) && !compared) return { stage: 1, key: "training" };
+  if (pendingSync > 0) return { stage: 0, key: "analyze" };
   if (activeHere && (!record || record.activation === "active")) return { stage: 3, key: "active" };
   if (record && ["failed", "interrupted"].includes(record.status)) return { stage: 1, key: "failed" };
   const outcome = compared ? record?.comparison?.decision.outcome : undefined;
-  if (outcome === "improved" && record?.activation !== "rejected") return { stage: 2, key: "activate" };
-  if (outcome === "insufficient_evidence") return { stage: 0, key: "more_evidence" };
-  if (outcome === "not_improved") return { stage: 0, key: "kept" };
+  if (outcome && record?.activation !== "rejected") return { stage: 2, key: "activate" };
   if (!report) return { stage: 0, key: "analyze" };
   if (!report.can_train) return { stage: 0, key: "annotate", n: Math.max(1, imagesStillNeeded(report)) };
   return { stage: 1, key: "train" };
@@ -393,7 +390,13 @@ export function NextStepCard({ t, step }: { t: AdaptiveCopy; step: NextStep }) {
   </section>;
 }
 
-export function AdaptiveAiPanel({ language, endpoint, project }: { language: Language; endpoint: string; project: AdaptiveProject | null }) {
+export function AdaptiveAiPanel({ language, endpoint, project, loadedModelId }: { language: Language; endpoint: string; project: AdaptiveProject | null; loadedModelId?: string | null }) {
+  // A new project or connector must not inherit readiness, run selection or
+  // override consent from the previous session.
+  return <AdaptiveAiSession key={`${connectorBaseUrl(endpoint)}:${project?.id ?? "none"}:${loadedModelId ?? ""}`} language={language} endpoint={endpoint} project={project} />;
+}
+
+function AdaptiveAiSession({ language, endpoint, project }: { language: Language; endpoint: string; project: AdaptiveProject | null }) {
   const t = getAdaptiveCopy(language);
   const copy = getCopy(language);
   const base = connectorBaseUrl(endpoint);
@@ -413,7 +416,7 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
   const [loadedExamples, setExamples] = useState<{ runId: string; urls: Record<string, string> } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [confirmOverride, setConfirmOverride] = useState(false);
+  const [overrideRunId, setOverrideRunId] = useState<string | null>(null);
   const [settings, setSettings] = useState({ strategy: "auto", rank: 8, alpha: 16, learning_rate: 0, max_epochs: 0, batch_size: 4, learning_curve: true });
   const [suggested, setSuggested] = useState<{ items: Suggestion[]; method: string | null; analyzed: number } | null>(null);
   const syncAbort = useRef<AbortController | null>(null);
@@ -579,6 +582,7 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
   const running = record ? RUNNING.has(record.status) : false;
   const outcome = record?.comparison?.decision.outcome;
   const modelSupported = status?.model?.supported ?? false;
+  const candidateMatchesModel = Boolean(record && status?.model && record.base_model.model_id === status.model.model_id);
 
   return <div className="byom-panel adaptive-panel">
     <section className="sam-model-hero">
@@ -607,7 +611,7 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
           {activeHere && <button disabled={busy !== null} onClick={() => act("rollback", async () => { setStatus(await adaptiveApi.rollback(base, project.id)); await refreshRuns(); await reloadRecord(); })}><Undo2 size={12} />{t.rollback}</button>}
         </section>
 
-        <NextStepCard t={t} step={nextStep({ report, record, activeHere: Boolean(activeHere) })} />
+        <NextStepCard t={t} step={nextStep({ report, record, activeHere: Boolean(activeHere), pendingSync })} />
 
         <section className="adaptive-section">
           <h4><Database size={13} />{t.datasetTitle}</h4>
@@ -623,7 +627,7 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
             <span><b>{t.groupSequencesTitle}</b><small>{t.groupSequencesBody}</small></span>
           </label>
           <div className="adaptive-actions">
-            <button className="primary" disabled={busy !== null || !plan?.items.length || !modelSupported} onClick={() => void analyze()}>
+            <button className="primary" disabled={busy !== null || (!plan?.items.length && !Object.keys(remoteItems ?? {}).length) || !modelSupported} onClick={() => void analyze()}>
               {busy === "sync" ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{t.analyze}
             </button>
             {syncProgress && <span>{fill(t.syncing, syncProgress)}</span>}
@@ -672,7 +676,7 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
             </div>
           </details>
           <div className="adaptive-actions">
-            <button className="primary" disabled={busy !== null || !report?.can_train || running || Boolean(status?.training)} onClick={() => void startTraining()}>
+            <button className="primary" disabled={busy !== null || !modelSupported || !report?.can_train || pendingSync > 0 || running || Boolean(status?.training)} onClick={() => void startTraining()}>
               {busy === "train" ? <LoaderCircle className="spin" size={13} /> : <Play size={13} />}{t.startTraining}
             </button>
           </div>
@@ -682,14 +686,14 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
         {record?.comparison && <section className="adaptive-section">
           <h4><GitCompare size={13} />{t.comparisonTitle}</h4>
           <ComparisonView t={t} comparison={record.comparison} examples={examples} />
+          {!candidateMatchesModel && <p className="adaptive-callout warn">{fill(t.adapterNeedsBase, { model: record.base_model.model_id })}</p>}
           <div className="adaptive-actions">
             {record.activation === "active" ? <span className="adaptive-badge"><Check size={12} />{t.isActive}</span> : <>
-              {outcome === "improved" && <button className="primary" disabled={busy !== null || !modelSupported} onClick={() => act("activate", async () => { setStatus(await adaptiveApi.activate(base, project.id, record.run_id, false)); setRecord(await adaptiveApi.run(base, project.id, record.run_id)); await refreshRuns(); })}><Power size={13} />{t.activate}</button>}
-              {outcome === "insufficient_evidence" && <>
-                <label className="adaptive-confirm"><input type="checkbox" checked={confirmOverride} onChange={(event) => setConfirmOverride(event.target.checked)} />{t.confirmOverride}</label>
-                <button disabled={busy !== null || !confirmOverride || !modelSupported} onClick={() => act("activate", async () => { setStatus(await adaptiveApi.activate(base, project.id, record.run_id, true)); setConfirmOverride(false); setRecord(await adaptiveApi.run(base, project.id, record.run_id)); await refreshRuns(); })}><Power size={13} />{t.activateAnyway}</button>
+              {outcome === "improved" && <button className="primary" disabled={busy !== null || !modelSupported || !candidateMatchesModel} onClick={() => act("activate", async () => { setStatus(await adaptiveApi.activate(base, project.id, record.run_id, false)); setRecord(await adaptiveApi.run(base, project.id, record.run_id)); await refreshRuns(); })}><Power size={13} />{t.activate}</button>}
+              {outcome !== "improved" && <>
+                <label className="adaptive-confirm"><input type="checkbox" checked={overrideRunId === record.run_id} onChange={(event) => setOverrideRunId(event.target.checked ? record.run_id : null)} />{t.confirmOverride}</label>
+                <button disabled={busy !== null || overrideRunId !== record.run_id || !modelSupported || !candidateMatchesModel} onClick={() => act("activate", async () => { setStatus(await adaptiveApi.activate(base, project.id, record.run_id, true)); setOverrideRunId(null); setRecord(await adaptiveApi.run(base, project.id, record.run_id)); await refreshRuns(); })}><Power size={13} />{t.activateAnyway}</button>
               </>}
-              {outcome === "not_improved" && <span className="adaptive-note">{t.keptPrevious}</span>}
               {record.activation !== "rejected" && <button disabled={busy !== null} onClick={() => act("reject", async () => { await adaptiveApi.reject(base, project.id, record.run_id); await refreshRuns(); const next = await adaptiveApi.run(base, project.id, record.run_id); setRecord(next); })}><X size={13} />{t.reject}</button>}
             </>}
           </div>
@@ -707,7 +711,7 @@ export function AdaptiveAiPanel({ language, endpoint, project }: { language: Lan
             <tbody>{runs.map((run) => <tr key={run.run_id} className={run.run_id === selectedRunId ? "selected" : ""}>
               <th><button onClick={() => setSelectedRunId(run.run_id)}>{new Date(run.created_at).toLocaleString(language)}</button></th>
               <td>{t[`status_${run.status}` as keyof AdaptiveCopy] ?? run.status}</td>
-              <td>{run.outcome ? t[`outcome_${run.outcome}` as keyof AdaptiveCopy] : "—"}</td>
+              <td>{run.outcome ? t.comparisonReady : "—"}</td>
               <td>{run.mean_delta === undefined || run.mean_delta === null ? "—" : `${points(run.mean_delta)} [${points(run.ci_low)}, ${points(run.ci_high)}]`}</td>
               <td>{t[`activation_${run.activation}` as keyof AdaptiveCopy] ?? run.activation}</td>
             </tr>)}</tbody>
