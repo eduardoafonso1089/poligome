@@ -1833,6 +1833,16 @@ def load(payload: LoadRequest):
     if spec.model_id == runtime.get("model_id") and runtime.get("status") == "ready":
         return {"status": "ready", "model_id": spec.model_id, "switching": False}
 
+    # Trocar de modelo substitui o processo e mataria um treino no meio.
+    if _adaptive_service is not None and _adaptive_service.training_active():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Uma rodada do Adaptive AI está treinando neste conector. "
+                "Espere terminar ou cancele antes de trocar de modelo."
+            ),
+        )
+
     availability = _model_availability(spec)
     if not availability["installed"]:
         raise HTTPException(
