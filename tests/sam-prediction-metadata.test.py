@@ -56,6 +56,12 @@ class AttributionTests(unittest.TestCase):
         result = connector.predict(connector.PredictionRequest(image=self.image, text="shape"))
         self.assertIsNone(result["adapter"])
 
+    def test_model_switch_does_not_attribute_the_old_predictor_to_the_new_live_adapter(self):
+        connector._adaptive_service.get_live_model = lambda: SimpleNamespace(model=object())
+        result = connector.predict(connector.PredictionRequest(image=self.image, points=[{"x": 15, "y": 15, "label": 1}]))
+        self.assertNotIn("adapter", result, "unidentified is different from the original SAM")
+        self.assertIsNone(result["model_fingerprint"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,8 @@ import { RasterImportControl, type RasterImportResult } from "../import/raster-i
 import { ExportControls } from "../export/export-controls";
 import { useEditorState } from "../state/use-editor-state";
 import { useAnnotationIndex } from "../state/annotation-index";
+import { useAnnotationEffort } from "../state/use-annotation-effort";
+import { AnnotationEffortLive } from "../../components/AnnotationEffortPanel";
 import { useCanvasInteractions } from "../interactions/use-canvas-interactions";
 import { useAdvancedVectorInteractions, type AdvancedVectorResult } from "../interactions/use-advanced-vector-interactions";
 import { EditorCanvas } from "../canvas/editor-canvas";
@@ -209,6 +211,7 @@ export function CanonicalEditorWorkbench() {
     () => editor.annotations.filter((annotation): annotation is Extract<EditorAnnotation, { type: "polygon" }> => selectedIds.includes(annotation.id) && annotation.type === "polygon"),
     [editor.annotations, selectedIds],
   );
+  const effort = useAnnotationEffort(adaptiveProjectId, asset?.id ?? null, editor.annotations, selectedIds);
   const activePolygon = editor.selectedAnnotation?.type === "polygon" && editor.selectedAnnotation.asset === asset?.id ? editor.selectedAnnotation : null;
   const activeColor = labels.find((label) => label.id === activeLabel)?.color ?? "#929a95";
   const projectDirty = sessionDirty || !editor.saved;
@@ -798,6 +801,7 @@ export function CanonicalEditorWorkbench() {
     samRunRef.current?.abort();
     const controller = new AbortController();
     samRunRef.current = controller;
+    if (!text?.trim()) effort.requestStarted(controller);
     const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
     setSamLoading(true);
     try {
@@ -812,6 +816,9 @@ export function CanonicalEditorWorkbench() {
         threshold: samThreshold,
         copy,
         signal: controller.signal,
+        onResult: (result) => {
+          if (!text?.trim() && !controller.signal.aborted && samRunRef.current === controller) effort.result(result);
+        },
       });
       if (controller.signal.aborted || samRunRef.current !== controller) return;
       setSamPreviews(annotations);
@@ -821,14 +828,16 @@ export function CanonicalEditorWorkbench() {
       setSamPreviews([]);
       setMessage(error instanceof Error ? aiFailureMessage(error.message, aiCopy) : copy.errSamUnreachable);
     } finally {
+      if (!text?.trim()) effort.requestEnded(controller);
       if (samRunRef.current === controller) {
         samRunRef.current = null;
         setSamLoading(false);
       }
     }
-  }, [activeLabel, aiCopy, asset, copy, makeId, samThreshold]);
+  }, [activeLabel, aiCopy, asset, copy, makeId, samThreshold, effort]);
 
   function addSamPrompt(point: { x: number; y: number }, negative: boolean) {
+    effort.prompt("points");
     const next: SamPrompt[] = [...samPrompts, { x: point.x, y: point.y, label: negative ? 0 : 1 }];
     setSamPrompts(next);
     void runSam({ prompts: next });
@@ -850,6 +859,7 @@ export function CanonicalEditorWorkbench() {
   }
 
   function restartSam() {
+    effort.restart();
     clearSamPrompts();
     setSamText("");
     setSamNegative(false);
@@ -862,6 +872,7 @@ export function CanonicalEditorWorkbench() {
    */
   function chooseSamMode(mode: SamInteractionMode) {
     if (mode === samMode) return;
+    effort.restart();
     clearSamPrompts();
     setSamNegative(false);
     setSamMode(mode);
@@ -890,6 +901,7 @@ export function CanonicalEditorWorkbench() {
       selectIds: samPreviews.map((preview) => preview.id),
     });
     const total = samPreviews.length;
+    effort.accept(normalized.annotations);
     clearSamPrompts();
     setSessionDirty(true);
     setMessage(total > 1 ? `${total} ${copy.imageAnnotations}. ${copy.samSavedToolActive}` : copy.samSavedToolActive);
@@ -1434,6 +1446,7 @@ export function CanonicalEditorWorkbench() {
       // Arrastar uma caixa e clicar um ponto são o mesmo gesto: o modo escolhido
       // no painel decide qual dos dois este toque é.
       if (activeSamMode === "box") {
+        effort.prompt("box");
         setSamBoxStart(imagePoint);
         setSamBox({ ...imagePoint, w: 0, h: 0, label: 1 });
         event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -1763,6 +1776,8 @@ export function CanonicalEditorWorkbench() {
           {/* Sem conector a ferramenta abria normal, e o usuário só descobria o
               problema depois de clicar e esperar. Avisar antes, com o caminho
               para resolver, é a diferença entre um erro e uma instrução. */}
+          {effort.enabled && effort.record && <AnnotationEffortLive language={language} record={effort.record}
+            paused={effort.paused} onPause={effort.pause} onFinish={effort.complete} />}
           {tool === "sam" && samConnectorFound === false ? <div className="sam-controls sam-controls-offline">
             <span className="sam-prompt-count">{copy.errSamUnreachable}</span>
             <div className="sam-actions">

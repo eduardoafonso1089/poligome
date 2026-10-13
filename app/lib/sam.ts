@@ -10,6 +10,10 @@ export type SamPredictionResult = {
   predictions: SamMaskPrediction[];
   modelId: string | null;
   reusedEmbedding: boolean;
+  embeddingKnown?: boolean;
+  device?: string;
+  fingerprint?: string;
+  adapter?: { projectId: string; runId: string } | null;
 };
 
 type SamRequest = {
@@ -338,6 +342,12 @@ function parseResponse(
     predictions,
     modelId: typeof data.model_id === "string" ? data.model_id : null,
     reusedEmbedding: data.reused_embedding === true,
+    embeddingKnown: typeof data.reused_embedding === "boolean",
+    ...(typeof data.device === "string" ? { device: data.device } : {}),
+    ...(typeof data.model_fingerprint === "string" ? { fingerprint: data.model_fingerprint } : {}),
+    ...(data.adapter === null ? { adapter: null } : data.adapter && typeof data.adapter === "object"
+      && typeof (data.adapter as Record<string, unknown>).project_id === "string" && typeof (data.adapter as Record<string, unknown>).run_id === "string"
+      ? { adapter: { projectId: String((data.adapter as Record<string, unknown>).project_id), runId: String((data.adapter as Record<string, unknown>).run_id) } } : {}),
   };
 }
 

@@ -44,7 +44,7 @@ $POLIGOME_SAM_INSTALLER_API = 2
 
 $DefaultSiteUrl = 'https://poligome.com'
 $DefaultAssetBaseUrl = 'https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public'
-$DefaultConnectorSha256 = '9133fe0081090589bed9b86965d7c2efd8e613267b987896f793420445d0f6af'
+$DefaultConnectorSha256 = 'db4682daa8eb7b4d06a6d81e954e23c65300aad49a01b26bb79c8bd1c2c9684d'
 
 $SiteUrl = if ($env:POLIGOME_SITE_URL) { $env:POLIGOME_SITE_URL.TrimEnd('/') } else { $DefaultSiteUrl }
 $AssetBaseUrl = if ($env:POLIGOME_ASSET_BASE_URL) { $env:POLIGOME_ASSET_BASE_URL.TrimEnd('/') } else { $DefaultAssetBaseUrl }

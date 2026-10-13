@@ -103,16 +103,19 @@ inconclusivo, escreva isso. Textos de interface existem em pt, en, fr e es
 (app/lib/adaptive-copy.ts) e o teste de paridade exige os quatro.
 ```
 
-## Segunda etapa (não começada)
+## Segunda etapa
 
 - **Seleção por incerteza**: além da cobertura, priorizar imagens em que o
   adaptador ativo discorda de si mesmo entre caixa e clique, ou em que o IoU
   previsto é baixo.
 - **Anotações suspeitas**: instâncias com loss alta persistente no treino,
   listadas para revisão em vez de usadas cegamente.
-- **Logs reais de interação**: registrar (localmente) quantos cliques e
-  correções cada máscara exigiu, para trocar os cliques simulados por medida
-  real.
+- **Logs reais de interação — implementados**: medição opcional local de tempo,
+  prompts e gestos de correção até a revisão, separada por modelo, dispositivo
+  e versão. A coleta com anotadores humanos ainda precisa acontecer; os
+  cliques simulados não comprovam produtividade. Ver
+  [Medição de esforço](adaptive-annotation-effort.md) e
+  [Validação local do SAM 3](adaptive-sam3-local-validation.md).
 - **Várias sementes na curva de aprendizado**: hoje cada ponto é um treino só;
   2–3 sementes dariam a variância de treino diretamente.
 - **Sugestões x lâmina nova**: no teste, a cobertura por embeddings pôs uma

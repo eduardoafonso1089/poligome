@@ -18,6 +18,23 @@ await server.listen();
 let browser;
 const results = [];
 
+async function effortHistory(page) {
+  // Controlled UI fixtures only. These times are not model/human measurements.
+  await page.evaluate(async () => {
+    const { writeEffortJournal } = await import('/app/lib/annotation-effort.ts');
+    const records = [];
+    for (const adapted of [false, true]) for (let i = 0; i < 6; i++) records.push({
+      id: `ui-effort-${adapted}-${i}`, assetId: `ui-image-${i}`, annotationIds: [`ui-shape-${adapted}-${i}`], geometryKeys: {},
+      startedAt: 1700000000000 + i, mode: 'points', source: { modelId: 'sam3-concepts', device: 'cpu', fingerprint: 'a'.repeat(64),
+        adapter: adapted ? { projectId: 'p-ui-project-00001', runId: 'run-ui-effort-fixture' } : null },
+      mixed: false, outcome: 'reviewed', clicks: adapted ? 1 : 2, boxes: 0, corrections: adapted ? 0 : 1,
+      requests: 1, coldRequests: 1, workMs: adapted ? 8000 : 18000, waitMs: 2000,
+    });
+    writeEffortJournal('p-ui-project-00001', { version: 1, enabled: true, records,
+      versions: [{ key: JSON.stringify(['sam3-concepts','p-ui-project-00001','run-ui-effort-fixture']), name: 'UI fixture LoRA', trainingMasks: 160, trainingGroups: 14 }], persistent: true });
+  });
+}
+
 async function scenario(name, options, check) {
   const page = await browser.newPage({ viewport: { width: options.width ?? 1366, height: 900 } });
   const errors = [];
@@ -81,7 +98,7 @@ async function scenario(name, options, check) {
     return json({ detail: { code: "unexpected_route", message: `${method} ${path}` } }, 404);
   });
   try {
-    await page.goto("http://127.0.0.1:3015/tests/browser/adaptive-ui.html", { waitUntil: "networkidle" });
+    await page.goto("http://127.0.0.1:3015/tests/browser/adaptive-ui.html", { waitUntil: "networkidle", timeout: 60_000 });
     await check(page, state);
     assert.deepEqual(errors, [], "uncaught browser errors");
     await page.screenshot({ path: resolve(out, `${name}.png`), fullPage: true });
@@ -231,15 +248,36 @@ try {
       assert(s.requests.some(r => r.path.endsWith("/activate")));
     });
   }
+  await scenario("effort-enable-persists-and-empty-is-honest", { synced: true }, async p => {
+    const checkbox = p.getByRole('checkbox', { name: 'Measure effort in this project' });
+    assert.equal(await checkbox.isChecked(), false);
+    await checkbox.check();
+    assert.equal(await p.getByRole('button', { name: 'Export measurements CSV' }).isDisabled(), true);
+    await p.keyboard.press('Escape'); await p.locator('#qa-reopen').click();
+    assert.equal(await p.getByRole('checkbox', { name: 'Measure effort in this project' }).isChecked(), true);
+  });
+  await scenario("effort-observed-change-and-amortization", { synced: true }, async p => {
+    await p.locator('.annotation-effort-panel').waitFor(); await effortHistory(p);
+    const panel = p.locator('.annotation-effort-panel');
+    assert.equal(await panel.locator('tbody tr').count(), 2);
+    await panel.getByText(/-50.0%/).waitFor();
+    await panel.locator('input[type=number]').fill('10');
+    await panel.getByText(/after another 60 reviewed/).waitFor();
+    const download = p.waitForEvent('download');
+    await panel.getByRole('button', { name: 'Export measurements CSV' }).click();
+    assert.equal((await download).suggestedFilename(), 'annotation-effort.csv');
+  });
   for (const language of ["pt", "en", "fr", "es"]) {
     for (const width of [390, 1366]) await scenario(`layout-${language}-${width}`, { synced: true, run: true, width }, async p => {
       await p.evaluate(lang => window.adaptiveUiQa.setLanguage(lang), language);
       await p.locator(".adaptive-verdict").waitFor();
+      await effortHistory(p);
+      await p.locator('.annotation-effort-panel input[type=number]').fill('10');
       const overflow = await p.evaluate(() => ({ document: document.documentElement.scrollWidth > innerWidth + 1, panel: [...document.querySelectorAll('.adaptive-panel, .sam-dialog')].filter(e => e.scrollWidth > e.clientWidth + 1).map(e => e.className) }));
       assert.equal(overflow.document, false, "horizontal page overflow");
       assert.deepEqual(overflow.panel, [], "horizontal panel overflow");
       const body = await p.locator(".adaptive-panel").innerText();
-      assert.doesNotMatch(body, /\{(?:n|low|high|groups|delta|message)\}/, "unfilled translation placeholder");
+      assert.doesNotMatch(body, /\{(?:n|low|high|groups|delta|message|name|time|prompts)\}/, "unfilled translation placeholder");
     });
   }
 } finally {

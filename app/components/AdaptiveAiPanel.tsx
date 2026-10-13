@@ -15,6 +15,7 @@ import {
 } from "../lib/adaptive-client";
 import type { Asset, Label } from "../lib/types";
 import type { EditorAnnotation } from "../editor/models/annotation-model";
+import { AnnotationEffortPanel, effortVersionKey } from "./AnnotationEffortPanel";
 
 export type AdaptiveProject = {
   id: string;
@@ -596,6 +597,10 @@ function AdaptiveAiSession({ language, endpoint, project }: { language: Language
       <p>{t.intro}</p>
     </section>
     <section className="sam-privacy"><ShieldCheck size={16} /><div><b>{t.privacyTitle}</b><p>{t.privacyBody}</p></div></section>
+    {project && project.assets.length > 0 && <AnnotationEffortPanel language={language} projectId={project.id}
+      version={record ? { key: effortVersionKey(record.base_model.model_id, record.project_id, record.run_id),
+        name: record.name ?? `${project.name} · ${runLabel(record.run_id)}`,
+        trainingMasks: record.data?.fit.instances ?? null, trainingGroups: record.data?.fit.groups ?? null } : null} />}
 
     {!project || !project.assets.length ? <p className="adaptive-callout">{t.noProject}</p>
       : connector === "checking" ? <p className="adaptive-callout"><LoaderCircle className="spin" size={14} />{t.checking}</p>
