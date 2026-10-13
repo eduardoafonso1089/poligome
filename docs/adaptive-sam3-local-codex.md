@@ -1,11 +1,12 @@
-# Prompt para o Codex local — SAM 3 + Adaptive AI
+# Prompt para o Codex local — SAM 3, exportação e continuidade do Adaptive AI
 
 Cole o bloco abaixo no Codex aberto na pasta do repositório Poligome, no
 computador que contém `C:\Users\lucas\Downloads\sam3.pt`.
 
 ```text
-Você é responsável por validar o SAM 3 e o Adaptive AI/LoRA do Poligome no meu
-computador, usando o checkpoint real. Execute o trabalho, corrija problemas
+Você é responsável por implementar a exportação/importação e a continuidade
+de uso dos modelos adaptados do Poligome e validar o SAM 3/Adaptive AI no meu
+computador usando o checkpoint real. Execute o trabalho, corrija problemas
 confirmados e registre evidências. Não termine apenas com um plano.
 
 CONTEXTO E ESCOPO
@@ -40,6 +41,90 @@ CONTEXTO E ESCOPO
   dependências, prepare um venv isolado compatível com o instalador. Não
   atualize às cegas o ambiente de produção nem troque as revisões fixadas.
 - Não altere configurações de segurança do Windows nem desative antivírus.
+
+1A. IMPLEMENTAR EXPORTAÇÃO, IMPORTAÇÃO E RETOMADA COM FOCO EM UX
+
+Objetivo: uma pessoa treina hoje, fecha o programa e continua amanhã; também
+leva aquele modelo para outro computador ou usa-o em um novo dataset sem
+repetir o treino. Implemente esse fluxo, não apenas sua documentação.
+
+- Inspecione primeiro o armazenamento atual. Os adaptadores e o estado ativo
+  já são persistidos pelo conector; o .plgm preserva a identidade do projeto.
+  Confirme quais partes da retomada já funcionam antes de criar outro sistema.
+- Apresente o modelo por nome escolhido pelo usuário, modelo base, data e
+  versão. Evite obrigar o usuário a compreender run_id, fingerprints ou nomes
+  de camadas para escolher um modelo. Esses detalhes podem ficar em avançado.
+- No painel, ofereça ações claras: “Exportar modelo adaptado”, “Importar
+  modelo adaptado”, “Usar neste projeto”, “Desativar” e “Voltar ao anterior”.
+  Ações destrutivas não podem ser confundidas com desativação.
+- O formato padrão deve ser um pacote portátil compacto do adaptador LoRA,
+  com os tensores e metadados suficientes para aplicar sobre o modelo base
+  correto: versão do formato, família/ID, fingerprint do checkpoint base,
+  estratégia, rank/alpha, camadas e formas, nome/versão e integridade do
+  pacote. Escolha uma extensão e documente seu contrato.
+- Explique no produto em linguagem simples que esse pacote requer o SAM base
+  correspondente. Não apresente um adaptador isolado como checkpoint
+  autossuficiente. Não duplique por padrão vários GB de pesos base.
+- Se oferecer um checkpoint completo com LoRA incorporado, use uma ação
+  separada com estimativa de tamanho. Implemente a fusão de pesos de forma
+  compatível com o carregador oficial, sem serializar wrappers/código Python,
+  e comprove paridade da inferência. Só disponibilize essa opção se ela tiver
+  sido realmente implementada e validada para o SAM 3. Caso contrário,
+  entregue a exportação compacta funcional e registre a opção completa como
+  pendente, sem fingir que existe.
+- Exportar não deve alterar o adaptador ativo, interromper a inferência nem
+  apagar a rodada. Imagens, máscaras e dados privados não entram no pacote
+  compacto. Resultados antigos podem ser incluídos como proveniência da
+  origem, sem nomes/caminhos privados e sem virarem métricas do novo dataset.
+- Importar deve validar limites de tamanho e conteúdo, hashes, versão,
+  metadados, nomes/formas das camadas e compatibilidade antes de tocar no
+  modelo vivo. Evite path traversal e execução de código serializado;
+  mantenha carregamento seguro dos tensores. Uma importação inválida precisa
+  deixar o modelo atual intacto e explicar a incompatibilidade ao usuário.
+- Uma importação deve criar um item/versionamento local próprio sem exigir
+  que o projeto ou diretório de treino originais ainda existam. Não basta
+  copiar um run_id que dependa de arquivos na máquina de origem.
+- Ao usar o adaptador em outro dataset, preserve o projeto e o modelo de
+  origem. A aplicação no novo projeto deve ser uma escolha explícita.
+  Mostre “ainda não avaliado neste projeto” até haver comparação nele;
+  não reutilize Dice/IC anteriores como prova de desempenho no novo domínio.
+- Aplicar em outro dataset deve funcionar para inferência sem exigir treino.
+  Se oferecer novo ajuste a partir do importado, explicite a inicialização,
+  preserve a versão anterior e crie outra versão. Não esconda risco de
+  esquecimento nem misture validação de origem e destino. Retreinar do modelo
+  base e continuar um adaptador são operações diferentes.
+- Retomada: salve o projeto, encerre navegador e conector, inicie novamente
+  e reabra o .plgm. O usuário precisa identificar o modelo usado, suas
+  configurações e as anotações preservadas, e conseguir continuar. Se o
+  modelo não estiver disponível, ofereça importação ou instalação do base
+  correspondente, com explicação clara; não troque silenciosamente de modelo.
+- Trocar de projeto deve informar qual adaptador está realmente em uso pelo
+  conector e permitir selecionar explicitamente o modelo daquele projeto.
+  Evite mostrar “SAM original” quando um adaptador de outro projeto está
+  afetando as previsões.
+- Considere uma opção “Salvar projeto com modelo adaptado” para um .plgm
+  portátil, se a arquitetura suportar incorporar o pacote compacto. A
+  exportação/importação independente deve funcionar mesmo sem essa opção.
+- Permita nomes duplicados com identificação de versão/data; trate cancelamento
+  de download/importação, conector offline, falta de espaço e pacote inválido.
+  Não dependa de caminhos fixos de Windows para a portabilidade do pacote.
+
+Critérios de aceitação adicionais, com o meu SAM 3 real:
+A. Treinar → nomear → exportar → desativar → importar em armazenamento isolado
+   novo → usar → repetir cliques/caixas. A inferência deve corresponder à do
+   adaptador exportado, na mesma precisão/dispositivo e tolerância justificada.
+B. Exportar → importar em outro projeto/dataset → segmentar sem novo treino.
+   O projeto original permanece íntegro; o destino não herda sua validação.
+C. Salvar .plgm → fechar navegador/conector → reabrir → continuar anotando
+   com o modelo escolhido, sem perda de máscaras/configuração.
+D. Pacote corrompido, base diferente, versão não suportada e tentativa de
+   caminhos maliciosos são recusados sem alterar o modelo ativo.
+E. Se houver exportação completa com pesos fundidos, carregá-la pelo caminho
+   oficial e comparar com base + adaptador. Sem essa prova, não marque a opção
+   de checkpoint completo como concluída.
+F. As ações devem ser testadas com cliques reais no navegador, nos quatro
+   idiomas e em viewport móvel/desktop; explique o fluxo como a um usuário
+   que conhece anotação, mas não conhece LoRA.
 
 2. PRIMEIRO TESTE REAL EM CONECTOR ISOLADO
 - Com o Python do venv SAM 3, execute:
@@ -159,7 +244,8 @@ CONTEXTO E ESCOPO
 
 8. ENTREGAR
 - Grave resultados e logs em resultados-adaptive/sam3-local/.
-- Crie docs/adaptive-sam3-local-validation.md com ambiente, checkpoint/revisão,
+- Crie docs/adaptive-sam3-local-validation.md com os testes de exportação,
+  importação, retomada e reutilização em outro dataset, além de ambiente, checkpoint/revisão,
   configuração, tabelas medidas, falhas/correções, evidências do navegador e
   limitações. Diferencie inferência original, inferência adaptada e texto.
 - Inclua um comando reproduzível para cada execução relevante e um resumo

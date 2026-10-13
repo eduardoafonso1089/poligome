@@ -169,6 +169,14 @@ revisão. Métricas parciais não foram tratadas como resultados finais. Para
 continuar sem refazer a rodada principal, preserve o diretório de resultados
 e rode `--only half overfit encoder` com o mesmo checkpoint e dispositivo.
 
+## Exportação e continuidade solicitadas
+
+A exportação/importação portátil do adaptador, sua reutilização em outro
+dataset e os testes de retomada foram acrescentados ao
+[prompt do Codex local](adaptive-sam3-local-codex.md). Esses recursos novos
+ainda precisam ser implementados e testados; esta revisão não os apresenta
+como entregues. A persistência local de rodadas e adaptador ativo já existe.
+
 ## SAM 3 com o checkpoint local
 
 Esta sessão não consegue abrir `C:\Users\lucas\Downloads\sam3.pt` no
