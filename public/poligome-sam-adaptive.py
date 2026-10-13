@@ -1959,6 +1959,11 @@ class TrainingJob:
 
     def _save(self, **updates: Any) -> None:
         with self._lock:
+            # Ativar ou rejeitar acontece por fora desta thread (é permitido
+            # durante a curva de aprendizado); o que está no disco vence.
+            on_disk = self.store.read_run(self.record["run_id"]) or {}
+            if "activation" in on_disk:
+                self.record["activation"] = on_disk["activation"]
             self.record.update(updates)
             self.record["updated_at"] = _now_iso()
             self.store.write_run(self.record)
@@ -2535,7 +2540,10 @@ class TrainingJob:
             self._save(learning_curve=curve)
             self._event("learning_curve", "curva de aprendizado calculada", sizes=sizes)
         except TrainingCancelled:
-            raise
+            # A rodada já foi comparada: cancelar a curva não joga isso fora.
+            self.cancel_event.clear()
+            self._save(learning_curve={"skipped": "cancelled"})
+            self._event("learning_curve_cancelled", "curva cancelada; a rodada continua válida")
         except Exception as error:  # noqa: BLE001 - a curva é um extra; a rodada continua válida
             self._save(learning_curve={"skipped": "error", "message": f"{type(error).__name__}: {error}"})
             self._event("learning_curve_failed", traceback.format_exc(limit=6))
@@ -2650,6 +2658,13 @@ def summarize_learning_curve(holdout: list[Sample], per_image: dict[int, dict[st
 
     unique_groups = sorted(set(clusters))
     rng = np.random.default_rng(config.seed + 101)
+    # Cada ponto é um treino só, então o bootstrap do holdout sozinho ignora a
+    # variação de treino e o erro do próprio ajuste, e devolvia intervalos como
+    # "4 a 4". Somar os resíduos do ajuste com sinal aleatório (wild bootstrap)
+    # leva essa incerteza para o intervalo.
+    residuals = np.zeros(len(fitted_sizes))
+    if params is not None:
+        residuals = np.asarray([points[sizes.index(size)]["mean"] - _predict_dice(params, size) for size in fitted_sizes])
     double, plus10, needed, gains = [], [], [], []
     largest_subset = max(size for size in fitted_sizes if size < total)
     for _ in range(300):
@@ -2657,7 +2672,8 @@ def summarize_learning_curve(holdout: list[Sample], per_image: dict[int, dict[st
         chosen_keys = [key for index in picked for key in keys if group_of[key] == unique_groups[index]]
         means = {size: float(np.mean([per_image[size][key] for key in chosen_keys])) for size in sizes}
         gains.append(means[total] - means[largest_subset])
-        sample_params = fit_power_law(fitted_sizes, [means[size] for size in fitted_sizes])
+        signs = rng.choice([-1.0, 1.0], size=len(fitted_sizes))
+        sample_params = fit_power_law(fitted_sizes, [means[size] + sign * residual for size, sign, residual in zip(fitted_sizes, signs, residuals)])
         if sample_params is None:
             continue
         current = _predict_dice(sample_params, total)
@@ -2698,6 +2714,7 @@ def summarize_learning_curve(holdout: list[Sample], per_image: dict[int, dict[st
         "last_step_gain": gain_interval,
         "trend": trend,
         "single_seed": True,
+        "fit_residual_rms": float(np.sqrt(np.mean(residuals ** 2))) if len(residuals) else None,
         "train_groups": total,
     }
 
@@ -2713,16 +2730,22 @@ def render_comparison_panel(pixels: np.ndarray, target: np.ndarray, reference: n
     left, top = max(0, x0 - pad_x), max(0, y0 - pad_y)
     right, bottom = min(width, x1 + pad_x), min(height, y1 + pad_y)
     panels = []
+    scale = 240.0 / max(1, bottom - top)
+    size = (max(1, int((right - left) * scale)), 240)
+    truth = cv2.resize(target[top:bottom, left:right].astype(np.uint8), size, interpolation=cv2.INTER_NEAREST)
+    truth_contours, _ = cv2.findContours(truth, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     for mask, color in ((reference, (59, 130, 246)), (candidate, (249, 115, 22))):
-        crop = pixels[top:bottom, left:right].astype(np.float32).copy()
-        region = mask[top:bottom, left:right]
-        crop[region] = crop[region] * 0.55 + np.asarray(color, dtype=np.float32) * 0.45
-        crop = crop.astype(np.uint8)
-        contours, _ = cv2.findContours(target[top:bottom, left:right].astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        crop = np.ascontiguousarray(crop)
-        cv2.drawContours(crop, contours, -1, (255, 255, 255), 2)
-        scale = 240.0 / max(1, crop.shape[0])
-        crop = cv2.resize(crop, (max(1, int(crop.shape[1] * scale)), 240), interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR)
+        # Amplia antes de desenhar, para as linhas terem a mesma espessura em
+        # qualquer recorte. Preenchimento leve e contorno forte: a cor do objeto
+        # não esconde a máscara.
+        crop = cv2.resize(pixels[top:bottom, left:right], size, interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR).astype(np.float32)
+        region = cv2.resize(mask[top:bottom, left:right].astype(np.uint8), size, interpolation=cv2.INTER_NEAREST)
+        crop[region.astype(bool)] = crop[region.astype(bool)] * 0.7 + np.asarray(color, dtype=np.float32) * 0.3
+        crop = np.ascontiguousarray(crop.astype(np.uint8))
+        contours, _ = cv2.findContours(region, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        cv2.drawContours(crop, contours, -1, color, 3)
+        cv2.drawContours(crop, truth_contours, -1, (0, 0, 0), 3)
+        cv2.drawContours(crop, truth_contours, -1, (255, 255, 255), 1)
         panels.append(crop)
     gap = np.full((240, 6, 3), 255, dtype=np.uint8)
     return np.concatenate([panels[0], gap, panels[1]], axis=1)
@@ -3244,7 +3267,12 @@ class AdaptiveService:
         record = store.read_run(run_id) if RUN_ID_PATTERN.fullmatch(run_id) else None
         if record is None:
             raise AdaptiveError(404, "run_not_found", "rodada não encontrada")
-        if record.get("status") != "completed":
+        # A curva de aprendizado roda depois da comparação e não muda a decisão:
+        # com o adaptador gravado e comparado, ativar não precisa esperar por ela.
+        comparable = record.get("status") == "completed" or (
+            record.get("stage") == "learning_curve" and record.get("comparison") and (record.get("adapter") or {}).get("sha256")
+        )
+        if not comparable:
             raise AdaptiveError(409, "not_completed", "só uma rodada concluída e comparada pode ser ativada")
         outcome = ((record.get("comparison") or {}).get("decision") or {}).get("outcome")
         if outcome == "not_improved":

@@ -87,11 +87,13 @@ def main() -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     root = out / "store"
-    results: dict = {}
+    previous = out / "results.json"
+    results: dict = json.loads(previous.read_text()) if previous.exists() else {}
     service, _ = build_service(root, args.checkpoint, args.model_config)
 
-    if "main" in args.only or "half" in args.only or "encoder" in args.only:
+    if ("main" in args.only or "encoder" in args.only) and not service.store("p-exp-main-00001").list_items():
         fill(service, "p-exp-main-00001", range(16), 3)
+    if "main" in args.only or "encoder" in args.only:
         results["readiness_main"] = service.assess("p-exp-main-00001")
         print("prontidão main:", results["readiness_main"]["state"], results["readiness_main"]["counts"]["independent_groups"], flush=True)
 
@@ -99,8 +101,13 @@ def main() -> int:
         results["main"] = train(service, "p-exp-main-00001", {"learning_curve": True}, "main")
         (out / "results.json").write_text(json.dumps(results, indent=1, ensure_ascii=False))
 
+    relaxed = adaptive.ReadinessConfig(min_independent_experimental=6, min_holdout_groups=3, target_holdout_groups=3, min_holdout_instances=10)
+
     if "half" in args.only:
-        # Mesmo holdout de main, metade dos grupos de treino.
+        # Mesmo holdout de main, metade dos grupos de treino. Fica abaixo do
+        # mínimo de prontidão de propósito (é o experimento de poucos dados),
+        # então usa limiares relaxados.
+        service, _ = build_service(root, args.checkpoint, args.model_config, readiness=relaxed)
         main_store = service.store("p-exp-main-00001")
         split = main_store.split()
         items = {item["key"]: item for item in main_store.list_items()}
@@ -119,7 +126,6 @@ def main() -> int:
         (out / "results.json").write_text(json.dumps(results, indent=1, ensure_ascii=False))
 
     if "overfit" in args.only:
-        relaxed = adaptive.ReadinessConfig(min_independent_experimental=6, min_holdout_groups=3, target_holdout_groups=3, min_holdout_instances=10)
         small, _ = build_service(root, args.checkpoint, args.model_config, readiness=relaxed)
         fill(small, "p-exp-overfit-01", range(30, 39), 1)
         results["readiness_overfit"] = small.assess("p-exp-overfit-01")

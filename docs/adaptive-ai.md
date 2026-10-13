@@ -64,16 +64,25 @@ rodada por conector. A interface acompanha por polling (`GET .../runs/{id}`).
 | --- | --- |
 | SAM 2.1 Tiny, Small, Base+, Large | sim |
 | MedSAM2 (todas as variantes) | sim — são SAM 2.1 Tiny ajustados |
-| SAM 3 | **não** |
+| SAM 3 | sim, **só cliques e caixas** — LoRA no mask decoder do modo interativo |
 | BYOM (contêiner) | **não** |
 | Poligome Runtime (nativo) | **não** |
 
-SAM 3 tem outro encoder (ViTDet com atenção fundida e caminho bfloat16 próprio),
-outro decoder e prompts de conceito; BYOM e Runtime são caixas-pretas que o
-conector não carrega. A extensão confere a família do modelo e procura as
-camadas-alvo pelo nome; se não encontrar, recusa (`unsupported_model`) em vez
-de presumir compatibilidade. A arquitetura está separada (`Sam2Segmenter`,
-`resolve_lora_targets`) para receber outra família depois, com testes próprios.
+**SAM 3.** Para pontos e caixas o SAM 3 usa um "modo interativo"
+(`predict_inst`): o backbone de ~840 M de parâmetros produz um
+`sam2_backbone_out`, e um `sam_prompt_encoder` + `sam_mask_decoder` no estilo do
+SAM 2 transforma prompts em máscaras. O `Sam3Segmenter` reproduz esse caminho sem
+`inference_mode`, e o LoRA entra nas 28 projeções de atenção desse decoder
+(`inst_interactive_predictor.model.sam_mask_decoder…`). O backbone fica
+congelado e **não é copiado**: o treino usa uma cópia só do preditor interativo
+e o backbone do modelo vivo, sob o lock do preditor, o que poupa ~3,4 GB. A busca
+por texto (conceitos) usa outro decoder e **não muda**; a interface diz isso.
+LoRA no encoder do SAM 3 é recusado (`strategy_unsupported`): em CPU ele seria
+inviável, e o ganho esperado não foi medido.
+
+BYOM e Runtime são caixas-pretas que o conector não carrega. A extensão confere
+a família do modelo e procura as camadas-alvo pelo nome; se não encontrar,
+recusa (`unsupported_model`) em vez de presumir compatibilidade.
 
 ---
 
@@ -212,8 +221,14 @@ Duas imagens são o mesmo grupo quando:
 
 1. o nome indica a mesma sequência (`exame07_corte_012`, `video3-frame-0041`;
    prefixos de câmera como `IMG_1234` não agrupam) — desligável na interface;
-2. são quase duplicatas: dHash de 64 bits a ≤ 6 bits de distância, ou correlação
-   ≥ 0,97 entre miniaturas 32×32 normalizadas.
+2. são quase duplicatas: correlação ≥ 0,97 entre miniaturas 32×32
+   normalizadas, ou dHash de 64 bits a ≤ 6 bits **com** correlação ≥ 0,9.
+
+O dHash sozinho foi descartado depois de um erro real na validação: em campos
+de microscopia com iluminação desigual ele codifica quase só o gradiente de luz,
+e lâminas diferentes caíam a ≤ 6 bits umas das outras (16 lâminas viraram 9
+grupos). A miniatura dessas imagens tem correlação de 0,1 a 0,5, então exigir as
+duas coisas separa cópia de "mesma luz".
 
 A união é transitiva (union-find). A regra é conservadora de propósito: unir
 demais só reduz a contagem; unir de menos vaza dados.
@@ -430,10 +445,37 @@ novas). Isso evita esquecimento catastrófico e acúmulo de erro entre rodadas;
 como o holdout acumulado contém os exemplos antigos, uma piora neles aparece
 como regressão contra o adaptador ativo e bloqueia a promoção.
 
-Para uma segunda etapa: seleção ativa de exemplos (priorizar imagens em que o
-modelo ativo erra mais ou discorda entre prompts), detecção de anotações
-suspeitas (perda alta persistente em treino) e reaproveitamento de logs reais
-de interação.
+### Quantas imagens anotar
+
+A resposta vem em duas etapas:
+
+1. **Antes de treinar** — a prontidão diz quantas imagens de origens novas
+   faltam para as referências (independência e avaliação). É uma conta sobre
+   alvos heurísticos, e o texto diz isso.
+2. **Depois de cada rodada** — a **curva de aprendizado**: o mesmo treino é
+   refeito do zero em 25%, 50% e 75% dos grupos de treino (subconjuntos
+   aninhados, com as mesmas épocas da melhor época da rodada) e cada um é medido
+   no holdout. Com o modelo original (0 grupos) e o candidato (100%), ajusta-se
+   `erro(n) = a·n^(−b) + c` (Hestness et al., 2017). A incerteza combina
+   bootstrap por grupo do holdout com os resíduos do ajuste em sinal aleatório
+   (wild bootstrap), porque cada ponto é um treino só. A interface mostra a
+   tendência (subindo, perto do platô, inconclusivo), a projeção com o dobro de
+   grupos e "quantos grupos novos para +1 ponto", sempre como ordem de grandeza.
+   Custa cerca de 1,5× o treino e pode ser desligada; a ativação não espera por
+   ela.
+
+### O que anotar a seguir
+
+As imagens do projeto ainda sem anotação aprovada podem ser enviadas só para
+análise (o conector guarda descritores e embedding, não a imagem). A ordem é por
+cobertura: seleção gulosa de k-centros (core-set, Sener & Savarese 2018) no
+espaço dos embeddings do SAM padronizados pelo projeto. A cada passo entra a
+imagem mais distante de tudo que já está anotado ou já foi sugerido, então duas
+imagens da mesma origem nova não ocupam os dois primeiros lugares. Quase cópias
+de imagens anotadas vão para o fim. "Abrir" leva direto à imagem no editor.
+
+Ainda não implementado: seleção por incerteza do modelo ativo, detecção de
+anotações suspeitas e uso de logs reais de interação.
 
 ---
 
@@ -470,9 +512,17 @@ features (padrão 2048).
 
 ## 14. GPU, memória e tempo
 
+O treino roda **no mesmo dispositivo do conector**: ele escolhe CUDA, depois
+Apple MPS, e só então CPU (`POLIGOME_DEVICE` força a escolha). A interface mostra
+"Treino em GPU NVIDIA (CUDA) com precisão mista bfloat16", "GPU Apple (MPS)" ou
+"CPU". Em CUDA com suporte a bfloat16, treino e avaliação usam `torch.autocast`
+em bfloat16, como o treino oficial do SAM 2 (`mixed_precision`, ligado por
+padrão); em CPU e MPS ficam em float32. **Este caminho de GPU não pôde ser
+executado aqui** (não havia GPU).
+
 | | CPU | GPU (CUDA/MPS) |
 | --- | --- | --- |
-| Estratégia automática | `decoder` | `encoder_decoder` |
+| Estratégia automática | `decoder` | `encoder_decoder` (SAM 3: sempre `decoder`) |
 | Memória extra durante o treino | uma cópia do modelo base (Tiny ≈ 160 MB; Large ≈ 900 MB) + cache de features (≤ 2 GB por padrão) | idem em VRAM; o modelo do editor continua carregado ao lado |
 | Envio de cada imagem | ~1,5 s (Tiny) para o embedding de diversidade; mais em modelos maiores | rápido |
 
@@ -484,8 +534,15 @@ aleatórios**, 24 imagens sintéticas 256×192, 14 de treino):
 | tempo por época | ≈ 12 s | ≈ 49 s |
 | rodada completa (com comparação) | ≈ 2,6 min (4 épocas) | ≈ 2,6 min (2 épocas) |
 
-Precisão: float32 (sem AMP nesta versão). Em GPU com pouca VRAM, prefira o
-`decoder` ou reduza "Imagens por passo".
+Com o SAM 2.1 Tiny **pré-treinado**, 30 imagens 256×256 de treino, CPU de 4
+núcleos dividida com outros processos: ≈ 97 s por época no `decoder`, incluindo a
+validação interna; ver [adaptive-ai-validation.md](adaptive-ai-validation.md).
+
+No modo `decoder` as features do holdout são calculadas uma vez e reaproveitadas
+para o modelo original, o adaptador ativo, o candidato, os exemplos e cada
+ponto da curva. Isso importa sobretudo no SAM 3 em CPU, onde cada codificação
+leva perto de um minuto. Em GPU com pouca VRAM, prefira o `decoder` ou reduza
+"Imagens por passo".
 
 ---
 
