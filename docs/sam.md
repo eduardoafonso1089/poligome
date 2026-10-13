@@ -454,6 +454,14 @@ A resposta diz o modelo carregado, o dispositivo em uso e o estado
 
 ---
 
+## Adaptive AI
+
+Com SAM 2.1 ou MedSAM2, a aba **Adaptive AI** da central de IA treina um
+adaptador LoRA local com as máscaras aprovadas do projeto e só oferece
+ativá-lo quando a melhora é medida num conjunto de avaliação separado. O
+instalador copia a extensão `poligome-sam-adaptive.py` ao lado do conector;
+`POLIGOME_ADAPTIVE=0` a desliga. Detalhes em [adaptive-ai.md](adaptive-ai.md).
+
 ## Limites desta versão
 
 - **Só imagem.** SAM 2.1 e SAM 3 fazem vídeo no upstream, mas o editor integra
