@@ -39,12 +39,17 @@ $ErrorActionPreference = 'Continue'
 # Invoke-WebRequest com barra de progresso fica ordens de grandeza mais lento em
 # arquivos grandes; o checkpoint do SAM 3 tem 3,45 GB.
 $ProgressPreference = 'SilentlyContinue'
+# O Windows PowerShell 5.1 sobre um .NET sem atualizacao ainda negocia TLS 1.0, e o
+# GitHub e o Hugging Face recusam: o download falhava com "conexao fechada".
+try {
+  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+} catch {}
 
 $POLIGOME_SAM_INSTALLER_API = 2
 
 $DefaultSiteUrl = 'https://poligome.com'
 $DefaultAssetBaseUrl = 'https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public'
-$DefaultConnectorSha256 = '27ddb1b6170fd2b8cbb2c4d1952c8100c1517ba4b0acc1e8fc0c2f19937cc50f'
+$DefaultConnectorSha256 = '25421160b10e032ab3fbc14617e66f34d4b0976bf11f46c652f02d37fa719387'
 
 $SiteUrl = if ($env:POLIGOME_SITE_URL) { $env:POLIGOME_SITE_URL.TrimEnd('/') } else { $DefaultSiteUrl }
 $AssetBaseUrl = if ($env:POLIGOME_ASSET_BASE_URL) { $env:POLIGOME_ASSET_BASE_URL.TrimEnd('/') } else { $DefaultAssetBaseUrl }
@@ -60,7 +65,11 @@ $Port = 7860
 $StartupTimeout = if ($env:POLIGOME_STARTUP_TIMEOUT) { [int]$env:POLIGOME_STARTUP_TIMEOUT } else { 1800 }
 # auto escolhe CUDA e depois CPU. Forcar cpu e a saida de quem tem uma GPU que o
 # PyTorch enxerga mas que nao aguenta o modelo. mps nao existe no Windows.
-$Device = if ($env:POLIGOME_DEVICE) { $env:POLIGOME_DEVICE } else { 'auto' }
+$Device = if ($env:POLIGOME_DEVICE -and $env:POLIGOME_DEVICE.Trim()) { $env:POLIGOME_DEVICE.Trim().ToLowerInvariant() } else { 'auto' }
+# O que a pessoa pediu, antes de Resolve-DeviceChoice decidir por ela: e isso que
+# segue para um instalador relancado, que deve refazer a mesma pergunta.
+$RequestedDevice = $Device
+$ModelForRelaunch = ''
 
 $Sam2Revision = '2b90b9f5ceec907a1c18123530e92e794ad901a4'
 $Sam3Revision = '8f0b7f4d4e7eda2ed606ebde6702c93359ad01da'
@@ -105,7 +114,7 @@ Modelos aceitos:
   medsam2-2411
   sam3-concepts              (alias aceito: sam3)
 
-Sem MODELO, o instalador abre um menu. O SAM 3 exige Python 3.12+ e acesso
+Sem MODELO, o instalador abre um menu. O SAM 3 exige Python 3.12 e acesso
 aprovado ao checkpoint gated da Meta no Hugging Face. Roda em GPU NVIDIA
 (capability 7.0+) ou, bem mais devagar, em CPU.
 
@@ -257,10 +266,72 @@ function Invoke-AtomicDownload([string] $Url, [string] $Destination, [long] $Exp
   Move-Item -LiteralPath $partial -Destination $Destination -Force
 }
 
+# Igual a Invoke-AtomicDownload, mas devolve $false em vez de abortar: serve para
+# tentar uma origem e passar para a seguinte.
+function Invoke-OptionalDownload([string] $Url, [string] $Destination) {
+  Assert-Https $Url
+  if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
+  try {
+    Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing -MaximumRedirection 5 -ErrorAction Stop
+  } catch {
+    if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
+    Write-Host "  $Url nao respondeu: $($_.Exception.Message)"
+    return $false
+  }
+  return ((Get-FileSize $Destination) -gt 0)
+}
+
+function Get-FileSha256([string] $Path) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+  return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
 function Test-ConnectorCompatible([string] $Path) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
   $text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
   return ($text -match '(?m)^API_VERSION = 2$') -and ($text.Contains('"--model"'))
+}
+
+# Um instalador antigo (baixado dias atras, ou a copia "(1)" que o navegador cria
+# ao baixar de novo e que o comando nao chama) encontra um conector publicado
+# mais novo que o pino dele. Parar ai com um erro de soma deixava a pessoa sem
+# saida: ela nao tem como saber qual arquivo esta velho. O instalador publicado
+# junto com o conector e buscado na mesma origem oficial, conferido pelo marcador
+# de API, e roda no lugar deste com o mesmo modelo. Uma variavel de ambiente
+# impede que isso vire um laco se a origem estiver inconsistente.
+function Invoke-InstallerSelfUpdate([string[]] $Obtained) {
+  $manual = "Baixe o instalador de novo em $SiteUrl, apague as copias antigas da pasta Downloads (inclusive as com (1), (2) no nome) e execute a copia nova."
+  if ($env:POLIGOME_INSTALLER_UPDATED -eq '1') {
+    Write-Host ''
+    Write-Host "Esperado: $DefaultConnectorSha256"
+    $Obtained | ForEach-Object { Write-Host "Obtido:   $_" }
+    Fail "o conector publicado nao confere com o instalador publicado. Isso e um problema do lado do Poligome, nao do seu computador; tente de novo em alguns minutos. $manual"
+  }
+  Write-Host ''
+  Write-Host 'Este instalador e de uma versao anterior do Poligome. Baixando a versao atual e continuando...'
+  $binDir = Join-Path $AppDir 'bin'
+  New-Item -ItemType Directory -Force $binDir | Out-Null
+  $fresh = Join-Path $binDir 'poligome-sam-windows-native.ps1'
+  $sources = @("$AssetBaseUrl/poligome-sam-windows-native.ps1", "$(Get-SiteOrigin)/poligome-sam-windows-native.ps1") | Select-Object -Unique
+  $ok = $false
+  foreach ($url in $sources) {
+    if (-not (Invoke-OptionalDownload $url "$fresh.download")) { continue }
+    $text = Get-Content -LiteralPath "$fresh.download" -Raw -Encoding UTF8
+    if ($text -match '(?m)^\$POLIGOME_SAM_INSTALLER_API = 2\s*$' -and $text -notmatch [regex]::Escape("'$DefaultConnectorSha256'")) {
+      Move-Item -LiteralPath "$fresh.download" -Destination $fresh -Force
+      $ok = $true
+      break
+    }
+    Remove-Item -LiteralPath "$fresh.download" -Force -ErrorAction SilentlyContinue
+  }
+  if (-not $ok) { Fail "este instalador esta desatualizado e nao foi possivel buscar a versao atual. $manual" }
+
+  $env:POLIGOME_INSTALLER_UPDATED = '1'
+  $env:POLIGOME_DEVICE = $script:RequestedDevice
+  $hostExe = (Get-Process -Id $PID).Path
+  if (-not $hostExe) { $hostExe = 'powershell.exe' }
+  & $hostExe -NoProfile -ExecutionPolicy Bypass -File $fresh $script:ModelForRelaunch
+  exit $LASTEXITCODE
 }
 
 function Install-Connector {
@@ -284,18 +355,48 @@ function Install-Connector {
       Remove-Item -LiteralPath $Connector -Force
       Fail "o conector ao lado do instalador nao confere com a soma oficial (esperado $DefaultConnectorSha256, obtido $hash)."
     }
-  } else {
-    $url = "$AssetBaseUrl/poligome-sam-local.py"
+  } elseif ($AssetBaseOverridden) {
+    # O pino de integridade so vale para a origem oficial: uma origem passada a
+    # mao e, por definicao, outro arquivo.
     Write-Host 'Baixando o conector local...'
-    Invoke-AtomicDownload $url $Connector 0
-    if (-not $AssetBaseOverridden) {
-      # O pino de integridade so vale para a origem oficial: uma origem passada
-      # a mao e, por definicao, outro arquivo.
-      $hash = (Get-FileHash -LiteralPath $Connector -Algorithm SHA256).Hash.ToLowerInvariant()
-      if ($hash -ne $DefaultConnectorSha256) {
-        Remove-Item -LiteralPath $Connector -Force
-        Fail "o conector baixado nao confere com a soma oficial (esperado $DefaultConnectorSha256, obtido $hash)."
+    Invoke-AtomicDownload "$AssetBaseUrl/poligome-sam-local.py" $Connector 0
+  } elseif ((Get-FileSha256 $Connector) -eq $DefaultConnectorSha256) {
+    # Ja instalado numa execucao anterior e identico ao que este instalador
+    # espera: baixar de novo so arriscaria trocar por outra versao.
+    Write-Host 'Conector local ja instalado e conferido.'
+  } else {
+    # O instalador vem do site, e o site e publicado a mao: ele pode estar
+    # alguns commits atras (ou a frente) do GitHub. Buscar o conector so no
+    # GitHub fazia um instalador perfeitamente integro falhar com "nao confere
+    # com a soma oficial" sempre que os dois saiam de sincronia. O site
+    # publica o conector junto com este arquivo, entao ele vem primeiro; o
+    # GitHub fica como segunda origem. As duas passam pelo mesmo pino.
+    $candidates = @("$(Get-SiteOrigin)/poligome-sam-local.py", "$AssetBaseUrl/poligome-sam-local.py") |
+      Select-Object -Unique
+    $obtained = @()
+    $installed = $false
+    Write-Host 'Baixando o conector local...'
+    foreach ($url in $candidates) {
+      $partial = "$Connector.download"
+      if (-not (Invoke-OptionalDownload $url $partial)) { continue }
+      $hash = Get-FileSha256 $partial
+      if ($hash -eq $DefaultConnectorSha256) {
+        Move-Item -LiteralPath $partial -Destination $Connector -Force
+        $installed = $true
+        break
       }
+      Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
+      $obtained += "$url -> $hash"
+    }
+    if (-not $installed) {
+      if ($obtained.Count -eq 0) {
+        if (Test-ConnectorCompatible $Connector) {
+          Write-Host 'Sem acesso as origens publicas; reutilizando o conector local compativel.'
+          return
+        }
+        Fail 'nao foi possivel baixar o conector local. Confira a conexao com a internet e execute de novo.'
+      }
+      Invoke-InstallerSelfUpdate $obtained
     }
   }
   if (-not (Test-ConnectorCompatible $Connector)) {
@@ -305,43 +406,85 @@ function Install-Connector {
 
 # ---------------------------------------------------------------- python -----
 
-function Find-SystemPython([int] $MinorMinimum) {
+# Faixa de Python aceita por familia. O teto do SAM 3 nao e capricho: o pacote
+# oficial exige numpy<2, e o numpy 1.26 so publica rodas ate o 3.12. Num Python
+# 3.13 ou 3.14 o pip tenta compilar o numpy, o que no Windows exige o Visual
+# Studio, e a instalacao morre no meio com um erro de compilador.
+function Get-PythonRange([string] $Family) {
+  if ($Family -eq 'sam3') { return @(12, 12) }
+  return @(10, 14)
+}
+
+function Get-PythonCheck([int] $MinorMinimum, [int] $MinorMaximum) {
+  return "import sys; raise SystemExit(0 if (3, $MinorMinimum) <= sys.version_info[:2] <= (3, $MinorMaximum) else 1)"
+}
+
+function Find-SystemPython([int] $MinorMinimum, [int] $MinorMaximum) {
   $candidates = @()
   if (Get-Command py -ErrorAction SilentlyContinue) {
-    foreach ($minor in 13, 12, 11, 10) {
-      if ($minor -ge $MinorMinimum) { $candidates += , @('py', "-3.$minor") }
+    # O 3.12 primeiro: e a versao em que todas as rodas fixadas existem.
+    foreach ($minor in 12, 13, 11, 10, 14) {
+      if ($minor -ge $MinorMinimum -and $minor -le $MinorMaximum) { $candidates += , @('py', "-3.$minor") }
     }
   }
   foreach ($name in 'python3', 'python') {
-    $command = Get-Command $name -ErrorAction SilentlyContinue
+    $command = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($command) { $candidates += , @($command.Source) }
   }
   foreach ($candidate in $candidates) {
     $exe = $candidate[0]
     $prefix = @($candidate | Select-Object -Skip 1)
-    $probe = @($prefix) + @('-c', "import sys; raise SystemExit(0 if sys.version_info >= (3, $MinorMinimum) else 1)")
-    & $exe @probe 2>$null
+    $probe = @($prefix) + @('-c', (Get-PythonCheck $MinorMinimum $MinorMaximum))
+    & $exe @probe 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) { return , $candidate }
   }
   return $null
 }
 
+function Test-VenvAboveRangeWorks([string] $Family, [string] $VenvPython, [int] $MinorMinimum) {
+  & $VenvPython -c (Get-PythonCheck $MinorMinimum 99) 2>$null
+  if ($LASTEXITCODE -ne 0) { return $false }
+  $probe = if ($Family -eq 'sam3') {
+    "$Sam3TritonShim; import cv2, fastapi, torch, uvicorn; from sam3.model_builder import build_sam3_image_model"
+  } else {
+    'import cv2, fastapi, torch, uvicorn; from sam2.build_sam import build_sam2'
+  }
+  & $VenvPython -c $probe 2>$null
+  return ($LASTEXITCODE -eq 0)
+}
+
 function Initialize-Venv([string] $Family, [string] $VenvDir, [string] $VenvPython) {
-  $minorMinimum = if ($Family -eq 'sam3') { 12 } else { 10 }
+  $range = Get-PythonRange $Family
+  $minorMinimum = $range[0]
+  $minorMaximum = $range[1]
+  $versionLabel = if ($minorMinimum -eq $minorMaximum) { "3.$minorMinimum" } else { "3.$minorMinimum a 3.$minorMaximum" }
+  $check = Get-PythonCheck $minorMinimum $minorMaximum
 
   if (Test-Path -LiteralPath $VenvPython) {
-    & $VenvPython -c "import sys; raise SystemExit(0 if sys.version_info >= (3, $minorMinimum) else 1)" 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    & $VenvPython -c $check 2>$null
+    $inRange = $LASTEXITCODE -eq 0
+    # Fora da faixa so e trocado se nao funcionar: quem ja tem o runtime rodando
+    # num Python mais novo nao pode perde-lo por causa do teto, que existe para
+    # nao criar ambientes novos que vao quebrar.
+    if (-not $inRange -and (Test-VenvAboveRangeWorks $Family $VenvPython $minorMinimum)) { return }
+    if (-not $inRange) {
       $backup = "$VenvDir.incompatible-" + (Get-Date -Format 'yyyyMMddHHmmss')
       Write-Host "Preservando o ambiente Python incompativel em $backup e recriando o runtime..."
       Move-Item -LiteralPath $VenvDir -Destination $backup -Force
     }
+  } elseif (Test-Path -LiteralPath $VenvDir) {
+    # Pasta sem python.exe: sobra de um venv interrompido. O venv nao recria
+    # por cima de uma pasta pela metade de forma confiavel.
+    Remove-Item -LiteralPath $VenvDir -Recurse -Force -ErrorAction SilentlyContinue
   }
 
   if (-not (Test-Path -LiteralPath $VenvPython)) {
-    $system = Find-SystemPython $minorMinimum
+    $system = Find-SystemPython $minorMinimum $minorMaximum
     if (-not $system) {
-      Fail "Python 3.$minorMinimum+ nao foi encontrado. Instale-o de https://www.python.org/downloads/windows/ marcando 'Add python.exe to PATH' e execute de novo."
+      if ($Family -eq 'sam3') {
+        Fail "o SAM 3 precisa do Python 3.12 (nem mais antigo, nem mais novo: o pacote oficial depende do numpy 1.26, que so existe pronto ate o 3.12). Instale o Python 3.12 de https://www.python.org/downloads/windows/ - ele pode conviver com outras versoes - e execute de novo."
+      }
+      Fail "Python $versionLabel nao foi encontrado. Instale-o de https://www.python.org/downloads/windows/ marcando 'Add python.exe to PATH' e execute de novo."
     }
     $exe = $system[0]
     $prefix = @($system | Select-Object -Skip 1)
@@ -352,18 +495,18 @@ function Initialize-Venv([string] $Family, [string] $VenvDir, [string] $VenvPyth
     if ($LASTEXITCODE -ne 0) { Fail 'nao foi possivel criar o ambiente virtual.' }
   }
 
-  & $VenvPython -c "import sys; raise SystemExit(0 if sys.version_info >= (3, $minorMinimum) else 1)" 2>$null
-  if ($LASTEXITCODE -ne 0) { Fail "o ambiente $VenvDir nao pode ser criado com Python 3.$minorMinimum+." }
+  & $VenvPython -c $check 2>$null
+  if ($LASTEXITCODE -ne 0) { Fail "o ambiente $VenvDir nao pode ser criado com Python $versionLabel." }
 }
 
 function Install-Runtime([string] $Family, [string] $VenvDir, [string] $VenvPython) {
   $revision = if ($Family -eq 'sam3') { $Sam3Revision } else { $Sam2Revision }
   # O sabor entra no marcador do SAM 3: CPU e CUDA usam rodas diferentes do torch.
-  $flavour = if ($Family -eq 'sam3' -and $Device -eq 'cpu') { '-cpu' } else { '' }
+  $flavour = if ($Family -eq 'sam3' -and $Device -eq 'cpu') { '-cpu' } elseif ($Family -eq 'sam2' -and $Device -eq 'cuda') { '-cuda' } else { '' }
   $marker = Join-Path $VenvDir ".poligome-$Family-$revision$flavour.ok"
 
-  # A prova de que o runtime está instalado é ele importar, não um arquivo ao lado
-  # dele existir. O marcador é só atalho: perdê-lo não pode custar ao usuário o
+  # A prova de que o runtime esta instalado e ele importar, nao um arquivo ao lado
+  # dele existir. O marcador e so atalho: perde-lo nao pode custar ao usuario o
   # download do PyTorch de novo, que foi o que aconteceu aqui.
   $probe = if ($Family -eq 'sam3') {
     $base = "$Sam3TritonShim; import cv2, fastapi, torch, uvicorn; from sam3.model.sam3_image_processor import Sam3Processor; from sam3.model_builder import build_sam3_image_model"
@@ -371,7 +514,8 @@ function Install-Runtime([string] $Family, [string] $VenvDir, [string] $VenvPyth
     # contrario nao: quem quer a GPU com um torch de CPU precisa reinstalar.
     if ($Device -eq 'cpu') { $base } else { "$base; raise SystemExit(0 if torch.version.cuda else 1)" }
   } else {
-    'import cv2, fastapi, torch, uvicorn; from sam2.build_sam import build_sam2; from sam2.sam2_image_predictor import SAM2ImagePredictor'
+    $base = 'import cv2, fastapi, torch, uvicorn; from sam2.build_sam import build_sam2; from sam2.sam2_image_predictor import SAM2ImagePredictor'
+    if ($Device -eq 'cuda') { "$base; raise SystemExit(0 if torch.version.cuda else 1)" } else { $base }
   }
   if (Test-Path -LiteralPath $VenvPython) {
     & $VenvPython -c $probe 2>$null
@@ -404,14 +548,22 @@ function Install-Runtime([string] $Family, [string] $VenvDir, [string] $VenvPyth
     & $VenvPython -m pip install fastapi uvicorn pillow einops huggingface_hub psutil pycocotools 'opencv-python-headless<4.12' 'numpy<2'
   } else {
     & $VenvPython -m pip install --upgrade setuptools
-    & $VenvPython -m pip install 'torch>=2.5.1' 'torchvision>=0.20.1'
+    # O PyPI so publica o torch de CPU para Windows. Quem pediu cuda precisa do
+    # indice do proprio PyTorch, senao o conector abre e diz que nao ha CUDA.
+    if ($Device -eq 'cuda') {
+      & $VenvPython -m pip install --upgrade 'torch>=2.5.1' 'torchvision>=0.20.1' --index-url https://download.pytorch.org/whl/cu128
+    } else {
+      & $VenvPython -m pip install 'torch>=2.5.1' 'torchvision>=0.20.1'
+    }
     if ($LASTEXITCODE -ne 0) { Fail 'falha ao instalar o PyTorch.' }
     # Sem isto o pacote tenta compilar a extensao CUDA, que no Windows exige o
     # MSVC e o nvcc casados; o proprio upstream trata a extensao como opcional.
     $previous = $env:SAM2_BUILD_CUDA
     $env:SAM2_BUILD_CUDA = '0'
     try {
-      & $VenvPython -m pip install "https://github.com/facebookresearch/sam2/archive/$Sam2Revision.zip"
+      # --no-build-isolation: o sam2 declara torch como dependencia de build, e
+      # sem isto o pip baixa um segundo torch inteiro so para montar o pacote.
+      & $VenvPython -m pip install --no-build-isolation "https://github.com/facebookresearch/sam2/archive/$Sam2Revision.zip"
     } finally {
       $env:SAM2_BUILD_CUDA = $previous
     }
@@ -454,15 +606,31 @@ function Resolve-DeviceChoice([string] $Family) {
     return 'cpu'
   }
   if (-not $temNvidia) { return $Device }
+  # No Windows o torch do SAM 2.1/MedSAM2 vem do PyPI, que so publica a roda de
+  # CPU. Em auto ele roda em CPU de qualquer jeito: perguntar sobre a placa aqui
+  # so assustaria quem nao vai usa-la.
+  if ($Family -ne 'sam3') { return $Device }
 
   $linha = @(& nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>$null) |
     Where-Object { $_ -match '\S' } | Select-Object -First 1
-  if (-not $linha) { return $Device }
-  $partes = $linha -split ','
-  if ($partes.Count -lt 2) { return $Device }
-  $nome = $partes[0].Trim()
-  $cap = $partes[1].Trim()
-  if ($cap -notmatch '^(\d+)\.(\d+)$') { return $Device }
+  $nome = 'A GPU encontrada'
+  $cap = ''
+  if ($linha) {
+    $partes = $linha -split ','
+    $nome = $partes[0].Trim()
+    if ($partes.Count -ge 2) { $cap = $partes[1].Trim() }
+  }
+  if ($cap -notmatch '^(\d+)\.(\d+)$') {
+    # O campo compute_cap entrou no nvidia-smi bem antes do driver minimo do
+    # CUDA 12.8. Se o driver nao sabe responde-lo, e antigo demais para o
+    # PyTorch do SAM 3, e quase sempre a placa tambem e. Instalar os gigabytes
+    # do torch CUDA para so entao falhar foi o que acontecia aqui.
+    Write-Host "$nome nao informou a compute capability (driver NVIDIA antigo): o SAM 3 vai rodar em CPU."
+    Write-Host "Cada imagem nova leva $Sam3CpuImageTime para ser preparada; os cliques seguintes sao mais rapidos."
+    Write-Host 'Para tentar a GPU mesmo assim, atualize o driver e rode de novo com $env:POLIGOME_DEVICE = "cuda".'
+    Write-Host ''
+    return 'cpu'
+  }
   $valor = [int]$Matches[1] * 10 + [int]$Matches[2]
   if ($valor -ge $TorchMinCompute) { return $Device }
 
@@ -506,11 +674,21 @@ function Resolve-DeviceChoice([string] $Family) {
   return 'cpu'
 }
 
-function Assert-RuntimeDevice([string] $Family, [string] $VenvPython) {
-  if ($Family -ne 'sam3' -or $Device -eq 'cpu') { return }
+# Devolve o device que o conector deve usar. Em auto, uma GPU que o torch nao
+# consegue usar vira CPU com aviso: o torch CUDA tambem roda em CPU, entao nada
+# precisa ser baixado de novo. So quem pediu cuda explicitamente ouve um erro.
+function Resolve-RuntimeDevice([string] $Family, [string] $VenvPython) {
+  if ($Family -ne 'sam3' -or $Device -eq 'cpu') { return $Device }
   & $VenvPython -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)' 2>$null
   if ($LASTEXITCODE -ne 0) {
-    Fail 'o PyTorch do SAM 3 nao conseguiu usar a GPU NVIDIA. Confirme driver e compatibilidade CUDA 12.6+.'
+    if ($Device -eq 'auto') {
+      Write-Host ''
+      Write-Host 'O PyTorch nao conseguiu usar a GPU NVIDIA (driver antigo ou placa sem suporte ao CUDA 12.8).'
+      Write-Host "Seguindo em CPU: cada imagem nova leva $Sam3CpuImageTime para ser preparada."
+      Write-Host ''
+      return 'cpu'
+    }
+    Fail 'o PyTorch do SAM 3 nao conseguiu usar a GPU NVIDIA. Atualize o driver da NVIDIA ou rode de novo com $env:POLIGOME_DEVICE = "cpu".'
   }
   # torch.cuda.is_available() responde "sim" mesmo quando a instalacao nao tem
   # kernel para a arquitetura da placa; ai o carregamento morre com "no kernel
@@ -536,8 +714,16 @@ if arquiteturas and not any(serve(a) for a in arquiteturas):
     print(f"{torch.cuda.get_device_name(0)} tem capability {major}.{minor}, e este PyTorch traz kernels apenas para {', '.join(arquiteturas)}")
 '@ 2>$null
   if ($diagnostic) {
+    if ($Device -eq 'auto') {
+      Write-Host ''
+      Write-Host "A GPU nao e compativel com o PyTorch do SAM 3 ($diagnostic)."
+      Write-Host "Seguindo em CPU: cada imagem nova leva $Sam3CpuImageTime para ser preparada."
+      Write-Host ''
+      return 'cpu'
+    }
     Fail "a GPU nao e compativel com o PyTorch instalado para o SAM 3: $diagnostic. O modelo nao chegaria a carregar. Rode de novo com `$env:POLIGOME_DEVICE = 'cpu'."
   }
+  return $Device
 }
 
 function Assert-Sam3Platform {
@@ -699,6 +885,7 @@ if ($Model) {
   if (-not $modelId) { Fail 'modelo invalido; rode de novo e escolha um numero de 1 a 10.' }
 }
 
+$ModelForRelaunch = $modelId
 $spec = $ModelCatalog[$modelId]
 $family = $spec.Family
 $venvDir = Join-Path $VenvsDir $family
@@ -713,14 +900,16 @@ Write-Host ''
 
 New-Item -ItemType Directory -Force $AppDir, $VenvsDir, $ModelsDir | Out-Null
 Save-Selection $PendingModelFile $modelId
+# O conector primeiro: se este instalador estiver velho, ele se troca pela versao
+# atual aqui, antes de fazer qualquer pergunta que teria de ser repetida.
+Install-Connector
 $Device = Resolve-DeviceChoice $family
 # Em auto ou cpu o SAM 3 ja tem para onde ir; so cuda explicito exige a placa, e e
 # recusado aqui para nao baixar 11 GB e terminar num erro de CUDA.
 if ($family -eq 'sam3' -and $Device -eq 'cuda') { Assert-Sam3Platform }
-Install-Connector
 Initialize-Venv $family $venvDir $venvPython
 Install-Runtime $family $venvDir $venvPython
-Assert-RuntimeDevice $family $venvPython
+$Device = Resolve-RuntimeDevice $family $venvPython
 
 if (-not (Test-CheckpointValid $checkpoint $spec.Size)) {
   if (Test-Path -LiteralPath $checkpoint) {

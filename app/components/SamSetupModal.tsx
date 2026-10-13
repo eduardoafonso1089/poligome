@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { containModalFocus } from "../lib/modal-focus";
 import {
-  AlertTriangle, Check, Cpu, Download, ExternalLink, Gauge, HardDrive,
+  AlertTriangle, Check, Copy, Cpu, Download, ExternalLink, Gauge, HardDrive,
   KeyRound, Laptop, Layers, Link2, Network, Plus, PowerOff, ScanSearch, Server, ShieldCheck, Sparkles, Terminal, WandSparkles, X,
 } from "lucide-react";
 import { fill, type Language } from "../lib/i18n";
@@ -97,6 +97,32 @@ const CAPABILITY_KEYS = {
   bidirectionalPropagation: "capBidirectional",
 } as const satisfies Record<string, keyof SamCopy>;
 
+/**
+ * Um comando para colar no terminal, com o botão de copiar.
+ *
+ * Selecionar o texto à mão levava junto o que estivesse em volta — e o comando
+ * que chegava ao terminal com o prompt "PS C:\...>" na frente fazia o
+ * PowerShell chamar Get-Process e falhar com um erro que não diz nada. O botão
+ * copia exatamente o comando, nem um caractere a mais.
+ */
+function CommandCode({ text, sc }: { text: string; sc: SamCopy }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  const copy = () => {
+    navigator.clipboard?.writeText(text).then(() => setCopied(true), () => setCopied(false));
+  };
+  return <div className="command-copy">
+    <code>{text}</code>
+    <button type="button" onClick={copy} aria-label={copied ? sc.copiedCommand : sc.copyCommand} title={copied ? sc.copiedCommand : sc.copyCommand}>
+      {copied ? <Check size={12} /> : <Copy size={12} />}<span>{copied ? sc.copiedCommand : sc.copyCommand}</span>
+    </button>
+  </div>;
+}
+
 function statusLabel(sc: SamCopy, state: ConnectionState, modelMatches: boolean) {
   if (state === "checking") return sc.stChecking;
   if (state === "loading") return sc.stLoading;
@@ -139,7 +165,6 @@ function ByomPanel({
   const [importing, setImporting] = useState(false);
   const [commandOs, setCommandOs] = useState<"unix" | "native">(preferredInstallOs);
   const cli = commandOs === "native" ? "powershell -ExecutionPolicy Bypass -File .\\poligome-byom-windows.ps1" : "bash poligome-byom-macos-linux.sh";
-  const repoCli = commandOs === "native" ? "powershell -ExecutionPolicy Bypass -File .\\public\\poligome-byom-windows.ps1" : "bash public/poligome-byom-macos-linux.sh";
   const portNumber = Number(draftPort);
   const validId = BYOM_MODEL_ID_PATTERN.test(draftId.trim().toLowerCase());
   const validPort = Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535;
@@ -251,7 +276,7 @@ function ByomPanel({
       <article>
         <b>{sc.byomRepoTitle}</b>
         <p>{sc.byomRepoBody}</p>
-        <code>{`${repoCli} examples`}</code>
+        <code>{`${cli} examples`}</code>
       </article>
       <article>
         <b>{sc.byomFilesOnlyTitle}</b>
@@ -390,7 +415,9 @@ export default function SamSetupModal({
   // comandos de religar e de serviço, senão marcar a caixa vale só na instalação.
   const unixCpuPrefix = forceCpu ? "POLIGOME_DEVICE=cpu " : "";
   const unixCommand = `${unixCpuPrefix}bash poligome-sam-macos-linux.sh ${model.id}`;
-  const windowsCommand = `${forceCpu ? "set POLIGOME_DEVICE=cpu && " : ""}poligome-sam-windows.bat ${model.id}`;
+  // As aspas em `set "X=cpu"` não são enfeite: sem elas o cmd guarda o espaço
+  // antes do && e o valor vira "cpu ", que os instaladores recusavam.
+  const windowsCommand = `${forceCpu ? 'set "POLIGOME_DEVICE=cpu" && ' : ""}poligome-sam-windows.bat ${model.id}`;
   // A forma completa, com powershell -File: digitar só o nome do .ps1 é recusado
   // pela política de execução, e dois cliques abrem o Bloco de Notas. Mostrar o
   // atalho seria entregar um comando que não roda.
@@ -629,7 +656,7 @@ export default function SamSetupModal({
                   {step.body && <p>{step.body}</p>}
                   {index === 0
                     ? <a className="sam-step-download" href={chosenPath.href} download><Download size={14} />{fill(sc.download, { file: chosenPath.file })}</a>
-                    : step.command ? <code>{step.command}</code> : null}
+                    : step.command ? <CommandCode text={step.command} sc={sc} /> : null}
                 </li>)}
               </ol>
               {/* Escolher CPU deixou de ser folclore de variável de ambiente: o
@@ -646,11 +673,10 @@ export default function SamSetupModal({
                 {installOs === "unix" && <>
                   <p>{sc.relaunchUnix}</p>
                   <a className="sam-step-download" href="/poligome-sam-start-macos-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-start-macos-linux.sh" })}</a>
-                  <code>{`cd ~/Downloads
-  ${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`}</code>
+                  <CommandCode text={`cd ~/Downloads\n${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`} sc={sc} />
                   <p>{sc.relaunchService}</p>
                   <a className="sam-step-download" href="/poligome-sam-service-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-service-linux.sh" })}</a>
-                  <code>{`${unixCpuPrefix}bash poligome-sam-service-linux.sh install`}</code>
+                  <CommandCode text={`${unixCpuPrefix}bash poligome-sam-service-linux.sh install`} sc={sc} />
                 </>}
                 {installOs === "wsl" && <>
                   <p>{sc.relaunchWsl}</p>
@@ -660,12 +686,12 @@ export default function SamSetupModal({
                       comando, não do atalho. */}
                   {forceCpu && <>
                     <p>{sc.relaunchWslCpu}</p>
-                    <code>{String.raw`cd %USERPROFILE%\Downloads` + "\n" + "set POLIGOME_DEVICE=cpu && poligome-sam-start-windows.bat"}</code>
+                    <CommandCode text={String.raw`cd %USERPROFILE%\Downloads` + "\n" + 'set "POLIGOME_DEVICE=cpu" && poligome-sam-start-windows.bat'} sc={sc} />
                   </>}
                 </>}
                 {installOs === "native" && <>
                   <p>{sc.relaunchNative}</p>
-                  <code>{nativeWindowsCommand}</code>
+                  <CommandCode text={nativeWindowsCommand} sc={sc} />
                 </>}
               </div>
               <p className="sam-manual-note">{model.family === "sam3" ? sc.sam3CpuSlow : sc.oldGpuNote}</p>
@@ -793,7 +819,7 @@ export default function SamSetupModal({
                   {step.body && <p>{step.body}</p>}
                   {index === 0
                     ? <a className="sam-step-download" href={chosenPath.href} download><Download size={14} />{fill(sc.download, { file: chosenPath.file })}</a>
-                    : step.command ? <code>{step.command}</code> : null}
+                    : step.command ? <CommandCode text={step.command} sc={sc} /> : null}
                 </li>)}
               </ol>
               {/* Escolher CPU deixou de ser folclore de variável de ambiente: o
@@ -810,11 +836,10 @@ export default function SamSetupModal({
                 {installOs === "unix" && <>
                   <p>{sc.relaunchUnix}</p>
                   <a className="sam-step-download" href="/poligome-sam-start-macos-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-start-macos-linux.sh" })}</a>
-                  <code>{`cd ~/Downloads
-  ${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`}</code>
+                  <CommandCode text={`cd ~/Downloads\n${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`} sc={sc} />
                   <p>{sc.relaunchService}</p>
                   <a className="sam-step-download" href="/poligome-sam-service-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-service-linux.sh" })}</a>
-                  <code>{`${unixCpuPrefix}bash poligome-sam-service-linux.sh install`}</code>
+                  <CommandCode text={`${unixCpuPrefix}bash poligome-sam-service-linux.sh install`} sc={sc} />
                 </>}
                 {installOs === "wsl" && <>
                   <p>{sc.relaunchWsl}</p>
@@ -824,12 +849,12 @@ export default function SamSetupModal({
                       comando, não do atalho. */}
                   {forceCpu && <>
                     <p>{sc.relaunchWslCpu}</p>
-                    <code>{String.raw`cd %USERPROFILE%\Downloads` + "\n" + "set POLIGOME_DEVICE=cpu && poligome-sam-start-windows.bat"}</code>
+                    <CommandCode text={String.raw`cd %USERPROFILE%\Downloads` + "\n" + 'set "POLIGOME_DEVICE=cpu" && poligome-sam-start-windows.bat'} sc={sc} />
                   </>}
                 </>}
                 {installOs === "native" && <>
                   <p>{sc.relaunchNative}</p>
-                  <code>{nativeWindowsCommand}</code>
+                  <CommandCode text={nativeWindowsCommand} sc={sc} />
                 </>}
               </div>
               <p className="sam-manual-note">{model.family === "sam3" ? sc.sam3CpuSlow : sc.oldGpuNote}</p>

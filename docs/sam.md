@@ -226,7 +226,7 @@ O SAM 3 não compartilha ambiente com o SAM 2.1:
 
 | | SAM 2.1 e MedSAM2 | SAM 3 |
 | --- | --- | --- |
-| Python | 3.10+ | 3.12+ |
+| Python | 3.10 a 3.14 | exatamente 3.12 (o `numpy<2` do pacote oficial só tem rodas até o 3.12) |
 | PyTorch | 2.5.1+ | 2.10, roda CUDA 12.8 ou de CPU |
 | GPU | recomendada | recomendada, CUDA 12.6+ e capability 7.0+ |
 | CPU | funciona | funciona, bem mais devagar (ver adiante) |
@@ -428,6 +428,8 @@ As mensagens abaixo são as que aparecem de verdade, com o que fazer em cada uma
 | A mensagem diz | O que aconteceu | O que fazer |
 | --- | --- | --- |
 | `não foi possível criar o ambiente virtual` | falta o `python3-venv` | `sudo apt install python3.12-venv` e rodar de novo |
+| `o conector baixado não confere com a soma oficial` | instalador antigo (de antes da auto-atualização) | baixar o instalador de novo no site, apagar as cópias antigas — inclusive as `(1)`, `(2)` — e rodar a cópia nova |
+| `O termo 'PS' não é reconhecido` / `Get-Process: ... parâmetro posicional` | o prompt `PS C:\...>` foi colado junto com o comando | colar só o comando; o botão Copiar do site copia exatamente ele |
 | `Python 3.10+ não foi encontrado` | o Python do sistema é antigo demais | instalar um Python 3.10 ou mais novo |
 | `a porta 7860 já está ocupada` | outro conector, com outro modelo, está no ar | fechar o terminal dele, ou trocar de modelo pelo editor em vez do instalador |
 | `exige um Mac Apple Silicon` | Mac Intel | usar Linux, ou um Mac M1 ou mais novo |

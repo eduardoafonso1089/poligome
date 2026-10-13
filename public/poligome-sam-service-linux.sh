@@ -21,7 +21,10 @@ PORT="7860"
 SITE_URL="${POLIGOME_SITE_URL:-https://poligome.com}"
 # auto escolhe CUDA, depois MPS, depois CPU. Forçar cpu é a saída de quem tem
 # uma GPU que o PyTorch enxerga mas que não aguenta o modelo.
-DEVICE="${POLIGOME_DEVICE:-auto}"
+# Espaços e maiúsculas vêm de comandos copiados (no cmd, `set X=cpu && ...`
+# guarda "cpu "); nenhum dos dois faz parte de um device válido.
+DEVICE="$(printf '%s' "${POLIGOME_DEVICE:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+DEVICE="${DEVICE:-auto}"
 
 fail() { printf '\nErro: %s\n' "$*" >&2; exit 1; }
 
@@ -32,6 +35,11 @@ esac
 
 command -v systemctl >/dev/null 2>&1 ||
   fail "systemd não encontrado. Use o iniciador comum: poligome-sam-start-macos-linux.sh"
+# O binário existir não quer dizer que o systemd de usuário esteja no ar: no WSL
+# sem systemd habilitado, e em contêineres, cada comando abaixo falhava com
+# "System has not been booted with systemd", sem dizer o que fazer.
+systemctl --user show-environment >/dev/null 2>&1 ||
+  fail "o systemd de usuário não está ativo nesta máquina (comum no WSL). Use o iniciador comum, poligome-sam-start-macos-linux.sh, ou habilite o systemd no WSL (systemd=true em /etc/wsl.conf) e reinicie com wsl --shutdown."
 
 case "${1:-install}" in
   status)
@@ -53,6 +61,13 @@ esac
   fail "conector ausente em ${CONNECTOR}. Rode o instalador de um modelo antes."
 [[ -f "$SELECTED_MODEL_FILE" ]] ||
   fail "nenhum modelo selecionado ainda. Rode o instalador de um modelo antes."
+
+# Um conector aberto num terminal segura a porta, e o serviço novo entraria num
+# laço de falha a cada 5 s sem que nada na tela dissesse por quê.
+if ! systemctl --user is-active --quiet poligome-sam.service 2>/dev/null &&
+  (exec 3<>"/dev/tcp/127.0.0.1/${PORT}") 2>/dev/null; then
+  fail "a porta ${PORT} já está em uso, provavelmente pelo conector aberto num terminal. Feche aquela janela (Ctrl+C) e rode este comando de novo."
+fi
 
 # O launcher resolve o modelo a cada arranque, então trocar de modelo pela web
 # continua valendo depois de reiniciar a máquina.
@@ -106,7 +121,10 @@ WantedBy=default.target
 UNITFILE
 
 systemctl --user daemon-reload
-systemctl --user enable --now poligome-sam.service
+# restart, e não só enable --now: rodar de novo para trocar POLIGOME_DEVICE
+# precisa valer já, e enable --now deixa no ar o processo antigo.
+systemctl --user enable poligome-sam.service >/dev/null
+systemctl --user restart poligome-sam.service
 
 printf '\nServiço instalado. O conector sobe sozinho no login e reinicia se falhar.\n'
 printf 'Nenhum terminal precisa ficar aberto.\n\n'

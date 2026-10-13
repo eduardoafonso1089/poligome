@@ -93,9 +93,81 @@ port_from_endpoint() {
   esac
 }
 
+# Sem proxy de propósito: o curl lê http_proxy do ambiente, e numa rede com proxy
+# corporativo o /ping local ia para o proxy, o contêiner parecia nunca subir e o
+# start esperava o tempo inteiro para dizer que falhou. O python3 entra quando
+# não há curl, que falta em instalações mínimas.
 ping_ok() {
   local endpoint="$1"
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "${endpoint}/ping" 2>/dev/null)" == "200" ]]
+  if command -v curl >/dev/null 2>&1; then
+    [[ "$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' --max-time 3 "${endpoint}/ping" 2>/dev/null)" == "200" ]]
+    return
+  fi
+  python3 - "${endpoint}/ping" <<'PY' >/dev/null 2>&1
+import sys, urllib.request
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+with opener.open(sys.argv[1], timeout=3) as response:
+    raise SystemExit(0 if response.status == 200 else 1)
+PY
+}
+
+# O conector lê o registro do lugar onde ele mesmo roda. Registrar no Linux do
+# WSL2 enquanto o conector no ar é o nativo do Windows (ou o contrário) deixava
+# o modelo invisível no editor, sem nenhuma pista do motivo.
+warn_if_connector_reads_elsewhere() {
+  local remote
+  remote="$(python3 - <<'PY' 2>/dev/null || true
+import json, urllib.request
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+try:
+    with opener.open("http://127.0.0.1:7860/health", timeout=2) as response:
+        payload = json.load(response)
+except Exception:
+    raise SystemExit(0)
+if payload.get("service") == "Poligome SAM local" and payload.get("app_dir"):
+    print(f"{payload.get('host') or '?'}\t{payload['app_dir']}")
+PY
+)"
+  [[ -n "$remote" ]] || return 0
+  local host="${remote%%$'\t'*}" remote_dir="${remote#*$'\t'}"
+  local here
+  # O conector resolve links simbólicos no caminho; a comparação também.
+  here="$(cd "$APP_DIR" 2>/dev/null && pwd -P || printf '%s' "$APP_DIR")"
+  [[ "$remote_dir" == "$APP_DIR" || "$remote_dir" == "$here" ]] && return 0
+  printf '\nAtenção: o conector do Poligome no ar roda em %s e lê os modelos de\n' "$host"
+  printf '  %s\n' "$remote_dir"
+  printf 'mas este registro foi gravado em %s. O editor não vai enxergá-lo.\n' "$REGISTRY_DIR"
+  if [[ "$host" == "Windows" ]]; then
+    printf 'Use o poligome-byom-windows.ps1 no PowerShell do Windows.\n'
+  else
+    printf 'Rode este mesmo script de dentro do %s.\n' "$host"
+  fi
+}
+
+DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
+ASSET_BASE_URL="${POLIGOME_ASSET_BASE_URL:-${DEFAULT_ASSET_BASE_URL}}"
+ASSET_BASE_URL="${ASSET_BASE_URL%/}"
+
+# Quem baixou só esta CLI não tem a pasta byom do repositório ao lado. Em vez de
+# mandar procurar um diretório que a pessoa nunca viu, os quatro arquivos dos
+# exemplos são baixados da mesma origem pública dos instaladores.
+fetch_example_sources() {
+  local target="${APP_DIR}/byom-src"
+  local name
+  [[ "$ASSET_BASE_URL" == https://* ]] || fail "POLIGOME_ASSET_BASE_URL precisa usar HTTPS."
+  command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 ||
+    fail "instale curl ou wget, ou aponte --path para o diretório byom do repositório."
+  mkdir -p "${target}/examples"
+  printf 'Baixando os arquivos dos exemplos de %s...\n' "$ASSET_BASE_URL" >&2
+  for name in Dockerfile serve.py examples/byom-otsu.json examples/byom-watershed.json; do
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL --proto '=https' --retry 3 "${ASSET_BASE_URL}/byom/${name}" -o "${target}/${name}.part"
+    else
+      wget -q --https-only --tries=3 "${ASSET_BASE_URL}/byom/${name}" -O "${target}/${name}.part"
+    fi || { rm -f "${target}/${name}.part"; fail "não foi possível baixar byom/${name}. Confira a internet ou use --path."; }
+    mv -f "${target}/${name}.part" "${target}/${name}"
+  done
+  printf '%s\n' "$target"
 }
 
 # Os exemplos oficiais são versionados junto do código, em byom/examples, para
@@ -112,6 +184,7 @@ cmd_examples() {
   done
   if [[ -z "$path" ]]; then
     path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/byom"
+    [[ -f "${path}/Dockerfile" && -d "${path}/examples" ]] || path="$(fetch_example_sources)"
   fi
   [[ -f "${path}/Dockerfile" ]] ||
     fail "não há Dockerfile em ${path}. Aponte --path para o diretório byom do repositório."
@@ -150,8 +223,11 @@ cmd_examples() {
   printf '\nSubindo os exemplos...\n'
   for file in "${registry_source}"/*.json; do
     base="$(basename "$file" .json)"
-    cmd_start --model-id "$base" || printf '  %s não subiu; use logs --model-id %s para ver o motivo.\n' "$base" "$base"
+    # Num subshell: o fail de um exemplo encerrava o script inteiro, e o segundo
+    # exemplo nunca chegava a subir.
+    ( cmd_start --model-id "$base" ) || printf '  %s não subiu; use logs --model-id %s para ver o motivo.\n' "$base" "$base"
   done
+  warn_if_connector_reads_elsewhere
 }
 
 cmd_build() {
@@ -230,6 +306,7 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
 ' "$file" || fail "o registro não foi criado; corrija o problema apontado acima."
 
   printf '\nModelo %s registrado em %s\n' "$model_id" "$file"
+  warn_if_connector_reads_elsewhere
   printf 'Suba o contêiner com:\n'
   printf '  bash poligome-byom-macos-linux.sh start --model-id %s\n' "$model_id"
 }

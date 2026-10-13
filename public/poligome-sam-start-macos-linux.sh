@@ -19,7 +19,10 @@ PORT="7860"
 STARTUP_TIMEOUT="${POLIGOME_STARTUP_TIMEOUT:-1800}"
 # auto escolhe CUDA, depois MPS, depois CPU. Forçar cpu é a saída de quem tem
 # uma GPU que o PyTorch enxerga mas que não aguenta o modelo.
-DEVICE="${POLIGOME_DEVICE:-auto}"
+# Espaços e maiúsculas vêm de comandos copiados (no cmd, `set X=cpu && ...`
+# guarda "cpu "); nenhum dos dois faz parte de um device válido.
+DEVICE="$(printf '%s' "${POLIGOME_DEVICE:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+DEVICE="${DEVICE:-auto}"
 SITE_ORIGIN=""
 
 usage() {

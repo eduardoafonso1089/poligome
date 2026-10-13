@@ -1425,6 +1425,9 @@ def _build_adapter(config: LoadConfig) -> EngineAdapter:
     if not checkpoint.is_file():
         raise FileNotFoundError(f"Checkpoint não encontrado: {checkpoint}")
     device = _resolve_device(config.requested_device)
+    if config.spec.family == "sam3" and device == "mps" and config.requested_device == "auto":
+        # Em auto o Mac escolheria MPS, que o SAM 3 não aceita; CPU funciona.
+        device = "cpu"
     _update_runtime(device=device)
     if config.spec.family == "sam3":
         _validate_sam3_runtime(device)
@@ -1704,7 +1707,13 @@ def _exec_with_model(spec: ModelSpec, port: int) -> None:
     ]
     if spec.default_config:
         argv += ["--model-config", spec.default_config]
-    argv += ["--device", "auto", "--port", str(port), "--app-dir", str(_app_dir)]
+    # CPU pedida explicitamente é uma decisão sobre a máquina, não sobre o
+    # modelo: quem a escolheu tem uma GPU antiga ou fraca demais, e a troca de
+    # modelo não pode voltar a tentá-la. Os outros pedidos (cuda, mps) valem só
+    # para a família em que foram feitos; para a próxima, auto decide.
+    requested = _startup_config.requested_device if _startup_config else "auto"
+    device = "cpu" if requested == "cpu" else "auto"
+    argv += ["--device", device, "--port", str(port), "--app-dir", str(_app_dir)]
     print(f"Trocando para {spec.model_id}; recarregando o conector...", flush=True)
     sys.stdout.flush()
     sys.stderr.flush()

@@ -6,7 +6,7 @@ POLIGOME_SAM_INSTALLER_API=2
 DEFAULT_SITE_URL="https://poligome.com"
 DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 DEFAULT_CONNECTOR_URL="${DEFAULT_ASSET_BASE_URL}/poligome-sam-local.py"
-DEFAULT_CONNECTOR_SHA256="27ddb1b6170fd2b8cbb2c4d1952c8100c1517ba4b0acc1e8fc0c2f19937cc50f"
+DEFAULT_CONNECTOR_SHA256="25421160b10e032ab3fbc14617e66f34d4b0976bf11f46c652f02d37fa719387"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE_URL="${POLIGOME_SITE_URL:-${DEFAULT_SITE_URL}}"
 SITE_URL="${SITE_URL%/}"
@@ -22,7 +22,13 @@ PORT="7860"
 STARTUP_TIMEOUT="${POLIGOME_STARTUP_TIMEOUT:-1800}"
 # auto escolhe CUDA, depois MPS, depois CPU. Forçar cpu é a saída de quem tem
 # uma GPU que o PyTorch enxerga mas que não aguenta o modelo.
-DEVICE="${POLIGOME_DEVICE:-auto}"
+# Espaços e maiúsculas vêm de comandos copiados (no cmd, `set X=cpu && ...`
+# guarda "cpu "); nenhum dos dois faz parte de um device válido.
+DEVICE="$(printf '%s' "${POLIGOME_DEVICE:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+DEVICE="${DEVICE:-auto}"
+# O que a pessoa pediu, antes de decide_device escolher por ela: é isso que segue
+# para um instalador relançado, que deve refazer a mesma pergunta.
+REQUESTED_DEVICE="$DEVICE"
 
 SAM2_REVISION="2b90b9f5ceec907a1c18123530e92e794ad901a4"
 SAM3_REVISION="8f0b7f4d4e7eda2ed606ebde6702c93359ad01da"
@@ -59,7 +65,7 @@ Modelos aceitos:
   medsam2-2411
   sam3-concepts              (alias aceito: sam3)
 
-Sem MODELO, o instalador abre um menu. SAM 3 exige Linux, Python 3.12+ e acesso
+Sem MODELO, o instalador abre um menu. SAM 3 exige Linux, Python 3.12 e acesso
 aprovado ao checkpoint gated da Meta no Hugging Face. Roda em GPU NVIDIA
 (capability 7.0+) ou, bem mais devagar, em CPU.
 
@@ -137,20 +143,24 @@ choose_model() {
   esac
 }
 
-python_meets() {
+python_in_range() {
   local command_name="$1"
-  local major="$2"
-  local minor="$3"
+  local minimum_minor="$2"
+  local maximum_minor="$3"
   command -v "$command_name" >/dev/null 2>&1 || return 1
-  "$command_name" -c "import sys; raise SystemExit(0 if sys.version_info >= (${major}, ${minor}) else 1)" >/dev/null 2>&1
+  "$command_name" -c "import sys; raise SystemExit(0 if (3, ${minimum_minor}) <= sys.version_info[:2] <= (3, ${maximum_minor}) else 1)" >/dev/null 2>&1
 }
 
+# O 3.12 vem primeiro: é a versão em que todas as rodas fixadas existem. O teto
+# do SAM 3 não é capricho: o pacote oficial exige numpy<2, e o numpy 1.26 só
+# publica rodas até o 3.12. Num 3.13 o pip tenta compilar o numpy e a instalação
+# morre no meio com erro de compilador.
 find_python() {
-  local major="$1"
-  local minor="$2"
+  local minimum_minor="$1"
+  local maximum_minor="$2"
   local candidate
-  for candidate in python3.13 python3.12 python3.11 python3.10 python3 python; do
-    if python_meets "$candidate" "$major" "$minor"; then
+  for candidate in python3.12 python3.13 python3.11 python3.10 python3.14 python3 python; do
+    if python_in_range "$candidate" "$minimum_minor" "$maximum_minor"; then
       command -v "$candidate"
       return 0
     fi
@@ -241,8 +251,38 @@ connector_is_compatible() {
     grep -Fq -- '"--model"' "$path"
 }
 
+# Um instalador antigo encontra um conector publicado mais novo que o pino dele.
+# Parar com "soma não confere" deixava a pessoa sem saída: ela não tem como saber
+# qual arquivo está velho. O instalador publicado junto com o conector é buscado
+# na origem oficial, conferido pelo marcador de API, e roda no lugar deste com o
+# mesmo modelo. A variável de ambiente impede um laço se a origem estiver
+# inconsistente.
+self_update_installer() {
+  local manual="Baixe o instalador de novo em ${SITE_URL}, apague as cópias antigas e execute a cópia nova."
+  local fresh="${APP_DIR}/bin/poligome-sam-macos-linux.sh.update"
+  local candidate line
+  if [[ "${POLIGOME_INSTALLER_UPDATED:-}" == "1" ]]; then
+    printf '\nEsperado: %s\n' "$DEFAULT_CONNECTOR_SHA256" >&2
+    for line in "$@"; do printf 'Obtido:   %s\n' "$line" >&2; done
+    fail "o conector publicado não confere com o instalador publicado. Isso é um problema do lado do Poligome, não do seu computador; tente de novo em alguns minutos. ${manual}"
+  fi
+  printf '\nEste instalador é de uma versão anterior do Poligome. Baixando a versão atual e continuando...\n'
+  mkdir -p "$(dirname "$fresh")"
+  for candidate in "${DEFAULT_ASSET_BASE_URL}/poligome-sam-macos-linux.sh" "${SITE_ORIGIN}/poligome-sam-macos-linux.sh"; do
+    rm -f "$fresh"
+    download_to_file "$candidate" "$fresh" 2>/dev/null || continue
+    if grep -Fqx 'POLIGOME_SAM_INSTALLER_API=2' "$fresh" &&
+      ! grep -Fq "DEFAULT_CONNECTOR_SHA256=\"${DEFAULT_CONNECTOR_SHA256}\"" "$fresh"; then
+      chmod 700 "$fresh"
+      POLIGOME_INSTALLER_UPDATED=1 POLIGOME_DEVICE="$REQUESTED_DEVICE" exec bash "$fresh" "$MODEL_ID"
+    fi
+  done
+  rm -f "$fresh"
+  fail "este instalador está desatualizado e não foi possível buscar a versão atual. ${manual}"
+}
+
 download_connector() {
-  local url
+  local url=""
   local expected_sha256=""
   local partial="${CONNECTOR}.part"
   local adjacent_connector="${SCRIPT_DIR}/poligome-sam-local.py"
@@ -263,23 +303,55 @@ download_connector() {
       rm -f "$partial"
       fail "não foi possível copiar o conector distribuído para ${partial}."
     fi
-  else
-    if [[ -n "${POLIGOME_ASSET_BASE_URL:-}" ]]; then
-      url="${ASSET_BASE_URL}/poligome-sam-local.py"
-    else
-      url="$DEFAULT_CONNECTOR_URL"
-      expected_sha256="$DEFAULT_CONNECTOR_SHA256"
-    fi
+  elif [[ -n "${POLIGOME_ASSET_BASE_URL:-}" ]]; then
+    # O pino só vale para a origem oficial: uma origem passada à mão é, por
+    # definição, outro arquivo.
+    url="${ASSET_BASE_URL}/poligome-sam-local.py"
     require_https "$url"
-    printf 'Baixando o conector canônico do Poligome da origem pública...\n'
+    printf 'Baixando o conector da origem informada em POLIGOME_ASSET_BASE_URL...\n'
     if ! download_to_file "$url" "$partial"; then
       rm -f "$partial"
-      if connector_is_compatible "$CONNECTOR"; then
-        printf 'A origem pública não respondeu; reutilizando o conector local compatível.\n'
-        return 0
-      fi
       fail "não foi possível baixar o conector de ${url}."
     fi
+  elif [[ -f "$CONNECTOR" && "$(file_sha256 "$CONNECTOR" 2>/dev/null)" == "$DEFAULT_CONNECTOR_SHA256" ]]; then
+    # Já instalado numa execução anterior e idêntico ao que este instalador
+    # espera: baixar de novo só arriscaria trocar por outra versão.
+    printf 'Conector local já instalado e conferido.\n'
+    return 0
+  else
+    # O site é publicado à mão e pode estar alguns commits atrás (ou à frente)
+    # do GitHub. Buscar o conector só no GitHub fazia um instalador íntegro
+    # falhar com "soma não confere" sempre que os dois saíam de sincronia. O
+    # site publica o conector junto com o instalador, então vem primeiro; o
+    # GitHub fica como segunda origem. As duas passam pelo mesmo pino.
+    local candidate actual obtained=() downloaded_any=0
+    printf 'Baixando o conector canônico do Poligome da origem pública...\n'
+    for candidate in "${SITE_ORIGIN}/poligome-sam-local.py" "$DEFAULT_CONNECTOR_URL"; do
+      rm -f "$partial"
+      download_to_file "$candidate" "$partial" 2>/dev/null || continue
+      downloaded_any=1
+      actual="$(file_sha256 "$partial")" || {
+        rm -f "$partial"
+        fail "sha256sum ou shasum é necessário para validar o conector versionado."
+      }
+      if [[ "$actual" == "$DEFAULT_CONNECTOR_SHA256" ]]; then
+        url="$candidate"
+        break
+      fi
+      obtained+=("${candidate} -> ${actual}")
+      rm -f "$partial"
+    done
+    if [[ -z "$url" ]]; then
+      if (( downloaded_any == 0 )); then
+        if connector_is_compatible "$CONNECTOR"; then
+          printf 'A origem pública não respondeu; reutilizando o conector local compatível.\n'
+          return 0
+        fi
+        fail "não foi possível baixar o conector. Confira a conexão com a internet e execute novamente."
+      fi
+      self_update_installer "${obtained[@]}"
+    fi
+    expected_sha256="$DEFAULT_CONNECTOR_SHA256"
   fi
   if ! connector_is_compatible "$partial"; then
     rm -f "$partial"
@@ -513,29 +585,43 @@ check_platform() {
     # capability aqui custa nada e evita baixar o runtime e o checkpoint —
     # cerca de 11 GB — para só então descobrir isso.
     local capability major minor gpu_name
-    capability="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+    # `|| true`: com pipefail, o erro de um driver antigo que não conhece o campo
+    # derrubava o instalador inteiro em silêncio, sem mensagem nenhuma.
+    capability="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n 1 | tr -d '[:space:]' || true)"
     if [[ "$capability" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
       major="${BASH_REMATCH[1]}"
       minor="${BASH_REMATCH[2]}"
       if (( major < SAM3_MIN_COMPUTE_MAJOR )); then
-        gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1)"
+        gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1 || true)"
         fail "SAM 3 exige uma GPU com capability ${SAM3_MIN_COMPUTE_MAJOR}.0 ou maior; ${gpu_name:-esta GPU} tem ${major}.${minor}. O PyTorch CUDA 12.8 não publica kernels para ela, e o modelo não chegaria a carregar. Rode com POLIGOME_DEVICE=cpu."
       fi
     fi
   fi
 }
 
+venv_runtime_works() {
+  case "$FAMILY" in
+    sam2) "$PYTHON" -c 'import cv2, fastapi, torch, uvicorn; from sam2.build_sam import build_sam2' >/dev/null 2>&1 ;;
+    sam3) "$PYTHON" -c "${SAM3_TRITON_SHIM}; import cv2, fastapi, torch, uvicorn; from sam3.model_builder import build_sam3_image_model" >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
 prepare_venv() {
   local minimum_minor
   local incompatible_backup
+  local maximum_minor version_label
   case "$FAMILY" in
-    sam2) minimum_minor=10 ;;
-    sam3) minimum_minor=12 ;;
+    sam2) minimum_minor=10; maximum_minor=14; version_label="3.10 a 3.14" ;;
+    sam3) minimum_minor=12; maximum_minor=12; version_label="3.12" ;;
     *) fail "família de runtime inválida: ${FAMILY}" ;;
   esac
 
-  if [[ -x "$PYTHON" ]] &&
-    ! "$PYTHON" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, ${minimum_minor}) else 1)" >/dev/null 2>&1; then
+  # Um ambiente fora da faixa só é trocado se não funcionar: quem já tem um SAM 3
+  # rodando num 3.13 (o numpy compilou) não pode perdê-lo por causa do teto, que
+  # existe para não criar ambientes novos que vão quebrar.
+  if [[ -x "$PYTHON" ]] && ! python_in_range "$PYTHON" "$minimum_minor" "$maximum_minor" &&
+    ! { python_in_range "$PYTHON" "$minimum_minor" 99 && venv_runtime_works; }; then
     incompatible_backup="${VENV_DIR}.incompatible-$(date +%Y%m%d%H%M%S)-$$"
     printf 'Preservando o ambiente Python incompatível em %s e recriando o runtime...\n' "$incompatible_backup"
     mv "$VENV_DIR" "$incompatible_backup" ||
@@ -544,16 +630,21 @@ prepare_venv() {
 
   if [[ ! -x "$PYTHON" ]]; then
     local system_python
-    system_python="$(find_python 3 "$minimum_minor")" ||
-      fail "Python 3.${minimum_minor}+ não foi encontrado. Instale essa versão do Python e execute novamente."
+    if ! system_python="$(find_python "$minimum_minor" "$maximum_minor")"; then
+      if [[ "$FAMILY" == "sam3" ]]; then
+        fail "o SAM 3 precisa do Python 3.12 (nem mais antigo, nem mais novo: o pacote oficial depende do numpy 1.26, que só existe pronto até o 3.12). Instale o python3.12 (no Ubuntu: sudo apt install python3.12 python3.12-venv; ele convive com outras versões) e execute novamente."
+      fi
+      fail "Python ${version_label} não foi encontrado. Instale uma dessas versões do Python e execute novamente."
+    fi
     printf 'Criando ambiente isolado da família %s com %s...\n' "$FAMILY" "$system_python"
     mkdir -p "$VENVS_DIR"
     "$system_python" -m venv "$VENV_DIR" ||
       fail "não foi possível criar o ambiente virtual. No Linux, instale também o pacote python3-venv."
   fi
 
-  "$PYTHON" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, ${minimum_minor}) else 1)" >/dev/null 2>&1 ||
-    fail "o ambiente ${VENV_DIR} não pôde ser criado com Python 3.${minimum_minor}+."
+  python_in_range "$PYTHON" "$minimum_minor" "$maximum_minor" ||
+    { python_in_range "$PYTHON" "$minimum_minor" 99 && venv_runtime_works; } ||
+    fail "o ambiente ${VENV_DIR} não pôde ser criado com Python ${version_label}."
 }
 
 # Uma GPU antiga demais é o pior dos casos: o PyTorch a enxerga, o modelo carrega,
@@ -577,12 +668,26 @@ decide_device() {
   command -v nvidia-smi >/dev/null 2>&1 || return 0
 
   local capability major minor gpu_name resposta minimo ritmo
-  capability="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n 1 | tr -d '[:space:]')"
-  [[ "$capability" =~ ^([0-9]+)\.([0-9]+)$ ]] || return 0
+  # `|| true`: com pipefail, o erro de um driver antigo que não conhece o campo
+  # derrubava o instalador inteiro em silêncio, sem mensagem nenhuma.
+  capability="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n 1 | tr -d '[:space:]' || true)"
+  if [[ ! "$capability" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+    # O campo compute_cap entrou no nvidia-smi bem antes do driver mínimo do
+    # CUDA 12.8: um driver que não sabe respondê-lo é antigo demais para o
+    # PyTorch do SAM 3. Instalar os gigabytes do torch CUDA para só então falhar
+    # era o que acontecia com placas antigas.
+    if [[ "$FAMILY" == "sam3" ]]; then
+      printf 'A GPU NVIDIA não informou a compute capability (driver antigo): o SAM 3 vai rodar em CPU.\n'
+      printf 'Cada imagem nova leva %s para ser preparada; os cliques seguintes são mais rápidos.\n' "$SAM3_CPU_IMAGE_TIME"
+      printf 'Para tentar a GPU mesmo assim, atualize o driver e rode de novo com POLIGOME_DEVICE=cuda.\n\n'
+      DEVICE="cpu"
+    fi
+    return 0
+  fi
   major="${BASH_REMATCH[1]}"
   minor="${BASH_REMATCH[2]}"
   (( major * 10 + minor < TORCH_MIN_COMPUTE )) || return 0
-  gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1)"
+  gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1 || true)"
   minimo="$((TORCH_MIN_COMPUTE / 10)).$((TORCH_MIN_COMPUTE % 10))"
   if [[ "$FAMILY" == "sam3" ]]; then
     ritmo="${SAM3_CPU_IMAGE_TIME} por imagem nova, em vez de menos de um segundo"
@@ -705,8 +810,18 @@ install_runtime() {
 verify_runtime_device() {
   local diagnostico
   if [[ "$FAMILY" == "sam3" && "$DEVICE" != "cpu" ]]; then
-    "$PYTHON" -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)' >/dev/null 2>&1 ||
-      fail "o PyTorch do SAM 3 não conseguiu usar a GPU NVIDIA. Confirme driver e compatibilidade CUDA 12.6+."
+    # Em auto, uma GPU que o torch não consegue usar vira CPU com aviso: o torch
+    # CUDA também roda em CPU, então nada precisa ser baixado de novo. Só quem
+    # pediu cuda explicitamente ouve um erro.
+    if ! "$PYTHON" -c 'import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)' >/dev/null 2>&1; then
+      if [[ "$DEVICE" == "auto" ]]; then
+        printf '\nO PyTorch não conseguiu usar a GPU NVIDIA (driver antigo ou placa sem suporte ao CUDA 12.8).\n'
+        printf 'Seguindo em CPU: cada imagem nova leva %s para ser preparada.\n\n' "$SAM3_CPU_IMAGE_TIME"
+        DEVICE="cpu"
+        return 0
+      fi
+      fail "o PyTorch do SAM 3 não conseguiu usar a GPU NVIDIA. Atualize o driver da NVIDIA ou rode de novo com POLIGOME_DEVICE=cpu."
+    fi
     # torch.cuda.is_available() responde "sim" mesmo quando a instalação não tem
     # kernel para a arquitetura da placa. Nesse caso o carregamento morre com
     # "no kernel image is available for execution on the device", que não diz o
@@ -737,6 +852,12 @@ if arquiteturas and not any(serve(a) for a in arquiteturas):
     )
 PY
 )" || true
+    if [[ -n "$diagnostico" && "$DEVICE" == "auto" ]]; then
+      printf '\nA GPU não é compatível com o PyTorch do SAM 3 (%s).\n' "$diagnostico"
+      printf 'Seguindo em CPU: cada imagem nova leva %s para ser preparada.\n\n' "$SAM3_CPU_IMAGE_TIME"
+      DEVICE="cpu"
+      return 0
+    fi
     [[ -z "$diagnostico" ]] ||
       fail "a GPU não é compatível com o PyTorch instalado para o SAM 3: ${diagnostico}. O modelo não chegaria a carregar. Rode de novo com POLIGOME_DEVICE=cpu."
   fi
@@ -1004,8 +1125,10 @@ printf '==========================================\n\n'
 mkdir -p "$APP_DIR" "$VENVS_DIR" "$MODELS_DIR"
 cache_current_installer
 save_pending_selection
-decide_device
+# O conector primeiro: se este instalador estiver velho, ele se troca pela versão
+# atual aqui, antes de fazer qualquer pergunta que teria de ser repetida.
 download_connector
+decide_device
 prepare_venv
 install_runtime
 verify_runtime_device

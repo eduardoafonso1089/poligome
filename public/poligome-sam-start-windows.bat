@@ -1,6 +1,9 @@
 @echo off
 chcp 65001 >nul
 setlocal EnableExtensions EnableDelayedExpansion
+rem Sem aspas, "set POLIGOME_DEVICE=cpu && ..." guarda "cpu " com espaco, e o
+rem instalador recusava o valor. Espacos nunca fazem parte de um device valido.
+if defined POLIGOME_DEVICE set "POLIGOME_DEVICE=!POLIGOME_DEVICE: =!"
 title Poligome SAM local - iniciar modelo selecionado
 set "POLIGOME_SAM_WINDOWS_STARTER_API=2"
 

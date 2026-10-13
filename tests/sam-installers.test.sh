@@ -308,13 +308,19 @@ printf 'nvidia-smi\t%s\n' "$*" >>"${POLIGOME_TEST_LOG:?}"
 # Sem GPU: o binário existe (driver desinstalado pela metade, WSL sem GPU) mas
 # não acha placa nenhuma.
 [[ -z "${POLIGOME_TEST_NO_GPU:-}" ]] || exit 9
-if [[ -n "${POLIGOME_TEST_GPU_CAP:-}" ]]; then
-  case "$*" in
-    *compute_cap*name*|*name*compute_cap*) printf 'NVIDIA GeForce GTX 1050, %s\n' "$POLIGOME_TEST_GPU_CAP" ;;
-    *compute_cap*) printf '%s\n' "$POLIGOME_TEST_GPU_CAP" ;;
-    *name*) printf 'NVIDIA GeForce GTX 1050\n' ;;
-  esac
-fi
+# Por padrão, uma placa atual. "unknown" imita um driver antigo, que não sabe
+# responder o campo compute_cap e sai com erro.
+capability="${POLIGOME_TEST_GPU_CAP:-8.6}"
+case "$*" in
+  *compute_cap*)
+    [[ "$capability" != unknown ]] || { printf 'Field "compute_cap" is not a valid field to query.\n' >&2; exit 2; }
+    ;;
+esac
+case "$*" in
+  *compute_cap*name*|*name*compute_cap*) printf 'NVIDIA GeForce GTX 1050, %s\n' "$capability" ;;
+  *compute_cap*) printf '%s\n' "$capability" ;;
+  *name*) printf 'NVIDIA GeForce GTX 1050\n' ;;
+esac
 exit 0
 MOCK_NVIDIA
 
@@ -1005,6 +1011,14 @@ test_pinned_default_connector() {
     "SHA-256 do conector padrão"
   assert_contains "$installer_source" 'if [[ "$actual_sha256" != "$expected_sha256" ]]' \
     "verificação do conector versionado"
+  # O .ps1 nativo tem o próprio pino. Ele ficou para trás uma vez e todo
+  # Windows sem WSL parava em "o conector baixado não confere com a soma oficial".
+  assert_contains "$(<"$NATIVE_INSTALLER")" \
+    "\$DefaultConnectorSha256 = '${connector_sha}'" \
+    "SHA-256 do conector no instalador nativo do Windows"
+  assert_contains "$(<"$WINDOWS_INSTALLER")" \
+    "DEFAULT_CONNECTOR_SHA256=${connector_sha}\"" \
+    "SHA-256 do conector no .bat"
   pass "conector padrão vem da base publicada e é conferido por SHA-256"
 }
 
@@ -1065,7 +1079,7 @@ test_sam3_rejects_old_gpu() {
 test_sam3_cpu_path() {
   local model="sam3-concepts"
   local case_name home_dir app_dir venv_dir log output expected_call
-  for case_name in sem-gpu torch-de-gpu gpu-antiga; do
+  for case_name in sem-gpu torch-de-gpu gpu-antiga driver-antigo; do
     home_dir="${TEMP_ROOT}/home-sam3-cpu-${case_name}"
     app_dir="${home_dir}/.poligome-sam"
     venv_dir="${app_dir}/venvs/sam3"
@@ -1079,8 +1093,8 @@ test_sam3_cpu_path() {
     fi
     : >"$log"
     if ! output="$(
-      POLIGOME_TEST_NO_GPU="$([[ "$case_name" == gpu-antiga ]] || printf 1)" \
-      POLIGOME_TEST_GPU_CAP="$([[ "$case_name" == gpu-antiga ]] && printf 6.1)" \
+      POLIGOME_TEST_NO_GPU="$([[ "$case_name" == gpu-antiga || "$case_name" == driver-antigo ]] || printf 1)" \
+      POLIGOME_TEST_GPU_CAP="$(case "$case_name" in gpu-antiga) printf 6.1 ;; driver-antigo) printf unknown ;; esac)" \
       POLIGOME_TEST_ALLOW_PIP="$([[ "$case_name" == torch-de-gpu ]] && printf 1)" \
         run_isolated "$home_dir" "$log" bash "$INSTALLER" "$model" </dev/null 2>&1
     )"; then
@@ -1108,9 +1122,13 @@ test_sam3_cpu_path() {
         assert_contains "$output" 'Sem terminal interativo para perguntar: seguindo em CPU.' \
           "placa antiga sem terminal segue em CPU"
         ;;
+      driver-antigo)
+        assert_contains "$output" 'não informou a compute capability (driver antigo): o SAM 3 vai rodar em CPU.' \
+          "driver sem compute_cap segue em CPU sem baixar o torch CUDA"
+        ;;
     esac
   done
-  pass "SAM 3 vai para CPU sem GPU, com GPU antiga e troca o torch de GPU pelo de CPU"
+  pass "SAM 3 vai para CPU sem GPU, com GPU antiga, com driver antigo e troca o torch de GPU pelo de CPU"
 }
 
 bash -n "$INSTALLER" "$STARTER" "$SERVICE"
@@ -1209,5 +1227,14 @@ test_native_windows_switch_contract() {
 
 test_native_windows_catalog_matches_bash
 test_native_windows_switch_contract
+
+# A origem do conector no .ps1 nativo é exercitada de verdade pelo pwsh, que
+# existe também no Linux e no macOS. Sem ele, o teste é pulado, não fingido.
+if command -v pwsh >/dev/null 2>&1; then
+  pwsh -NoProfile -File "${PROJECT_ROOT}/tests/sam-native-connector.test.ps1" ||
+    fail "origem do conector no instalador nativo de Windows"
+else
+  printf 'ok - # SKIP origem do conector no .ps1 nativo: pwsh não está instalado\n'
+fi
 
 printf '\nTodos os testes locais dos instaladores SAM passaram.\n'

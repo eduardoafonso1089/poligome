@@ -114,7 +114,7 @@ Available models:
 | --- | --- | --- | --- |
 | SAM 2.1 | Hiera Tiny, Small, Base+, Large | positive/negative points and boxes; Small is the default | Python 3.10+, PyTorch 2.5.1+, Torchvision 0.20.1+; CUDA recommended |
 | MedSAM2 | General medical model, CT lesion, MRI liver lesion, echocardiogram, and the earlier 2411 weights | positive/negative points and boxes | same runtime as SAM 2.1; no additional environment |
-| SAM 3 | Image and concepts | points, boxes, and text with multiple instances | Python 3.12+, PyTorch 2.7+, GPU and CUDA 12.6+; gated Hugging Face access |
+| SAM 3 | Image and concepts | points, boxes, and text with multiple instances | Python 3.12, PyTorch 2.7+; NVIDIA GPU with CUDA 12.6+ or, slower, CPU; gated Hugging Face access |
 
 SAM 2.1 also supports upstream video tracking. SAM 3.1, released by Meta on 2026-03-27, adds Object Multiplex for video, but it is not yet integrated or installed by Poligome. The current editor integrates images only and makes that distinction explicit.
 

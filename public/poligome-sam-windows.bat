@@ -1,13 +1,16 @@
 @echo off
 chcp 65001 >nul
 setlocal EnableExtensions EnableDelayedExpansion
+rem Sem aspas, "set POLIGOME_DEVICE=cpu && ..." guarda "cpu " com espaco, e o
+rem instalador recusava o valor. Espacos nunca fazem parte de um device valido.
+if defined POLIGOME_DEVICE set "POLIGOME_DEVICE=!POLIGOME_DEVICE: =!"
 title Poligome SAM local - instalar modelo
 set "POLIGOME_SAM_WINDOWS_INSTALLER_API=2"
 
 set "DEFAULT_SITE_URL=https://poligome.com"
 set "DEFAULT_ASSET_BASE_URL=https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 set "DEFAULT_CONNECTOR_URL=%DEFAULT_ASSET_BASE_URL%/poligome-sam-local.py"
-set "DEFAULT_CONNECTOR_SHA256=27ddb1b6170fd2b8cbb2c4d1952c8100c1517ba4b0acc1e8fc0c2f19937cc50f"
+set "DEFAULT_CONNECTOR_SHA256=25421160b10e032ab3fbc14617e66f34d4b0976bf11f46c652f02d37fa719387"
 set "SITE_URL=%POLIGOME_SITE_URL%"
 if not defined SITE_URL set "SITE_URL=%DEFAULT_SITE_URL%"
 if "!SITE_URL:~-1!"=="/" set "SITE_URL=!SITE_URL:~0,-1!"
@@ -70,7 +73,7 @@ echo   6^) MedSAM2 lesao em TC  ^(tomografia; WSL2^)
 echo   7^) MedSAM2 lesao em RM  ^(figado; WSL2^)
 echo   8^) MedSAM2 ecocardio    ^(ultrassom; WSL2^)
 echo   9^) MedSAM2 2411         ^(versao anterior; WSL2^)
-echo  10^) SAM 3 Concepts       ^(WSL2 + GPU NVIDIA^)
+echo  10^) SAM 3 Concepts       ^(WSL2; GPU NVIDIA ou CPU, mais lento^)
 echo.
 set /p "MODEL_CHOICE=Digite 1-10 ou o ID completo: "
 if "!MODEL_CHOICE!"=="1" (
@@ -329,8 +332,8 @@ echo   poligome-sam-windows.bat [MODELO]
 echo   poligome-sam-windows.bat --help
 echo.
 echo SAM 2.1 é instalado automaticamente na distribuição WSL2 padrão.
-echo SAM 3 também usa WSL2 e exige GPU NVIDIA disponível no WSL,
-echo Python 3.12+ e um runtime CUDA compatível com 12.6+.
+echo SAM 3 também usa WSL2: roda em GPU NVIDIA ou, mais devagar, em CPU.
+echo Ele precisa do Python 3.12 e de acesso aprovado ao checkpoint da Meta no Hugging Face.
 echo.
 echo O alias sam3 é aceito e normalizado para sam3-concepts.
 echo.

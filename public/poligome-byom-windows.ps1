@@ -30,6 +30,9 @@ param(
 # caminho normal aqui. Quem decide e o codigo de saida.
 $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
+try {
+  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+} catch {}
 
 $AppDir = if ($env:POLIGOME_APP_DIR) { $env:POLIGOME_APP_DIR } else { Join-Path $env:USERPROFILE '.poligome-sam' }
 $RegistryDir = Join-Path $AppDir 'byom'
@@ -38,6 +41,11 @@ $DefaultPort = 8080
 $StartTimeout = if ($env:POLIGOME_BYOM_START_TIMEOUT) { [int]$env:POLIGOME_BYOM_START_TIMEOUT } else { 120 }
 $ExampleImage = 'poligome-byom-exemplo'
 $ModelIdPattern = '^byom-[a-z0-9][a-z0-9._-]{0,62}$'
+$DefaultAssetBaseUrl = 'https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public'
+$AssetBaseUrl = if ($env:POLIGOME_ASSET_BASE_URL) { $env:POLIGOME_ASSET_BASE_URL.TrimEnd('/') } else { $DefaultAssetBaseUrl }
+# Durante "examples", uma falha de um exemplo nao pode encerrar o script: o
+# segundo exemplo nunca chegava a subir.
+$script:ThrowOnFail = $false
 
 function Show-Usage {
   @'
@@ -63,12 +71,14 @@ O ID precisa comecar com "byom-" para nunca colidir com um modelo oficial.
 Variaveis opcionais:
   POLIGOME_APP_DIR            raiz das instalacoes (padrao: %USERPROFILE%\.poligome-sam)
   POLIGOME_BYOM_START_TIMEOUT segundos de espera pelo /ping (padrao: 120)
+  POLIGOME_ASSET_BASE_URL     origem HTTPS dos arquivos dos exemplos
 '@ | Write-Host
 }
 
 function Fail([string] $Message) {
   Write-Host ''
   Write-Host "Erro: $Message" -ForegroundColor Red
+  if ($script:ThrowOnFail) { throw $Message }
   exit 1
 }
 
@@ -110,13 +120,69 @@ function Get-PortFromEndpoint([string] $Endpoint) {
   return $DefaultPort
 }
 
-function Test-Ping([string] $Endpoint) {
+# Sem proxy de proposito: o Invoke-WebRequest segue o proxy do sistema, e numa
+# rede corporativa o /ping local ia para o proxy, o conteiner parecia nunca
+# subir e o start esperava o tempo inteiro para dizer que falhou.
+function Get-LocalUrl([string] $Url, [int] $TimeoutMs = 3000) {
   try {
-    $response = Invoke-WebRequest -Uri "$Endpoint/ping" -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
-    return $response.StatusCode -eq 200
+    $request = [System.Net.HttpWebRequest]::Create($Url)
+    $request.Proxy = $null
+    $request.Timeout = $TimeoutMs
+    $request.ReadWriteTimeout = $TimeoutMs
+    $response = $request.GetResponse()
+    try {
+      $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+      return @{ Status = [int]$response.StatusCode; Body = $reader.ReadToEnd() }
+    } finally { $response.Close() }
   } catch {
-    return $false
+    return $null
   }
+}
+
+function Test-Ping([string] $Endpoint) {
+  $result = Get-LocalUrl "$Endpoint/ping"
+  return ($null -ne $result -and $result.Status -eq 200)
+}
+
+# O conector le o registro do lugar onde ele mesmo roda. Registrar aqui enquanto
+# o conector no ar e o do WSL2 deixava o modelo invisivel no editor, sem nenhuma
+# pista do motivo.
+function Write-ConnectorLocationWarning {
+  $result = Get-LocalUrl 'http://127.0.0.1:7860/health' 2000
+  if (-not $result) { return }
+  try { $health = $result.Body | ConvertFrom-Json } catch { return }
+  if ($health.service -ne 'Poligome SAM local' -or -not $health.app_dir) { return }
+  $here = [System.IO.Path]::GetFullPath($AppDir).TrimEnd('\', '/')
+  $there = "$($health.app_dir)".TrimEnd('\', '/')
+  if ($there -ieq $here) { return }
+  Write-Host ''
+  Write-Host "Atencao: o conector do Poligome no ar roda em $($health.host) e le os modelos de" -ForegroundColor Yellow
+  Write-Host "  $there" -ForegroundColor Yellow
+  Write-Host "mas este registro foi gravado em $RegistryDir. O editor nao vai enxerga-lo." -ForegroundColor Yellow
+  if ($health.host -ne 'Windows') {
+    Write-Host "Rode a versao bash, de dentro do WSL: wsl bash poligome-byom-macos-linux.sh ..." -ForegroundColor Yellow
+  }
+}
+
+# Quem baixou so esta CLI nao tem a pasta byom do repositorio ao lado. Em vez de
+# mandar procurar um diretorio que a pessoa nunca viu, os quatro arquivos dos
+# exemplos sao baixados da mesma origem publica dos instaladores.
+function Get-ExampleSources {
+  if ($AssetBaseUrl -notmatch '^https://') { Fail 'POLIGOME_ASSET_BASE_URL precisa usar HTTPS.' }
+  $target = Join-Path $AppDir 'byom-src'
+  New-Item -ItemType Directory -Force (Join-Path $target 'examples') | Out-Null
+  Write-Host "Baixando os arquivos dos exemplos de $AssetBaseUrl..."
+  foreach ($name in 'Dockerfile', 'serve.py', 'examples/byom-otsu.json', 'examples/byom-watershed.json') {
+    $destination = Join-Path $target ($name -replace '/', '\')
+    try {
+      Invoke-WebRequest -Uri "$AssetBaseUrl/byom/$name" -OutFile "$destination.part" -UseBasicParsing -ErrorAction Stop
+    } catch {
+      Remove-Item -LiteralPath "$destination.part" -Force -ErrorAction SilentlyContinue
+      Fail "nao foi possivel baixar byom/${name}: $($_.Exception.Message). Confira a internet ou use -Path."
+    }
+    Move-Item -LiteralPath "$destination.part" -Destination $destination -Force
+  }
+  return $target
 }
 
 function Save-Registration([hashtable] $Document, [string] $Path) {
@@ -184,6 +250,7 @@ function Invoke-Register([hashtable] $Options) {
   Save-Registration $document $path
   Write-Host ''
   Write-Host "Modelo $($Options.ModelId) registrado em $path"
+  Write-ConnectorLocationWarning
   Write-Host 'Suba o conteiner com:'
   Write-Host "  powershell -ExecutionPolicy Bypass -File poligome-byom-windows.ps1 start -ModelId $($Options.ModelId)"
 }
@@ -229,8 +296,13 @@ function Invoke-Start([hashtable] $Options) {
   # A publicacao fica presa a 127.0.0.1 de proposito: o conteiner nao deve ficar
   # exposto na rede, porque a inferencia precisa permanecer local.
   $runArgs = @('run', '-d', '--name', $container, '-p', "127.0.0.1:${port}:8080") + $envArgs + @($registration.image, 'serve')
-  docker @runArgs *> $null
-  if ($LASTEXITCODE -ne 0) { Fail "docker run falhou para a imagem $($registration.image)." }
+  # A saida do docker fica guardada e so aparece na falha: e ela que diz "port is
+  # already allocated" ou "No such image", e escondida restava so "falhou".
+  $runOutput = docker @runArgs 2>&1 | ForEach-Object { "$_" }
+  if ($LASTEXITCODE -ne 0) {
+    $runOutput | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
+    Fail "docker run falhou para a imagem $($registration.image)."
+  }
 
   $deadline = (Get-Date).AddSeconds($StartTimeout)
   while ((Get-Date) -lt $deadline) {
@@ -326,7 +398,12 @@ function Invoke-Remove([hashtable] $Options) {
 
 function Invoke-Examples([hashtable] $Options) {
   $path = $Options.Path
-  if (-not $path) { $path = Join-Path $PSScriptRoot 'byom' }
+  if (-not $path) {
+    $path = Join-Path $PSScriptRoot 'byom'
+    if (-not (Test-Path -LiteralPath (Join-Path $path 'Dockerfile')) -or -not (Test-Path -LiteralPath (Join-Path $path 'examples'))) {
+      $path = Get-ExampleSources
+    }
+  }
   if (-not (Test-Path -LiteralPath (Join-Path $path 'Dockerfile'))) {
     Fail "nao ha Dockerfile em $path. Aponte -Path para o diretorio byom do repositorio."
   }
@@ -364,12 +441,16 @@ function Invoke-Examples([hashtable] $Options) {
   Write-Host 'Subindo os exemplos...'
   foreach ($example in $examples) {
     $id = [System.IO.Path]::GetFileNameWithoutExtension($example.Name)
+    $script:ThrowOnFail = $true
     try {
       Invoke-Start @{ ModelId = $id }
     } catch {
       Write-Host "  $id nao subiu; use logs -ModelId $id para ver o motivo."
+    } finally {
+      $script:ThrowOnFail = $false
     }
   }
+  Write-ConnectorLocationWarning
 }
 
 # =================================================================== main ====

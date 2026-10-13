@@ -330,6 +330,8 @@ const SAM2_REQUIREMENTS = {
 const SAM3_REQUIREMENTS = {
   python: {
     minimum: "3.12",
+    notes:
+      "Exatamente o 3.12: o pacote oficial exige numpy<2, que só tem rodas prontas até o 3.12. Ele pode conviver com um Python mais novo; o instalador procura o 3.12 sozinho.",
   },
   pytorch: {
     minimum: "2.7",
