@@ -113,7 +113,7 @@ oferece wheel para Windows/Python 3.12.
 
 Resultados de regressão: suíte Python adaptive, **75 testes, 4 skips**;
 os skips cobrem SAM 2 ausente e arquitetura SAM 3 opcional. Regressões de
-metadata (2), pós-processamento (2) e runner/console (2) passaram separadamente.
+metadata (3), pós-processamento (2) e runner/console (2) passaram separadamente.
 Typecheck e testes JS específicos passaram. A execução ampla inicial de JS
 teve 499 aprovados, 1 skip e 1 falha no fixture de instalação Linux executado
 em Windows; não é uma suíte ampla inteiramente verde. Os contratos shell de
@@ -137,6 +137,17 @@ Os artefatos locais em `resultados-adaptive/sam3-local/` não são versionados:
 `sam3-local-test.plora` e logs de regressões. Pesos não entram no Git.
 O CLI de seis épocas completo não foi repetido depois da correção de console;
 a regressão de console e os testes reais suplementares validam etapas distintas.
+
+Validação do editor: o fluxo automatizado com o SAM 3 e o pacote treinado reais
+passou, incluindo um arrasto com 12 movimentos contado como uma correção,
+atribuição original/adaptado, invalidação do cache, revisão e CSV. O relatório
+está em `effort-browser/results.json`; os tempos desse fluxo são de automação,
+nunca uma comparação de produtividade humana. Outros 25 cenários do painel
+passaram com respostas controladas, incluindo quatro idiomas e duas larguras.
+O teste do editor com propostas controladas verificou exclusão parcial,
+edição após concluir, pausa/retomada e persistência após reload. A suíte JS
+final teve 512 aprovados, 1 skip e a mesma falha do fixture Linux sob Windows;
+os 66 testes específicos, typecheck e contratos de instaladores passaram.
 
 Para medir produtividade humana, usar o fluxo descrito em
 [Medição de esforço](adaptive-annotation-effort.md). Um teste automatizado do

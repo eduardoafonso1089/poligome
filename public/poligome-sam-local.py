@@ -2195,13 +2195,15 @@ def predict(payload: PredictionRequest):
             # Snapshot the effective model while inference still owns the lock.
             # SAM 3 concept prompts use its separate, unadapted text decoder.
             prediction_adapter = None
+            prediction_adapter_known = _adaptive_service is None
             prediction_fingerprint = None
             if _adaptive_service is not None:
-                active = _adaptive_service.active_summary()
-                if active is not None and not (adapter.spec.family == "sam3" and prompts.text is not None):
-                    prediction_adapter = dict(active)
                 live = _adaptive_service.get_live_model()
                 if live is not None and live.model is getattr(adapter, "model", None):
+                    prediction_adapter_known = True
+                    active = _adaptive_service.active_summary()
+                    if active is not None and not (adapter.spec.family == "sam3" and prompts.text is not None):
+                        prediction_adapter = dict(active)
                     prediction_fingerprint = _adaptive_service.fingerprint(live)
             if prompts.text is not None and "text" not in adapter.spec.capabilities:
                 raise HTTPException(
@@ -2303,7 +2305,7 @@ def predict(payload: PredictionRequest):
         "reused_embedding": reused_embedding,
         "model_id": adapter.spec.model_id,
         "family": adapter.spec.family,
-        "adapter": prediction_adapter,
+        **({"adapter": prediction_adapter} if prediction_adapter_known else {}),
         "device": adapter.device,
         "model_fingerprint": prediction_fingerprint,
         "raw_prediction_count": raw_prediction_count,

@@ -1,6 +1,6 @@
 import type { Asset, SamBoxPrompt, SamPrompt } from "../../lib/types";
 import type { Copy } from "../../lib/i18n";
-import { requestSamPredictions } from "../../lib/sam";
+import { requestSamPredictions, type SamPredictionResult } from "../../lib/sam";
 import type { PolygonAnnotation } from "./annotation-model";
 import { createPolygonFromFlat } from "./annotation-factory";
 
@@ -34,6 +34,7 @@ export async function requestSamAnnotations({
   threshold,
   copy,
   signal,
+  onResult,
 }: {
   makeId: (prefix: string) => string;
   asset: Asset;
@@ -45,6 +46,7 @@ export async function requestSamAnnotations({
   threshold?: number;
   copy: Copy;
   signal?: AbortSignal;
+  onResult?: (result: SamPredictionResult) => void;
 }): Promise<PolygonAnnotation[]> {
   const query = text?.trim() ?? "";
   const result = await requestSamPredictions({
@@ -63,6 +65,7 @@ export async function requestSamAnnotations({
     multimaskOutput: Boolean(query),
     signal,
   });
+  if (!signal?.aborted) onResult?.(result);
   // One annotation per prediction, carrying that prediction's largest contour.
   // A mask routinely comes back in pieces — a box around one roof answered with
   // eleven of them here — and handing the editor eleven shapes for the single
