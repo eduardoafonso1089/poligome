@@ -334,7 +334,9 @@ A cada época: loss de treino, loss/Dice/IoU/IoU de borda na validação interna
 Dice de treino (sobre lotes aumentados). A **época 0** é o modelo antes do
 treino, medido no mesmo conjunto — é o ponto de partida dos gráficos.
 
-Diagnóstico (só com validação interna, nunca com a loss de treino sozinha):
+O painel mostra as métricas e a época restaurada, sem declarar convergência ou overfitting. O usuário interpreta as curvas e escolhe se quer usar o adaptador. Early stopping continua limitando o custo e restaurando uma época selecionada na validação interna; isso não demonstra generalização. As losses de treino e validação usam prompts e aumentos diferentes.
+
+Há um diagnóstico heurístico nos registros internos para depuração (só com validação interna, nunca com a loss de treino sozinha):
 
 | Estado | Critério |
 | --- | --- |
@@ -375,8 +377,11 @@ Mesmo holdout, mesmas instâncias, mesmos prompts determinísticos:
   (reamostra grupos inteiros, 2000 reamostragens, semente fixa).
 - Fração de imagens que melhoraram / pioraram / ficaram iguais (tolerância 1 ponto).
 - Por classe e por tamanho (pequeno < 1% da imagem, médio, grande > 10%), com
-  IC: piora ≥ 2 pontos com IC inteiro abaixo de zero e ≥ 3 instâncias =
-  **regressão significativa**; sem o IC = **possível regressão**.
+  IC exploratório: piora ≥ 2 pontos com IC inteiro abaixo de zero, ≥ 3 instâncias
+  e ≥ 4 origens recebe uma marca interna de regressão; com poucas origens
+  fica apenas como possível piora. A agregação é por imagem também nesses
+  subgrupos. Na interface, intervalos de subgrupos com menos de 4 origens são
+  substituídos por uma indicação de dados insuficientes.
 - **Segmentação interativa simulada:** começa no clique central e, a cada
   passo, clica no ponto mais interno do maior erro (positivo se falta, negativo
   se sobra), reenviando todos os pontos como o editor faz. Mede NoC@85 e NoC@90
@@ -391,12 +396,24 @@ Mesmo holdout, mesmas instâncias, mesmos prompts determinísticos:
 | Resultado | Regra |
 | --- | --- |
 | **Evidência insuficiente** | holdout com < 4 grupos ou < 10 máscaras; ou o IC cruza o efeito mínimo; ou mais de 25% das imagens pioraram; ou o NoC@90 piorou > 0,5 clique |
-| **Melhorou** | IC inteiro > 0 **e** média ≥ efeito mínimo (1 ponto de Dice) **e** nenhuma regressão significativa **e** ≤ 25% de imagens piores **e** NoC@90 não piora > 0,5 |
+| **Melhorou** | IC inteiro > 0 **e** limite inferior ≥ efeito mínimo (1 ponto de Dice) **e** nenhuma regressão significativa **e** ≤ 25% de imagens piores **e** NoC@90 não piora > 0,5 **e** falha@90 não cresce > 5 pontos |
 | **Não melhorou** | IC inteiro abaixo do efeito mínimo, ou regressão significativa em algum subgrupo |
 
-A loss de treino não entra na decisão. "Melhorou" libera **Ativar**;
-"evidência insuficiente" exige confirmação explícita ("Entendo que a melhora
-não foi comprovada"); "não melhorou" **não pode** ser ativado.
+Essas regras ficam nos registros como indicadores exploratórios, não como
+vereditos de convergência ou generalização. A interface mostra resultados,
+intervalos e exemplos; nenhuma ativação é automática. O usuário pode manter o
+modelo atual, ativar um candidato compatível ou anotar mais dados. Candidatos
+sem ganho demonstrado exigem uma escolha explícita na interface, vinculada à
+rodada selecionada. Continuam bloqueados modelos incompatíveis, arquivos
+corrompidos e rodadas não concluídas nem comparadas.
+
+**Limites estatísticos.** Quatro a seis origens são poucas para garantir a
+cobertura nominal do bootstrap. Os intervalos são exploratórios, condicionados
+a uma rodada, às anotações disponíveis e aos prompts simulados. Os subgrupos
+não têm correção por comparações múltiplas. Usar o holdout para escolher a rodada,
+hyperparâmetros ou quantidade de dados transforma-o em conjunto de seleção.
+Para uma conclusão científica, escolha o adaptador sem consultar um teste
+externo e confirme em origens novas com anotações independentes.
 
 **Viés residual a ter em mente:** o holdout é reutilizado entre rodadas para
 manter a comparação justa; muitas rodadas sobre o mesmo holdout podem acabar
@@ -441,7 +458,7 @@ outra:
 
 Nunca há treino automático. Cada rodada **retreina do modelo base sobre todo o
 dataset acumulado** (não sobre o adaptador anterior, nem só sobre as imagens
-novas). Isso evita esquecimento catastrófico e acúmulo de erro entre rodadas;
+novas). Isso reduz o risco de esquecimento dos exemplos retidos e acúmulo de erro entre rodadas;
 como o holdout acumulado contém os exemplos antigos, uma piora neles aparece
 como regressão contra o adaptador ativo e bloqueia a promoção.
 

@@ -13,6 +13,14 @@ funciona e foi validado com o SAM 2.1 Tiny pré-treinado (ver
 | 5 | Validar com imagens reais de um domínio | dataset com permissão | fluxo normal pela interface |
 | 6 | Melhorias de segunda etapa | — | ver o fim deste arquivo |
 
+## Revisão de UI/UX e metodologia
+
+Veja [adaptive-ai-review.md](adaptive-ai-review.md). O painel apresenta evidências
+e deixa a escolha com o usuário; não declara convergência nem generalização.
+O experimento `half` agora preserva a validação interna e reduz somente os
+grupos de gradiente. NoC e subgrupos devem ser interpretados com os limites
+estatísticos documentados na revisão.
+
 ## Script
 
 `scripts/adaptive-finish.sh` roda os itens 1–3 e grava os resultados em
@@ -29,7 +37,21 @@ bash scripts/adaptive-finish.sh sam3-smoke http://127.0.0.1:7860
 bash scripts/adaptive-finish.sh tests
 ```
 
-No Windows, rode dentro do WSL2, onde o conector do SAM fica instalado.
+Para testar o checkpoint local em um conector isolado, no Python do ambiente
+SAM 3 (Windows nativo ou WSL2):
+
+```powershell
+python scripts/adaptive-sam3-checkpoint.py --checkpoint "C:\Users\lucas\Downloads\sam3.pt"
+```
+
+No WSL2, o caminho é `/mnt/c/Users/lucas/Downloads/sam3.pt`.
+Para experimentos em GPU, defina `POLIGOME_ADAPTIVE_DEVICE=cuda` (ou `mps`).
+A execução só valida o dispositivo realmente registrado no resultado.
+Para repetir a suíte de UI com APIs controladas:
+
+```bash
+node scripts/adaptive-ui-qa.mjs
+```
 
 ## Prompt para continuar com um LLM
 
@@ -42,6 +64,8 @@ docs/adaptive-ai.md, docs/adaptive-ai-validation.md e
 docs/adaptive-ai-next-steps.md antes de mudar qualquer coisa.
 
 Tarefa: completar a validação do Adaptive AI (LoRA no SAM) sem inventar números.
+Leia também docs/adaptive-ai-review.md. Preserve a orientação: resultados e
+gráficos para o usuário decidir, sem veredito automático de convergência.
 
 1. Leia resultados-adaptive/results.json (gerado por
    scripts/adaptive-finish.sh experiments). Para cada experimento (main, half,

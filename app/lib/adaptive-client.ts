@@ -79,7 +79,7 @@ export type ComparisonSummary = {
     relative_gain: number | null; share_improved: number; share_worsened: number; share_unchanged: number; images: number;
   };
   protocols: Record<"box" | "point" | "box_jitter", Record<"dice" | "iou" | "boundary_iou", MetricPair>>;
-  subgroups: Array<{ kind: "class" | "size"; name: string; instances: number; reference_mean: number; candidate_mean: number; mean_delta: number; ci_low: number; ci_high: number; regression: "none" | "possible" | "significant" }>;
+  subgroups: Array<{ kind: "class" | "size"; name: string; instances: number; groups?: number; images?: number; reference_mean: number; candidate_mean: number; mean_delta: number; ci_low: number; ci_high: number; regression: "none" | "possible" | "significant" }>;
   interactive: {
     max_clicks: number;
     reference: { noc85: number | null; noc90: number | null; fail85: number; fail90: number; curve: number[] };
@@ -105,6 +105,8 @@ export type LearningCurve = {
   last_step_gain?: Interval | null;
   trend?: "rising" | "plateau" | "uncertain";
   single_seed?: boolean;
+  projection_interval_level?: number;
+  training_variance_measured?: boolean;
   train_groups?: number;
   epochs?: number;
 };

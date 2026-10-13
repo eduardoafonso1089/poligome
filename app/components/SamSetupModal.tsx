@@ -556,7 +556,7 @@ export default function SamSetupModal({
         </aside>}
 
         <div className="sam-model-detail" key={`${tab}-${automaticView}`}>
-          {tab === "adaptive" ? <AdaptiveAiPanel language={language} endpoint={endpoint} project={adaptiveProject} />
+          {tab === "adaptive" ? <AdaptiveAiPanel language={language} endpoint={endpoint} project={adaptiveProject} loadedModelId={loadedModelId} />
           : tab === "connections" ? <ConnectionsPanel
             copy={ai}
             connector={{

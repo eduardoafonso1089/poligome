@@ -165,7 +165,8 @@ test("training view shows measured epochs and marks the best one", () => {
   const content = text(markup);
   assert.match(content, /Completed/);
   assert.match(content, new RegExp(`★ ${run.best_epoch}`));
-  assert.match(content, new RegExp(t[`diag_${run.diagnosis.state}`]));
+  assert.match(content, new RegExp(t.trainingEvidenceTitle));
+  assert.doesNotMatch(content, /Converged|Validation stopped improving/);
   assert.equal(countClass(markup, "adaptive-chart"), 2);
   assert.equal(countClass(markup, "adaptive-progress"), 0, "a finished run has no progress bar");
   const running = render(TrainingView, { t, record: { ...run, status: "training", progress: { phase: "training", epoch: 2, max_epochs: 10, done: 3, total: 12 } }, busy: false, onCancel: () => {} });
@@ -177,6 +178,20 @@ test("round ids read as their start time", () => {
   assert.equal(runLabel("run-20261013t144705z-b2c8f2"), "2026-10-13 14:47 UTC");
 });
 
+test("training results do not turn heuristic diagnoses into user-facing verdicts", () => {
+  const props = { t: getAdaptiveCopy("en"), busy: false, onCancel: () => {} };
+  const content = state => text(render(TrainingView, { ...props, record: { ...backend.run, diagnosis: { state, best_epoch: backend.run.best_epoch } } }));
+  assert.equal(content("converged"), content("overfitting"));
+  assert.match(content("converged"), /do not prove convergence or generalization/);
+});
+
+test("one source never appears to have a precise subgroup interval", () => {
+  const t = getAdaptiveCopy("en");
+  const comparison = { ...backend.run.comparison, subgroups: [{ ...backend.run.comparison.subgroups[0], groups: 1 }] };
+  const content = text(render(ComparisonView, { t, comparison, examples: {} }));
+  assert.match(content, /too few sources to estimate the interval/);
+});
+
 test("metric chart refuses to draw without data", () => {
   assert.equal(render(MetricChart, { title: "x", epochs: [], series: [] }), "");
 });
@@ -185,7 +200,8 @@ test("comparison view states the decision, the interval and the simulation cavea
   const t = getAdaptiveCopy("en");
   const markup = render(ComparisonView, { t, comparison: backend.run.comparison, examples: {} });
   const content = text(markup);
-  assert.match(content, new RegExp(t[`outcome_${backend.run.comparison.decision.outcome}`]));
+  assert.match(content, new RegExp(t.comparisonEvidenceTitle));
+  assert.match(content, /You decide/);
   assert.match(content, /95% CI/);
   assert.match(content, /simulated/);
   assert.match(content, /Original SAM/);
@@ -247,7 +263,7 @@ test("learning curve view answers how many images, with its caveats", () => {
   const content = text(markup);
   assert.match(content, new RegExp(t[`curveTrend_${curve.trend}`]));
   assert.match(content, /With \d+ training groups/);
-  assert.match(content, /order of magnitude/);
+  assert.match(content, /not a calibrated prediction interval/);
   assert.equal(countClass(markup, "adaptive-chart"), 1);
   assert.match(text(render(LearningCurveView, { t, curve: { skipped: "too_few_groups" } })), /too few training groups/);
 });
@@ -281,8 +297,9 @@ test("the next step follows the real state, one action at a time", () => {
   assert.equal(nextStep({ report: ready, record: { ...run, status: "training" }, activeHere: false }).key, "training");
   assert.equal(nextStep({ report: ready, record: with_("improved"), activeHere: false }).key, "activate");
   assert.equal(nextStep({ report: ready, record: with_("improved", { activation: "active" }), activeHere: true }).key, "active");
-  assert.equal(nextStep({ report: ready, record: with_("insufficient_evidence"), activeHere: false }).key, "more_evidence");
-  assert.equal(nextStep({ report: ready, record: with_("not_improved"), activeHere: false }).key, "kept");
+  assert.equal(nextStep({ report: ready, record: with_("insufficient_evidence"), activeHere: false }).key, "activate");
+  assert.equal(nextStep({ report: ready, record: with_("not_improved"), activeHere: false }).key, "activate");
+  assert.equal(nextStep({ report: ready, record: null, activeHere: false, pendingSync: 1 }).key, "analyze");
   assert.equal(nextStep({ report: ready, record: { ...run, status: "failed" }, activeHere: false }).key, "failed");
   const markup = render(NextStepCard, { t: getAdaptiveCopy("en"), step: { stage: 0, key: "annotate", n: 7 } });
   assert.match(text(markup), /Annotate about 7 images from new sources/);

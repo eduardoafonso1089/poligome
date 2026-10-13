@@ -1,0 +1,545 @@
+{
+  "run_id": "run-20261013t171031z-22972e",
+  "project_id": "p-exp-main-00001",
+  "base_model": {
+    "model_id": "sam2.1-hiera-tiny",
+    "family": "sam2",
+    "fingerprint": "7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69",
+    "device": "cpu"
+  },
+  "config": {
+    "strategy": "decoder",
+    "rank": 8,
+    "alpha": 16.0,
+    "dropout": 0.05,
+    "encoder_blocks": 4,
+    "learning_rate": 0.0,
+    "weight_decay": 0.01,
+    "batch_size": 4,
+    "max_epochs": 0,
+    "min_epochs": 3,
+    "patience": 5,
+    "min_delta": 0.002,
+    "max_instances_per_image": 8,
+    "internal_val_fraction": 0.2,
+    "min_internal_val_groups": 2,
+    "augment_hflip": true,
+    "augment_vflip": false,
+    "augment_color": true,
+    "seed": 1234,
+    "max_clicks": 8,
+    "learning_curve": true,
+    "mixed_precision": true,
+    "bootstrap_samples": 2000,
+    "min_effect": 0.01
+  },
+  "resolved": {
+    "learning_rate": 0.0003,
+    "max_epochs": 40,
+    "device": "cpu",
+    "precision": "float32"
+  },
+  "snapshot": {
+    "snapshot_id": "snap-20261013t171031z-22972e",
+    "holdout_set_id": "hs-b5a25b23a1864278"
+  },
+  "data": {
+    "fit": {
+      "images": 30,
+      "groups": 10,
+      "instances": 293
+    },
+    "internal_val": {
+      "images": 6,
+      "groups": 2,
+      "instances": 71
+    },
+    "holdout": {
+      "images": 12,
+      "groups": 4,
+      "instances": 115,
+      "set_id": "hs-b5a25b23a1864278"
+    }
+  },
+  "lora": {
+    "strategy": "decoder",
+    "rank": 8,
+    "alpha": 16.0,
+    "dropout": 0.05,
+    "encoder_blocks": 0,
+    "targets": [
+      "sam_mask_decoder.transformer.layers.0.self_attn.q_proj",
+      "sam_mask_decoder.transformer.layers.0.self_attn.k_proj",
+      "sam_mask_decoder.transformer.layers.0.self_attn.v_proj",
+      "sam_mask_decoder.transformer.layers.0.self_attn.out_proj",
+      "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.q_proj",
+      "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.k_proj",
+      "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.v_proj",
+      "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.out_proj",
+      "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.q_proj",
+      "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.k_proj",
+      "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.v_proj",
+      "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.out_proj",
+      "sam_mask_decoder.transformer.layers.1.self_attn.q_proj",
+      "sam_mask_decoder.transformer.layers.1.self_attn.k_proj",
+      "sam_mask_decoder.transformer.layers.1.self_attn.v_proj",
+      "sam_mask_decoder.transformer.layers.1.self_attn.out_proj",
+      "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.q_proj",
+      "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.k_proj",
+      "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.v_proj",
+      "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.out_proj",
+      "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.q_proj",
+      "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.k_proj",
+      "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.v_proj",
+      "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.out_proj",
+      "sam_mask_decoder.transformer.final_attn_token_to_image.q_proj",
+      "sam_mask_decoder.transformer.final_attn_token_to_image.k_proj",
+      "sam_mask_decoder.transformer.final_attn_token_to_image.v_proj",
+      "sam_mask_decoder.transformer.final_attn_token_to_image.out_proj"
+    ],
+    "trainable_params": 94208,
+    "total_params": 39056706
+  },
+  "epochs": [
+    {
+      "epoch": 0,
+      "val_loss": 0.3850107242663701,
+      "val_dice": 0.6644416740944634,
+      "val_iou": 0.5814256809838046,
+      "val_boundary_iou": 0.5778036476301502
+    },
+    {
+      "epoch": 1,
+      "train_loss": 0.3370545834302902,
+      "train_dice": 0.7049424509207408,
+      "val_loss": 0.3734031567970912,
+      "val_dice": 0.6714009047818229,
+      "val_iou": 0.5884949975323114,
+      "val_boundary_iou": 0.5847901075514956,
+      "learning_rate": 8.437499999999999e-05,
+      "seconds": 93.83
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.30234005029002825,
+      "train_dice": 0.734155343969663,
+      "val_loss": 0.31841787695884705,
+      "val_dice": 0.7212755648669282,
+      "val_iou": 0.6388623761184073,
+      "val_boundary_iou": 0.6347472396971402,
+      "learning_rate": 0.00015937499999999998,
+      "seconds": 90.39
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.291955832267801,
+      "train_dice": 0.740964796145757,
+      "val_loss": 0.2797858988245328,
+      "val_dice": 0.75551006547655,
+      "val_iou": 0.674413074700877,
+      "val_boundary_iou": 0.6710124111740372,
+      "learning_rate": 0.000234375,
+      "seconds": 94.84
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.24534375208119552,
+      "train_dice": 0.7776617209116617,
+      "val_loss": 0.18639101460576057,
+      "val_dice": 0.829302890610729,
+      "val_iou": 0.7416707449447352,
+      "val_boundary_iou": 0.7393618136385759,
+      "learning_rate": 0.0003,
+      "seconds": 92.99
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.2050073963900407,
+      "train_dice": 0.8105349044005076,
+      "val_loss": 0.17345859731237093,
+      "val_dice": 0.8394571253353655,
+      "val_iou": 0.7564920443676598,
+      "val_boundary_iou": 0.7540107481649744,
+      "learning_rate": 0.0002994862842423856,
+      "seconds": 96.1
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.18030757158994676,
+      "train_dice": 0.8335299253463745,
+      "val_loss": 0.17925503477454185,
+      "val_dice": 0.8344377035108588,
+      "val_iou": 0.7515441971781156,
+      "val_boundary_iou": 0.749161969197969,
+      "learning_rate": 0.0002979490466566481,
+      "seconds": 87.89
+    },
+    {
+      "epoch": 7,
+      "train_loss": 0.19142081830650567,
+      "train_dice": 0.8233742376168569,
+      "val_loss": 0.16437725350260735,
+      "val_dice": 0.8471841825793334,
+      "val_iou": 0.7661636734019958,
+      "val_boundary_iou": 0.7635843155328838,
+      "learning_rate": 0.0002953999865490242,
+      "seconds": 93.9
+    },
+    {
+      "epoch": 8,
+      "train_loss": 0.17247103241582712,
+      "train_dice": 0.8398323555787405,
+      "val_loss": 0.17453297724326453,
+      "val_dice": 0.8384816267998366,
+      "val_iou": 0.7570818623559892,
+      "val_boundary_iou": 0.7545569122608224,
+      "learning_rate": 0.00029185850380609757,
+      "seconds": 92.93
+    },
+    {
+      "epoch": 9,
+      "train_loss": 0.1797851407279571,
+      "train_dice": 0.8329265177249908,
+      "val_loss": 0.16457671796282133,
+      "val_dice": 0.846858708542875,
+      "val_iou": 0.7668567863898123,
+      "val_boundary_iou": 0.7643523422153066,
+      "learning_rate": 0.00028735155124994774,
+      "seconds": 91.86
+    },
+    {
+      "epoch": 10,
+      "train_loss": 0.16991190823415916,
+      "train_dice": 0.841853936513265,
+      "val_loss": 0.15260059759020805,
+      "val_dice": 0.8574683160342019,
+      "val_iou": 0.7771569528847295,
+      "val_boundary_iou": 0.7747881501947066,
+      "learning_rate": 0.0002819134295108992,
+      "seconds": 90.39
+    },
+    {
+      "epoch": 11,
+      "train_loss": 0.16804511932035288,
+      "train_dice": 0.8432574609915415,
+      "val_loss": 0.1536731074253718,
+      "val_dice": 0.8570719581285736,
+      "val_iou": 0.7782094464951971,
+      "val_boundary_iou": 0.7757147093633927,
+      "learning_rate": 0.0002755855259790139,
+      "seconds": 90.1
+    },
+    {
+      "epoch": 12,
+      "train_loss": 0.18203136598070463,
+      "train_dice": 0.8310777803262075,
+      "val_loss": 0.16191501542925835,
+      "val_dice": 0.8500914506123171,
+      "val_iou": 0.7694733775404438,
+      "val_boundary_iou": 0.7669558264359515,
+      "learning_rate": 0.000268415999821062,
+      "seconds": 90.84
+    },
+    {
+      "epoch": 13,
+      "train_loss": 0.15607922691851855,
+      "train_dice": 0.8546190877755483,
+      "val_loss": 0.15594068293770155,
+      "val_dice": 0.8550244541997758,
+      "val_iou": 0.7760050927027754,
+      "val_boundary_iou": 0.7735542376873087,
+      "learning_rate": 0.0002604594154601839,
+      "seconds": 92.11
+    },
+    {
+      "epoch": 14,
+      "train_loss": 0.16625605697433155,
+      "train_dice": 0.846581228574117,
+      "val_loss": 0.15518912424643835,
+      "val_dice": 0.8552770864456171,
+      "val_iou": 0.7776793397425661,
+      "val_boundary_iou": 0.7752166780699357,
+      "learning_rate": 0.0002517763273076828,
+      "seconds": 91.25
+    },
+    {
+      "epoch": 15,
+      "train_loss": 0.1653642232219378,
+      "train_dice": 0.8465722481409709,
+      "val_loss": 0.15506625672181448,
+      "val_dice": 0.8558750345854912,
+      "val_iou": 0.777636796639972,
+      "val_boundary_iou": 0.775471658162362,
+      "learning_rate": 0.0002424328189073912,
+      "seconds": 91.43
+    }
+  ],
+  "best_epoch": 10,
+  "epochs_run": 15,
+  "comparison": {
+    "primary": {
+      "metric": "dice_per_image_box_and_point",
+      "reference_mean": 0.7391994629825055,
+      "candidate_mean": 0.8658925218756494,
+      "mean_delta": 0.12669305889314383,
+      "ci_low": 0.09170754380001955,
+      "ci_high": 0.16167857398626817,
+      "relative_gain": 0.17139224963985433,
+      "share_improved": 1.0,
+      "share_worsened": 0.0,
+      "share_unchanged": 0.0,
+      "images": 12
+    },
+    "protocols": {
+      "box": {
+        "dice": {
+          "reference": 0.8835718137538762,
+          "candidate": 0.8924089699132257
+        },
+        "iou": {
+          "reference": 0.811982284529495,
+          "candidate": 0.8253429039750122
+        },
+        "boundary_iou": {
+          "reference": 0.8028489014052264,
+          "candidate": 0.8171484044826269
+        }
+      },
+      "point": {
+        "dice": {
+          "reference": 0.5948271122111352,
+          "candidate": 0.8393760738380732
+        },
+        "iou": {
+          "reference": 0.5198449858870524,
+          "candidate": 0.7616063257874742
+        },
+        "boundary_iou": {
+          "reference": 0.5088596034967829,
+          "candidate": 0.7503378889247007
+        }
+      },
+      "box_jitter": {
+        "dice": {
+          "reference": 0.8610743696760393,
+          "candidate": 0.8618771471621409
+        },
+        "iou": {
+          "reference": 0.7790654333570025,
+          "candidate": 0.7796824796624907
+        },
+        "boundary_iou": {
+          "reference": 0.7694362529563102,
+          "candidate": 0.7698054295375548
+        }
+      }
+    },
+    "subgroups": [
+      {
+        "kind": "class",
+        "name": "Nucleus",
+        "instances": 115,
+        "groups": 4,
+        "images": 12,
+        "reference_mean": 0.7391994629825055,
+        "candidate_mean": 0.8658925218756494,
+        "mean_delta": 0.12669305889314383,
+        "ci_low": 0.09170754380001955,
+        "ci_high": 0.16167857398626817,
+        "regression": "none"
+      },
+      {
+        "kind": "size",
+        "name": "medium",
+        "instances": 4,
+        "groups": 1,
+        "images": 3,
+        "reference_mean": 0.6781270059864144,
+        "candidate_mean": 0.8789111196687855,
+        "mean_delta": 0.20078411368237128,
+        "ci_low": 0.20078411368237128,
+        "ci_high": 0.20078411368237128,
+        "regression": "none"
+      },
+      {
+        "kind": "size",
+        "name": "small",
+        "instances": 111,
+        "groups": 4,
+        "images": 12,
+        "reference_mean": 0.7376733363081435,
+        "candidate_mean": 0.8644318270510137,
+        "mean_delta": 0.12675849074287032,
+        "ci_low": 0.09170754380001955,
+        "ci_high": 0.16180943768572106,
+        "regression": "none"
+      }
+    ],
+    "interactive": {
+      "max_clicks": 8,
+      "reference": {
+        "noc85": 3.9304347826086956,
+        "noc90": 5.060869565217391,
+        "fail85": 0.2956521739130435,
+        "fail90": 0.4782608695652174,
+        "curve": [
+          0.5290987769702985,
+          0.6665243875554762,
+          0.7337374931013413,
+          0.7545537999319936,
+          0.7795631912625196,
+          0.7876929603333589,
+          0.8017554841604065,
+          0.8115393390817008
+        ]
+      },
+      "candidate": {
+        "noc85": 3.5739130434782607,
+        "noc90": 4.6869565217391305,
+        "fail85": 0.25217391304347825,
+        "fail90": 0.45217391304347826,
+        "curve": [
+          0.7540872652112511,
+          0.7877342051379697,
+          0.8100409473493136,
+          0.8246411498588015,
+          0.835421870257586,
+          0.8416836915389608,
+          0.8528758049029124,
+          0.8621381576568306
+        ]
+      },
+      "noc90_delta": -0.3739130434782609,
+      "noc90_ci_low": -0.7304347826086957,
+      "noc90_ci_high": -0.125
+    },
+    "per_image": [
+      {
+        "delta": 0.06489431741308926,
+        "reference": 0.8963647490958072,
+        "candidate": 0.9612590665088965
+      },
+      {
+        "delta": 0.03471970545298142,
+        "reference": 0.8001740846483277,
+        "candidate": 0.8348937901013092
+      },
+      {
+        "delta": 0.2096544799433433,
+        "reference": 0.6262208667818101,
+        "candidate": 0.8358753467251534
+      },
+      {
+        "delta": 0.20872145851561785,
+        "reference": 0.6058636575709233,
+        "candidate": 0.8145851160865412
+      },
+      {
+        "delta": 0.15060306527963963,
+        "reference": 0.670129563397619,
+        "candidate": 0.8207326286772586
+      },
+      {
+        "delta": 0.17837632880787546,
+        "reference": 0.6641782501378156,
+        "candidate": 0.8425545789456911
+      },
+      {
+        "delta": 0.05315435205742525,
+        "reference": 0.7571586685895707,
+        "candidate": 0.810313020646996
+      },
+      {
+        "delta": 0.1581795184601852,
+        "reference": 0.6422974737403614,
+        "candidate": 0.8004769922005466
+      },
+      {
+        "delta": 0.029642889473092904,
+        "reference": 0.9016736962355405,
+        "candidate": 0.9313165857086334
+      },
+      {
+        "delta": 0.1987770154061922,
+        "reference": 0.7194159041372442,
+        "candidate": 0.9181929195434364
+      },
+      {
+        "delta": 0.11617700903387751,
+        "reference": 0.8197388643040368,
+        "candidate": 0.9359158733379143
+      },
+      {
+        "delta": 0.11741656687440627,
+        "reference": 0.7671777771510107,
+        "candidate": 0.8845943440254169
+      }
+    ],
+    "holdout": {
+      "images": 12,
+      "groups": 4,
+      "instances": 115
+    },
+    "reference": {
+      "kind": "base",
+      "run_id": null
+    },
+    "decision": {
+      "outcome": "improved",
+      "reasons": [
+        {
+          "code": "ci_above_zero",
+          "params": {
+            "low": 0.09170754380001955,
+            "high": 0.16167857398626817
+          }
+        }
+      ]
+    },
+    "examples": [
+      {
+        "file": "example-00.png",
+        "label_name": "Nucleus",
+        "reference_dice": 0.7855,
+        "candidate_dice": 0.8657,
+        "delta": 0.0802,
+        "prompt": "box"
+      },
+      {
+        "file": "example-01.png",
+        "label_name": "Nucleus",
+        "reference_dice": 0.6868,
+        "candidate_dice": 0.7616,
+        "delta": 0.0748,
+        "prompt": "box"
+      },
+      {
+        "file": "example-02.png",
+        "label_name": "Nucleus",
+        "reference_dice": 0.7407,
+        "candidate_dice": 0.7229,
+        "delta": -0.0178,
+        "prompt": "box"
+      },
+      {
+        "file": "example-03.png",
+        "label_name": "Nucleus",
+        "reference_dice": 0.9076,
+        "candidate_dice": 0.8902,
+        "delta": -0.0174,
+        "prompt": "box"
+      },
+      {
+        "file": "example-04.png",
+        "label_name": "Nucleus",
+        "reference_dice": 0.98,
+        "candidate_dice": 0.9868,
+        "delta": 0.0068,
+        "prompt": "box"
+      }
+    ],
+    "simulated_interaction_note": true
+  },
+  "validation_scope": "synthetic nuclei; pretrained SAM2.1 Tiny; CPU",
+  "learning_curve_pending": true
+}

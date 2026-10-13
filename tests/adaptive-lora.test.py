@@ -22,6 +22,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import numpy as np
@@ -296,6 +297,36 @@ class DecisionTests(unittest.TestCase):
     config = adaptive.TrainConfig()
     readiness = adaptive.ReadinessConfig()
 
+    def test_sam3_backbone_uses_a_supported_autocast_dtype(self):
+        segmenter = adaptive.Sam3Segmenter.__new__(adaptive.Sam3Segmenter)
+        segmenter.device = torch.device("cuda")
+        for supported, expected in [(True, torch.bfloat16), (False, torch.float16)]:
+            with mock.patch.object(torch.cuda, "is_bf16_supported", return_value=supported), mock.patch.object(torch, "autocast") as autocast:
+                segmenter._autocast()
+                autocast.assert_called_once_with("cuda", dtype=expected)
+
+    def test_live_sam3_uses_the_same_dtype_selection_without_loading_a_model(self):
+        import ast
+        import contextlib
+        from types import SimpleNamespace
+        source = ast.parse((Path(__file__).resolve().parents[1] / "public/poligome-sam-local.py").read_text())
+        adapter = next(node for node in source.body if isinstance(node, ast.ClassDef) and node.name == "Sam3Adapter")
+        method = next(node for node in adapter.body if isinstance(node, ast.FunctionDef) and node.name == "_autocast")
+        namespace = {"contextlib": contextlib}
+        exec(compile(ast.Module(body=[method], type_ignores=[]), "sam3-live-autocast", "exec"), namespace)
+        for supported, expected in [(True, torch.bfloat16), (False, torch.float16)]:
+            with mock.patch.object(torch.cuda, "is_bf16_supported", return_value=supported), mock.patch.object(torch, "autocast") as autocast:
+                namespace["_autocast"](SimpleNamespace(device="cuda", _torch=torch))
+                autocast.assert_called_once_with("cuda", dtype=expected)
+
+    def test_decoder_training_does_not_claim_emulated_bf16_as_native_support(self):
+        job = adaptive.TrainingJob.__new__(adaptive.TrainingJob)
+        job.config = self.config
+        job.device = "cuda"
+        with mock.patch.object(torch.cuda, "is_available", return_value=True), mock.patch.object(torch.cuda, "is_bf16_supported", return_value=False) as supported:
+            self.assertEqual(job.precision(), "float32")
+            supported.assert_called_once_with(including_emulation=False)
+
     def summary(self, low, high, mean, worsened=0.1, groups=6, instances=30, regression="none", noc=0.0):
         return {
             "primary": {"ci_low": low, "ci_high": high, "mean_delta": mean, "share_worsened": worsened},
@@ -318,6 +349,60 @@ class DecisionTests(unittest.TestCase):
         # zero-width CI around zero gain is not improved, whatever happened in training.
         outcome = adaptive.decide_promotion(self.summary(0.0, 0.0, 0.0), self.config, self.readiness)["outcome"]
         self.assertEqual(outcome, "not_improved")
+
+    def test_positive_but_subthreshold_lower_bound_needs_more_evidence(self):
+        decision = adaptive.decide_promotion(self.summary(0.001, 0.06, 0.03), self.config, self.readiness)
+        self.assertEqual(decision["outcome"], "insufficient_evidence")
+
+    def test_capped_click_count_cannot_hide_more_failed_objects(self):
+        summary = self.summary(0.02, 0.08, 0.05)
+        summary["interactive"].update(reference={"fail90": 0.1}, candidate={"fail90": 0.4})
+        decision = adaptive.decide_promotion(summary, self.config, self.readiness)
+        self.assertEqual(decision["outcome"], "insufficient_evidence")
+        self.assertIn("more_failures", [reason["code"] for reason in decision["reasons"]])
+
+    def test_plateau_with_unstable_training_loss_is_not_convergence(self):
+        epochs = [{"epoch": i, "val_dice": 0.5 if i == 0 else 0.7, "val_loss": 0.6, "train_loss": None if i == 0 else (0.6 if i % 2 else 1.0)} for i in range(10)]
+        self.assertEqual(adaptive.diagnose_convergence(epochs, self.config)["state"], "inconclusive")
+
+    def test_many_objects_from_one_slide_are_not_significant_evidence(self):
+        sample = adaptive.Sample(key="same-slide", group_id="slide-1", pixels=np.zeros((16, 16, 3), dtype=np.uint8), width=16, height=16, instances=[{"index": i, "label": "cell", "label_name": "Cell", "relative_area": 0.1} for i in range(20)])
+        def result(dice):
+            return {name: {"dice": dice, "iou": dice, "boundary_iou": dice} for name in ("box", "point", "box_jitter")} | {"curve": [0.9, 0.9]}
+        reference = {(sample.key, i): result(0.8) for i in range(20)}
+        candidate = {(sample.key, i): result(0.6) for i in range(20)}
+        summary = adaptive.summarize_comparison([sample], reference, candidate, self.config, 2)
+        self.assertTrue(all(sub["regression"] == "possible" and sub["groups"] == 1 for sub in summary["subgroups"]))
+
+    def test_subgroup_statistics_weight_images_instead_of_object_density(self):
+        samples = [adaptive.Sample(key=f"image-{j}", group_id=f"slide-{j}", pixels=np.zeros((16, 16, 3), dtype=np.uint8), width=16, height=16, instances=[{"index": i, "label": "cell", "label_name": "Cell", "relative_area": 0.1} for i in range(count)]) for j, count in enumerate([20, 1])]
+        def result(dice):
+            return {name: {"dice": dice, "iou": dice, "boundary_iou": dice} for name in ("box", "point", "box_jitter")} | {"curve": [0.9, 0.9]}
+        reference = {(s.key, i["index"]): result(0.6) for s in samples for i in s.instances}
+        candidate = {(s.key, i["index"]): result(0.4 if j == 0 else 0.8) for j, s in enumerate(samples) for i in s.instances}
+        summary = adaptive.summarize_comparison(samples, reference, candidate, self.config, 2)
+        self.assertAlmostEqual(summary["primary"]["mean_delta"], 0.0)
+        for sub in summary["subgroups"]:
+            self.assertAlmostEqual(sub["mean_delta"], 0.0)
+            self.assertEqual(sub["images"], 2)
+
+    def test_partial_batch_matches_single_image_gradient(self):
+        # A final batch with one image must have the same gradient as a genuine
+        # batch of one, even when the configured maximum is four.
+        image, objects = synthetic_image(77)
+        sample = adaptive.Sample(key="gradient-image", group_id="source-1", pixels=image, width=160, height=128, instances=[{"mask": objects[0][2]}])
+        gradients = []
+        with tempfile.TemporaryDirectory() as folder:
+            for batch_size in [1, 4]:
+                model = ToySam(seed=0)
+                adaptive.inject_lora(model, adaptive.resolve_lora_targets(model, "decoder"), 4, 8, 0.0)
+                adaptive.freeze_base_parameters(model)
+                config = adaptive.TrainConfig(batch_size=batch_size, augment_hflip=False)
+                job = adaptive.TrainingJob(store=adaptive.ProjectStore(Path(folder), "project-gradient"), record={"run_id": "run-20261013t000000z-abcdef"}, config=config, readiness=self.readiness, model_factory=lambda: model, device="cpu", reference=None, model_key=None)
+                job._train_step(ToySegmenter(model, "cpu"), sample, {}, np.random.default_rng(1), 1, True, {"enabled": False, "flips": False}, batch_images=1)
+                gradients.append({name: p.grad.clone() for name, p in model.named_parameters() if p.grad is not None})
+        self.assertEqual(gradients[0].keys(), gradients[1].keys())
+        self.assertTrue(all(torch.allclose(gradients[0][name], gradients[1][name]) for name in gradients[0]))
 
     def test_convergence_states(self):
         def curve(vals, losses, train):
@@ -514,11 +599,14 @@ class ActivationTests(unittest.TestCase):
         self.assertTrue(torch.equal(base, self.live_output()))
         self.assertIsNone(self.service.active_summary())
 
-    def test_not_improved_cannot_be_activated_and_insufficient_needs_confirmation(self):
+    def test_user_can_choose_a_weak_candidate_after_reviewing_evidence(self):
         self.force_outcome(self.runs[0], "not_improved")
         with self.assertRaises(adaptive.AdaptiveError) as caught:
             self.service.activate(self.project, self.runs[0])
-        self.assertEqual(caught.exception.code, "not_improved")
+        self.assertEqual(caught.exception.code, "needs_confirmation")
+        self.service.activate(self.project, self.runs[0], override=True)
+        self.assertEqual(self.service.active_summary()["run_id"], self.runs[0])
+        self.service.deactivate()
         self.force_outcome(self.runs[0], "insufficient_evidence")
         with self.assertRaises(adaptive.AdaptiveError) as caught:
             self.service.activate(self.project, self.runs[0])
@@ -948,12 +1036,12 @@ class Sam2IntegrationTests(unittest.TestCase):
             shutil.rmtree(folder)
 
 
-try:
-    import sam3  # noqa: F401
+import importlib.util
 
-    HAS_SAM3 = True
-except Exception:
-    HAS_SAM3 = False
+# The connector installs CPU compatibility patches before importing SAM 3.
+# Importing it here first would silently skip an installed package when Triton
+# is unavailable, instead of testing the same initialization as the connector.
+HAS_SAM3 = importlib.util.find_spec("sam3") is not None
 
 
 @unittest.skipUnless(HAS_SAM3 and os.environ.get("POLIGOME_TEST_SAM3") == "1", "set POLIGOME_TEST_SAM3=1 with the sam3 package installed (slow: ~1 min per image on CPU)")
