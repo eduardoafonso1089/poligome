@@ -18,6 +18,7 @@ import base64
 import binascii
 import contextlib
 import hashlib
+import importlib.util
 import io
 import json
 import math
@@ -819,6 +820,8 @@ class Sam2Adapter:
         self.spec = spec
         self.device = device
         self._torch = torch
+        # Exposto para o Adaptive AI, que aplica e remove LoRA neste modelo.
+        self.model = model
         self._predictor = SAM2ImagePredictor(model)
 
     def set_image(self, image: np.ndarray) -> None:
@@ -1172,10 +1175,16 @@ class PredictionRequestGuard:
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         # /byom/annotate carrega a mesma imagem inteira que /predict, então
         # precisa do mesmo teto de corpo e do mesmo limite de concorrência.
+        path = str(scope.get("path", "")).rstrip("/")
         is_prediction = (
             scope.get("type") == "http"
             and scope.get("method") == "POST"
-            and str(scope.get("path", "")).rstrip("/") in ("/predict", "/byom/annotate")
+            and (
+                path in ("/predict", "/byom/annotate")
+                # O envio de uma imagem aprovada ao Adaptive AI carrega a mesma
+                # imagem inteira de /predict.
+                or re.fullmatch(r"/adaptive/projects/[^/]+/items/[^/]+", path) is not None
+            )
         )
         if not is_prediction:
             await self.app(scope, receive, send)
@@ -1303,6 +1312,10 @@ def _runtime_snapshot() -> dict[str, Any]:
     # falando com a instalação errada. Dizer onde este mora resolve isso.
     snapshot["host"] = _host_label()
     snapshot["app_dir"] = str(_app_dir)
+    snapshot["adaptive"] = {
+        "available": _adaptive_service is not None,
+        "active": _adaptive_service.active_summary() if _adaptive_service is not None else None,
+    }
     return snapshot
 
 
@@ -1448,6 +1461,8 @@ def _load_model(config: LoadConfig) -> None:
             _adapter = adapter
             _current_image_hash = None
         _update_runtime(status="ready", device=adapter.device, error=None)
+        if _adaptive_service is not None:
+            _adaptive_service.on_model_loaded()
         print(
             f"Poligome SAM pronto: {config.spec.model_id} em {adapter.device}.",
             flush=True,
@@ -1456,6 +1471,93 @@ def _load_model(config: LoadConfig) -> None:
         message = f"{type(error).__name__}: {error}"
         _update_runtime(status="error", error=message)
         print(f"Falha ao carregar o modelo: {message}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Adaptive AI: extensão opcional, num arquivo ao lado do conector
+#
+# Fica fora deste arquivo para que o conector continue funcionando igual sem
+# ela, e para que o treino seja testável sem subir o servidor. Sem o arquivo,
+# ou com POLIGOME_ADAPTIVE=0, nenhuma rota /adaptive existe.
+# ---------------------------------------------------------------------------
+
+ADAPTIVE_MODULE_NAME = "poligome-sam-adaptive.py"
+_adaptive_service: Any = None
+
+
+def _adaptive_live_model() -> Any:
+    adapter = _adapter
+    config = _startup_config
+    module = sys.modules.get("poligome_adaptive")
+    if adapter is None or module is None or _runtime_snapshot_status() != "ready":
+        return None
+    checkpoint = Path(config.checkpoint).expanduser() if config is not None else None
+    return module.LiveModel(
+        model=getattr(adapter, "model", None),
+        model_id=adapter.spec.model_id,
+        family=adapter.spec.family,
+        device=adapter.device,
+        checkpoint=checkpoint,
+    )
+
+
+def _runtime_snapshot_status() -> str:
+    with _runtime_lock:
+        return str(_runtime.get("status"))
+
+
+def _adaptive_model_factory() -> Any:
+    """Uma cópia nova do modelo base para treinar sem tocar no que serve o editor."""
+    config = _startup_config
+    if config is None or config.spec.family != "sam2":
+        raise RuntimeError("Adaptive AI só treina modelos da família SAM 2.")
+    from sam2.build_sam import build_sam2
+
+    checkpoint = Path(config.checkpoint).expanduser().resolve()
+    model_config = config.model_config or config.spec.default_config
+    device = _adapter.device if _adapter is not None else "cpu"
+    return build_sam2(model_config, str(checkpoint), device=device, mode="eval")
+
+
+def _invalidate_embedding() -> None:
+    global _current_image_hash
+    _current_image_hash = None
+
+
+def _adaptive_decode(data_url: str) -> Any:
+    decoded = decode_image(data_url)
+    module = sys.modules["poligome_adaptive"]
+    _, raw, extension = module.decode_data_url(data_url, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS)
+    return decoded.pixels, raw, extension
+
+
+def _load_adaptive_extension() -> None:
+    global _adaptive_service
+    if os.environ.get("POLIGOME_ADAPTIVE", "1").strip() == "0":
+        return
+    path = Path(__file__).resolve().with_name(ADAPTIVE_MODULE_NAME)
+    if not path.is_file():
+        return
+    try:
+        spec = importlib.util.spec_from_file_location("poligome_adaptive", path)
+        if spec is None or spec.loader is None:
+            return
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["poligome_adaptive"] = module
+        spec.loader.exec_module(module)
+        _adaptive_service = module.AdaptiveService(
+            root=_app_dir / "adaptive",
+            get_live_model=_adaptive_live_model,
+            predictor_lock=_predictor_lock,
+            invalidate_embedding=_invalidate_embedding,
+            model_factory=_adaptive_model_factory,
+            decode_image=_adaptive_decode,
+        )
+        app.include_router(module.create_router(_adaptive_service))
+    except Exception as error:  # a extensão nunca derruba o conector
+        sys.modules.pop("poligome_adaptive", None)
+        _adaptive_service = None
+        print(f"Aviso: Adaptive AI indisponível: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
 
 
 @app.on_event("startup")
@@ -2165,6 +2267,7 @@ def predict(payload: PredictionRequest):
         "reused_embedding": reused_embedding,
         "model_id": adapter.spec.model_id,
         "family": adapter.spec.family,
+        "adapter": _adaptive_service.active_summary() if _adaptive_service is not None else None,
         "raw_prediction_count": raw_prediction_count,
         "predictions_truncated": predictions_truncated,
         "prediction_limit": MAX_SAM3_PREDICTIONS
@@ -2205,6 +2308,7 @@ def main() -> None:
     if args.app_dir:
         _app_dir = Path(args.app_dir).expanduser().resolve()
     _startup_port = args.port
+    _load_adaptive_extension()
 
     requested_model_id = args.model
     model_id = MODEL_ALIASES.get(requested_model_id, requested_model_id)

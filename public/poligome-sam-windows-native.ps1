@@ -44,7 +44,7 @@ $POLIGOME_SAM_INSTALLER_API = 2
 
 $DefaultSiteUrl = 'https://poligome.com'
 $DefaultAssetBaseUrl = 'https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public'
-$DefaultConnectorSha256 = '27ddb1b6170fd2b8cbb2c4d1952c8100c1517ba4b0acc1e8fc0c2f19937cc50f'
+$DefaultConnectorSha256 = '52b2c7243f276ed4918322491942cdd2686dd0ac4e0086e09f1801b1104ec426'
 
 $SiteUrl = if ($env:POLIGOME_SITE_URL) { $env:POLIGOME_SITE_URL.TrimEnd('/') } else { $DefaultSiteUrl }
 $AssetBaseUrl = if ($env:POLIGOME_ASSET_BASE_URL) { $env:POLIGOME_ASSET_BASE_URL.TrimEnd('/') } else { $DefaultAssetBaseUrl }
@@ -54,6 +54,8 @@ $AppDir = Join-Path $env:USERPROFILE '.poligome-sam'
 $VenvsDir = Join-Path $AppDir 'venvs'
 $ModelsDir = Join-Path $AppDir 'models'
 $Connector = Join-Path $AppDir 'poligome-sam-local.py'
+$AdaptiveModule = Join-Path $AppDir 'poligome-sam-adaptive.py'
+$DefaultAdaptiveSha256 = 'bf2e6f6d02f81f19162a2eb95873aac335dce4f8b091a10d4164751423afac37'
 $SelectedModelFile = Join-Path $AppDir 'selected-model.txt'
 $PendingModelFile = Join-Path $AppDir 'pending-model.txt'
 $Port = 7860
@@ -255,6 +257,40 @@ function Invoke-AtomicDownload([string] $Url, [string] $Destination, [long] $Exp
     Fail "o download de $Url ficou incompleto ($actual bytes; esperado: $ExpectedSize)."
   }
   Move-Item -LiteralPath $partial -Destination $Destination -Force
+}
+
+# Adaptive AI: extensao opcional ao lado do conector. Uma falha aqui so avisa;
+# sem o arquivo o conector funciona igual, apenas sem as rotas /adaptive.
+function Install-AdaptiveExtension {
+  if ($env:POLIGOME_ADAPTIVE -eq '0') {
+    if (Test-Path -LiteralPath $AdaptiveModule) { Remove-Item -LiteralPath $AdaptiveModule -Force }
+    return
+  }
+  $partial = "$AdaptiveModule.part"
+  if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
+  $adjacent = Join-Path $PSScriptRoot 'poligome-sam-adaptive.py'
+  $checkHash = $true
+  try {
+    if ((Test-Path -LiteralPath $adjacent -PathType Leaf) -and ((Get-Item -LiteralPath $adjacent).Length -gt 0)) {
+      Copy-Item -LiteralPath $adjacent -Destination $partial -Force
+    } else {
+      $checkHash = -not $AssetBaseOverridden
+      Invoke-WebRequest -Uri "$AssetBaseUrl/poligome-sam-adaptive.py" -OutFile $partial -UseBasicParsing -MaximumRedirection 5 -ErrorAction Stop
+    }
+  } catch {
+    if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
+    Write-Host 'Aviso: o Adaptive AI nao foi instalado (download falhou); o SAM funciona normalmente.'
+    return
+  }
+  if ($checkHash) {
+    $hash = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($hash -ne $DefaultAdaptiveSha256) {
+      Remove-Item -LiteralPath $partial -Force
+      Write-Host 'Aviso: o Adaptive AI nao confere com a soma publicada e nao foi instalado.'
+      return
+    }
+  }
+  Move-Item -LiteralPath $partial -Destination $AdaptiveModule -Force
 }
 
 function Test-ConnectorCompatible([string] $Path) {
@@ -718,6 +754,7 @@ $Device = Resolve-DeviceChoice $family
 # recusado aqui para nao baixar 11 GB e terminar num erro de CUDA.
 if ($family -eq 'sam3' -and $Device -eq 'cuda') { Assert-Sam3Platform }
 Install-Connector
+Install-AdaptiveExtension
 Initialize-Venv $family $venvDir $venvPython
 Install-Runtime $family $venvDir $venvPython
 Assert-RuntimeDevice $family $venvPython

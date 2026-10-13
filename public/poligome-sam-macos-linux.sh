@@ -6,7 +6,8 @@ POLIGOME_SAM_INSTALLER_API=2
 DEFAULT_SITE_URL="https://poligome.com"
 DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 DEFAULT_CONNECTOR_URL="${DEFAULT_ASSET_BASE_URL}/poligome-sam-local.py"
-DEFAULT_CONNECTOR_SHA256="27ddb1b6170fd2b8cbb2c4d1952c8100c1517ba4b0acc1e8fc0c2f19937cc50f"
+DEFAULT_CONNECTOR_SHA256="52b2c7243f276ed4918322491942cdd2686dd0ac4e0086e09f1801b1104ec426"
+DEFAULT_ADAPTIVE_SHA256="bf2e6f6d02f81f19162a2eb95873aac335dce4f8b091a10d4164751423afac37"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE_URL="${POLIGOME_SITE_URL:-${DEFAULT_SITE_URL}}"
 SITE_URL="${SITE_URL%/}"
@@ -16,6 +17,7 @@ APP_DIR="${HOME}/.poligome-sam"
 VENVS_DIR="${APP_DIR}/venvs"
 MODELS_DIR="${APP_DIR}/models"
 CONNECTOR="${APP_DIR}/poligome-sam-local.py"
+ADAPTIVE_MODULE="${APP_DIR}/poligome-sam-adaptive.py"
 SELECTED_MODEL_FILE="${APP_DIR}/selected-model.txt"
 PENDING_MODEL_FILE="${APP_DIR}/pending-model.txt"
 PORT="7860"
@@ -303,6 +305,47 @@ download_connector() {
   fi
   chmod 600 "$partial"
   mv -f "$partial" "$CONNECTOR"
+}
+
+# O Adaptive AI (treino LoRA local) é uma extensão opcional ao lado do conector.
+# Falhar aqui nunca impede a instalação: sem o arquivo o conector funciona igual,
+# só não oferece as rotas /adaptive.
+install_adaptive_extension() {
+  local partial="${ADAPTIVE_MODULE}.part"
+  local adjacent="${SCRIPT_DIR}/poligome-sam-adaptive.py"
+  local expected_sha256=""
+  rm -f "$partial"
+  if [[ "${POLIGOME_ADAPTIVE:-1}" == "0" ]]; then
+    rm -f "$ADAPTIVE_MODULE"
+    return 0
+  fi
+  if [[ -n "${POLIGOME_CONNECTOR_PATH:-}" ]]; then
+    # Conector local explícito (retomada, desenvolvimento): nada de rede. Usa o
+    # módulo ao lado dele, se houver, ou mantém o que já está instalado.
+    local sibling
+    sibling="$(dirname "$POLIGOME_CONNECTOR_PATH")/poligome-sam-adaptive.py"
+    [[ -s "$sibling" && "$sibling" -ef "$ADAPTIVE_MODULE" ]] && return 0
+    [[ -s "$sibling" ]] || return 0
+    cp "$sibling" "$partial" 2>/dev/null || { rm -f "$partial"; return 0; }
+  elif [[ -f "$adjacent" && -s "$adjacent" ]]; then
+    expected_sha256="$DEFAULT_ADAPTIVE_SHA256"
+    cp "$adjacent" "$partial" 2>/dev/null || { rm -f "$partial"; return 0; }
+  else
+    local url="${ASSET_BASE_URL}/poligome-sam-adaptive.py"
+    [[ -z "${POLIGOME_ASSET_BASE_URL:-}" ]] && expected_sha256="$DEFAULT_ADAPTIVE_SHA256"
+    if ! download_to_file "$url" "$partial"; then
+      rm -f "$partial"
+      printf 'Aviso: o Adaptive AI não foi instalado (download falhou); o SAM funciona normalmente.\n'
+      return 0
+    fi
+  fi
+  if [[ -n "$expected_sha256" && "$(file_sha256 "$partial" 2>/dev/null || true)" != "$expected_sha256" ]]; then
+    rm -f "$partial"
+    printf 'Aviso: o Adaptive AI não confere com a soma publicada e não foi instalado.\n'
+    return 0
+  fi
+  chmod 600 "$partial"
+  mv -f "$partial" "$ADAPTIVE_MODULE"
 }
 
 cache_current_installer() {
@@ -1006,6 +1049,7 @@ cache_current_installer
 save_pending_selection
 decide_device
 download_connector
+install_adaptive_extension
 prepare_venv
 install_runtime
 verify_runtime_device
