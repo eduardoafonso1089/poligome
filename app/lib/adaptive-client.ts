@@ -114,6 +114,8 @@ export type LearningCurve = {
 export type Suggestion = { key: string; rank: number; novelty: number | null; reason: "first_examples" | "novel" | "typical" | "similar" | "near_duplicate" };
 
 export type RunRecord = {
+  name?: string;
+  imported?: boolean;
   run_id: string;
   project_id: string;
   created_at: string;
@@ -139,6 +141,7 @@ export type RunRecord = {
 };
 
 export type RunSummary = {
+  name?: string; imported?: boolean;
   run_id: string; created_at: string; finished_at?: string; status: RunRecord["status"]; activation: RunRecord["activation"];
   base_model_id: string; best_epoch?: number; epochs_run?: number; diagnosis?: string; outcome?: ComparisonSummary["decision"]["outcome"];
   mean_delta?: number; ci_low?: number; ci_high?: number; holdout_set_id?: string; error?: { code: string; message: string };
@@ -151,7 +154,7 @@ async function request<T>(base: string, path: string, init: RequestInit & { time
   try {
     response = await fetch(`${base}${path}`, {
       ...rest,
-      headers: rest.body ? { "Content-Type": "application/json" } : undefined,
+      headers: rest.headers ?? (rest.body ? { "Content-Type": "application/json" } : undefined),
       signal: rest.signal ?? AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
@@ -174,6 +177,17 @@ async function request<T>(base: string, path: string, init: RequestInit & { time
 const project = (id: string) => `/adaptive/projects/${encodeURIComponent(id)}`;
 
 export const adaptiveApi = {
+  importAdapter: (base: string, id: string, file: File) => request<RunRecord>(base, `${project(id)}/adapters/import`, {
+    method: "POST", body: file, headers: { "Content-Type": "application/octet-stream" }, timeoutMs: 120_000,
+  }),
+  async exportAdapter(base: string, id: string, runId: string, name: string): Promise<Blob> {
+    const response = await fetch(`${base}${project(id)}/runs/${encodeURIComponent(runId)}/export?name=${encodeURIComponent(name)}`, { signal: AbortSignal.timeout(120_000) });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { detail?: AdaptiveErrorDetail } | null;
+      throw new AdaptiveRequestError(response.status, body?.detail ?? { code: "http_error", message: `HTTP ${response.status}` });
+    }
+    return response.blob();
+  },
   status: (base: string) => request<AdaptiveStatus>(base, "/adaptive/status", { timeoutMs: 5_000 }),
   items: (base: string, id: string) => request<{ items: Record<string, string> }>(base, `${project(id)}/items`),
   assess: (base: string, id: string) => request<ReadinessReport>(base, `${project(id)}/assess`, { method: "POST", timeoutMs: 120_000 }),

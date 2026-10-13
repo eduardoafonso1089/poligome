@@ -44,7 +44,7 @@ $POLIGOME_SAM_INSTALLER_API = 2
 
 $DefaultSiteUrl = 'https://poligome.com'
 $DefaultAssetBaseUrl = 'https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public'
-$DefaultConnectorSha256 = '26c99cbff7e7c2a566c575821952a1bb021bc8776a22640a086ca835502332e7'
+$DefaultConnectorSha256 = '425bfd7971613df72af4ec760f0aa03cd96ef9d14fefdf37c58894909d44c9b0'
 
 $SiteUrl = if ($env:POLIGOME_SITE_URL) { $env:POLIGOME_SITE_URL.TrimEnd('/') } else { $DefaultSiteUrl }
 $AssetBaseUrl = if ($env:POLIGOME_ASSET_BASE_URL) { $env:POLIGOME_ASSET_BASE_URL.TrimEnd('/') } else { $DefaultAssetBaseUrl }
@@ -55,7 +55,7 @@ $VenvsDir = Join-Path $AppDir 'venvs'
 $ModelsDir = Join-Path $AppDir 'models'
 $Connector = Join-Path $AppDir 'poligome-sam-local.py'
 $AdaptiveModule = Join-Path $AppDir 'poligome-sam-adaptive.py'
-$DefaultAdaptiveSha256 = '39dee64f8a0681162c4921c568549038539734087c5e3968e72b0f1bca7dc9a1'
+$DefaultAdaptiveSha256 = '0fbb5b209028d627af8d2ad8f10d9c1bc3287c704c716f13d5c9cfb14324bbd6'
 $SelectedModelFile = Join-Path $AppDir 'selected-model.txt'
 $PendingModelFile = Join-Path $AppDir 'pending-model.txt'
 $Port = 7860

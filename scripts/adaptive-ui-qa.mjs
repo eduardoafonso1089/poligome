@@ -36,6 +36,12 @@ async function scenario(name, options, check) {
     if (state.remote === null) state.remote = options.synced ? await page.evaluate(() => Object.fromEntries(window.adaptiveUiQa.plan.items.map(item => [item.key, item.fingerprint]))) : {};
     const json = (body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     if (path === "/adaptive/status") return json(status());
+    if (path.endsWith("/adapters/import")) {
+      if (options.importError) return json({ detail: { code: "invalid_adapter", message: "Invalid adapter" } }, 400);
+      state.run = { ...structuredClone(fixture.run), name: "Núcleos v1", imported: true, epochs: [], comparison: undefined, learning_curve: undefined, activation: "inactive" };
+      return json(run());
+    }
+    if (path.endsWith("/export")) return route.fulfill({ contentType: "application/octet-stream", body: Buffer.from("portable-adapter-fixture") });
     if (path.includes("/projects/p-ui-project-00002/")) {
       if (path.endsWith("/items")) return json({ items: {} });
       if (path.endsWith("/runs")) return json({ runs: [], history: [] });
@@ -94,6 +100,33 @@ async function scenario(name, options, check) {
 
 try {
   browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+  await scenario("portable-import-activate-reopen-export", { synced: true }, async p => {
+    assert.equal(await p.getByRole("button", { name: "Export LoRA", exact: true }).isDisabled(), true);
+    await p.locator('input[type="file"][accept=".plora"]').setInputFiles({ name: "nuclei.plora", mimeType: "application/octet-stream", buffer: Buffer.from("fixture") });
+    await p.getByText("Imported: Núcleos v1", { exact: true }).waitFor();
+    assert.equal(await p.locator(".adaptive-comparison").count(), 0, "must not transfer source validation");
+    const activate = p.getByRole("button", { name: "Activate adapter", exact: true });
+    assert.equal(await activate.isDisabled(), true);
+    await p.getByRole("checkbox", { name: "I want to use this adapter in this project.", exact: true }).check();
+    await activate.click();
+    await p.locator(".adaptive-active").getByText("In use: Núcleos v1", { exact: true }).waitFor();
+    await p.reload({ waitUntil: "networkidle" });
+    await p.getByText("Imported: Núcleos v1", { exact: true }).waitFor();
+    assert.equal(await p.getByRole("textbox", { name: "Adapter name", exact: true }).inputValue(), "Núcleos v1");
+    assert.equal(await p.locator(".adaptive-steps").count(), 0);
+    const downloadPromise = p.waitForEvent("download");
+    await p.getByRole("button", { name: "Export LoRA", exact: true }).click();
+    const download = await downloadPromise;
+    assert.match(download.suggestedFilename(), /\.plora$/);
+    assert.equal(await download.failure(), null);
+  });
+  await scenario("portable-invalid-import-preserves-selection", { synced: true, run: true, importError: true }, async p => {
+    await p.locator(".adaptive-comparison").waitFor();
+    await p.locator('input[type="file"][accept=".plora"]').setInputFiles({ name: "broken.plora", mimeType: "application/octet-stream", buffer: Buffer.from("invalid") });
+    await p.getByRole("alert").getByText(/Invalid, corrupted or incompatible file/).waitFor();
+    assert.equal(await p.locator(".adaptive-comparison").count(), 1);
+    assert.equal(await p.getByText("Imported: Núcleos v1", { exact: true }).count(), 0);
+  });
   await scenario("offline-retry", { offline: true }, async (p, s) => {
     await p.getByText("The local connector did not answer.", { exact: false }).waitFor();
     s.offline = false;

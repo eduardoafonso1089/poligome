@@ -618,3 +618,24 @@ Verificado:
 - **Dados reais** de qualquer domínio.
 - **Windows nativo** (`poligome-sam-windows-native.ps1`): a instalação da
   extensão foi escrita, mas não executada.
+
+
+## Exportar e reutilizar LoRA
+
+No painel Adaptive AI, selecione uma rodada salva, dê um nome e use
+**Exportar LoRA**. O `.plora` é um pacote de até 64 MiB com manifesto JSON
+(version 1, `poligome-lora-portable`) e tensores NPY float32 com hashes SHA-256.
+Não inclui imagens, anotações, checkpoints base ou histórico de avaliações.
+
+Em outro projeto/computador, carregue o mesmo checkpoint SAM base e use
+**Importar LoRA**. O conector valida fingerprint, família, camadas, formas,
+integridade e valores finitos antes de salvar; nenhum peso é aplicado durante
+a importação. Confirme **Ativar adaptador** para usá-lo sem repetir o treino.
+A qualidade no novo dataset deve ser revisada: métricas da origem não são
+transferidas. Desativar restaura o modelo base; Reverter usa o histórico local.
+
+Para continuar amanhã, salve também o projeto `.plgm` e preserve as imagens
+originais. O conector guarda o adaptador ativo e o reaplica ao reiniciar com o
+mesmo base; o `.plgm` preserva a identidade do projeto. O `.plora` permite
+recuperá-lo se mudar de computador ou de pasta do conector. Novas rodadas
+partem do modelo base; não retomam os passos/estado do otimizador anterior.

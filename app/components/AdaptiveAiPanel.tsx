@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, BarChart3, Check, CircleSlash, Compass, Cpu, Database, GitCompare, History, LoaderCircle,
-  Play, Power, RefreshCw, RotateCcw, ShieldCheck, Square, TrendingUp, Undo2, X,
+  Download, Upload, Play, Power, RefreshCw, RotateCcw, ShieldCheck, Square, TrendingUp, Undo2, X,
 } from "lucide-react";
 import { getCopy, fill, type Language } from "../lib/i18n";
 import { getAdaptiveCopy, type AdaptiveCopy } from "../lib/adaptive-copy";
@@ -362,7 +362,7 @@ export function SuggestionsView({ t, suggestions, names, method, analyzed }: {
   </div>;
 }
 
-export type NextStep = { stage: 0 | 1 | 2 | 3; key: "analyze" | "annotate" | "train" | "training" | "activate" | "more_evidence" | "kept" | "active" | "failed"; n?: number };
+export type NextStep = { stage: 0 | 1 | 2 | 3; key: "analyze" | "annotate" | "train" | "training" | "activate" | "imported" | "more_evidence" | "kept" | "active" | "failed"; n?: number };
 
 /**
  * Uma ação por vez: o que a pessoa deveria fazer agora, derivado do estado real
@@ -372,6 +372,7 @@ export type NextStep = { stage: 0 | 1 | 2 | 3; key: "analyze" | "annotate" | "tr
 export function nextStep({ report, record, activeHere, pendingSync = 0 }: { report: ReadinessReport | null; record: RunRecord | null; activeHere: boolean; pendingSync?: number }): NextStep {
   const compared = Boolean(record?.comparison) && (record?.status === "completed" || record?.stage === "learning_curve");
   if (record && RUNNING.has(record.status) && !compared) return { stage: 1, key: "training" };
+  if (record?.imported) return { stage: 3, key: activeHere && record.activation === "active" ? "active" : "imported" };
   if (pendingSync > 0) return { stage: 0, key: "analyze" };
   if (activeHere && (!record || record.activation === "active")) return { stage: 3, key: "active" };
   if (record && ["failed", "interrupted"].includes(record.status)) return { stage: 1, key: "failed" };
@@ -382,10 +383,10 @@ export function nextStep({ report, record, activeHere, pendingSync = 0 }: { repo
   return { stage: 1, key: "train" };
 }
 
-export function NextStepCard({ t, step }: { t: AdaptiveCopy; step: NextStep }) {
+export function NextStepCard({ t, step, imported = false }: { t: AdaptiveCopy; step: NextStep; imported?: boolean }) {
   const stages = [t.stepData, t.stepTraining, t.stepComparison, t.stepUse];
   return <section className="adaptive-next" aria-live="polite">
-    <ol className="adaptive-steps">{stages.map((label, index) => <li key={label} className={index < step.stage ? "done" : index === step.stage ? "current" : ""} aria-current={index === step.stage ? "step" : undefined}><i>{index + 1}</i>{label}</li>)}</ol>
+    {!imported && <ol className="adaptive-steps">{stages.map((label, index) => <li key={label} className={index < step.stage ? "done" : index === step.stage ? "current" : ""} aria-current={index === step.stage ? "step" : undefined}><i>{index + 1}</i>{label}</li>)}</ol>}
     <p><b>{t.nextTitle}:</b> {fill(t[`next_${step.key}` as keyof AdaptiveCopy], { n: step.n ?? 0 })}</p>
   </section>;
 }
@@ -417,6 +418,8 @@ function AdaptiveAiSession({ language, endpoint, project }: { language: Language
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [overrideRunId, setOverrideRunId] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState<{ runId: string | null; value: string } | null>(null);
+  const adapterFile = useRef<HTMLInputElement | null>(null);
   const [settings, setSettings] = useState({ strategy: "auto", rank: 8, alpha: 16, learning_rate: 0, max_epochs: 0, batch_size: 4, learning_curve: true });
   const [suggested, setSuggested] = useState<{ items: Suggestion[]; method: string | null; analyzed: number } | null>(null);
   const syncAbort = useRef<AbortController | null>(null);
@@ -496,6 +499,7 @@ function AdaptiveAiSession({ language, endpoint, project }: { language: Language
   // Derivados em vez de zerados por efeito: trocar de rodada ou perder o
   // conector some com o que estava na tela no mesmo render.
   const record = loadedRecord && loadedRecord.run_id === selectedRunId && connector === "ready" ? loadedRecord : null;
+  const adapterName = nameDraft && nameDraft.runId === (record?.run_id ?? null) ? nameDraft.value : record?.name ?? project?.name ?? "LoRA";
   const examples = loadedExamples && record && loadedExamples.runId === record.run_id ? loadedExamples.urls : {};
 
   const exampleFiles = record?.comparison?.examples.map((example) => example.file).join(",") ?? "";
@@ -577,6 +581,7 @@ function AdaptiveAiSession({ language, endpoint, project }: { language: Language
   });
 
   const activeHere = status?.active && project && status.active.project_id === project.id ? status.active : null;
+  const activeName = activeHere ? runs.find((run) => run.run_id === activeHere.run_id)?.name : null;
   const activeElsewhere = status?.active && project && status.active.project_id !== project.id ? status.active : null;
   const trainingElsewhere = status?.training && project && status.training.project_id !== project.id;
   const running = record ? RUNNING.has(record.status) : false;
@@ -604,14 +609,61 @@ function AdaptiveAiSession({ language, endpoint, project }: { language: Language
         <section className="adaptive-active">
           <Power size={14} />
           <div>
-            <b>{activeHere ? fill(t.activeAdapter, { run: runLabel(activeHere.run_id) }) : t.usingBase}</b>
+            <b>{activeHere ? activeName ? fill(t.activeNamedAdapter, { name: activeName }) : fill(t.activeAdapter, { run: runLabel(activeHere.run_id) }) : activeElsewhere?.applied ? t.usingOtherAdapter : t.usingBase}</b>
             <small>{activeHere ? (activeHere.applied ? t.activeAppliedNote : t.activeNotAppliedNote) : activeElsewhere ? t.activeElsewhere : t.usingBaseNote}</small>
           </div>
           {(activeHere || activeElsewhere) && <button disabled={busy !== null} onClick={() => act("deactivate", async () => { setStatus(await adaptiveApi.deactivate(base)); await refreshRuns(); await reloadRecord(); })}><X size={12} />{t.deactivate}</button>}
           {activeHere && <button disabled={busy !== null} onClick={() => act("rollback", async () => { setStatus(await adaptiveApi.rollback(base, project.id)); await refreshRuns(); await reloadRecord(); })}><Undo2 size={12} />{t.rollback}</button>}
         </section>
 
-        <NextStepCard t={t} step={nextStep({ report, record, activeHere: Boolean(activeHere), pendingSync })} />
+        <section className="adaptive-section">
+          <h4><Download size={13} />{t.portableTitle}</h4>
+          <p className="adaptive-note">{t.portableNote}</p>
+          <div className="adaptive-settings-grid"><label>{t.adapterName}<input type="text" maxLength={120} value={adapterName} onChange={(event) => setNameDraft({ runId: record?.run_id ?? null, value: event.target.value })} /></label></div>
+          <input ref={adapterFile} type="file" accept=".plora" hidden aria-label={t.importAdapter} onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file) return;
+            if (file.size > 64 * 1024 * 1024) { setError(t.adapterTooLarge); return; }
+            void act("import", async () => {
+              const imported = await adaptiveApi.importAdapter(base, project.id, file);
+              setSelectedRunId(imported.run_id);
+              setRecord(imported);
+              setNameDraft({ runId: imported.run_id, value: imported.name ?? file.name.replace(/\.plora$/i, "") });
+              setOverrideRunId(null);
+              await refreshRuns();
+            });
+          }} />
+          <div className="adaptive-actions">
+            <button disabled={busy !== null || !modelSupported} onClick={() => adapterFile.current?.click()}><Upload size={13} />{t.importAdapter}</button>
+            <button disabled={busy !== null || !record || (!record.comparison && !record.imported)} onClick={() => void act("export", async () => {
+              if (!record) return;
+              const blob = await adaptiveApi.exportAdapter(base, project.id, record.run_id, adapterName);
+              const url = URL.createObjectURL(blob);
+              const anchor = document.createElement("a");
+              anchor.href = url;
+              anchor.download = `${adapterName.replace(/[^\p{L}\p{N}_-]/gu, "_").slice(0, 80) || "LoRA"}-${record.run_id}.plora`;
+              anchor.click();
+              window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+            })}><Download size={13} />{t.exportAdapter}</button>
+          </div>
+          {record?.imported && <>
+            <p><b>{fill(t.importedAdapter, { name: record.name ?? record.run_id })}</b></p>
+            <p className="adaptive-callout warn">{t.importedNote}</p>
+            {!candidateMatchesModel && <p className="adaptive-callout warn">{fill(t.adapterNeedsBase, { model: record.base_model.model_id })}</p>}
+            {record.activation !== "active" && <div className="adaptive-actions">
+              <label className="adaptive-confirm"><input type="checkbox" checked={overrideRunId === record.run_id} onChange={(event) => setOverrideRunId(event.target.checked ? record.run_id : null)} />{t.confirmImported}</label>
+              <button disabled={busy !== null || overrideRunId !== record.run_id || !modelSupported || !candidateMatchesModel} onClick={() => void act("activate", async () => {
+                setStatus(await adaptiveApi.activate(base, project.id, record.run_id, true));
+                setOverrideRunId(null);
+                await reloadRecord();
+                await refreshRuns();
+              })}><Power size={13} />{t.activate}</button>
+            </div>}
+          </>}
+        </section>
+
+        <NextStepCard t={t} step={nextStep({ report, record, activeHere: Boolean(activeHere), pendingSync })} imported={record?.imported} />
 
         <section className="adaptive-section">
           <h4><Database size={13} />{t.datasetTitle}</h4>
@@ -680,7 +732,7 @@ function AdaptiveAiSession({ language, endpoint, project }: { language: Language
               {busy === "train" ? <LoaderCircle className="spin" size={13} /> : <Play size={13} />}{t.startTraining}
             </button>
           </div>
-          {record && <TrainingView t={t} record={record} busy={busy !== null} onCancel={() => void act("cancel", () => adaptiveApi.cancel(base, project.id, record.run_id))} />}
+          {record && !record.imported && <TrainingView t={t} record={record} busy={busy !== null} onCancel={() => void act("cancel", () => adaptiveApi.cancel(base, project.id, record.run_id))} />}
         </section>
 
         {record?.comparison && <section className="adaptive-section">
@@ -709,7 +761,7 @@ function AdaptiveAiSession({ language, endpoint, project }: { language: Language
           <table className="adaptive-table adaptive-history">
             <thead><tr><th>{t.dateColumn}</th><th>{t.statusColumn}</th><th>{t.outcomeColumn}</th><th>{t.deltaLabel}</th><th>{t.activationColumn}</th></tr></thead>
             <tbody>{runs.map((run) => <tr key={run.run_id} className={run.run_id === selectedRunId ? "selected" : ""}>
-              <th><button onClick={() => setSelectedRunId(run.run_id)}>{new Date(run.created_at).toLocaleString(language)}</button></th>
+              <th><button onClick={() => setSelectedRunId(run.run_id)}>{run.name ? `${run.name} · ` : ""}{new Date(run.created_at).toLocaleString(language)}</button></th>
               <td>{t[`status_${run.status}` as keyof AdaptiveCopy] ?? run.status}</td>
               <td>{run.outcome ? t.comparisonReady : "—"}</td>
               <td>{run.mean_delta === undefined || run.mean_delta === null ? "—" : `${points(run.mean_delta)} [${points(run.ci_low)}, ${points(run.ci_high)}]`}</td>
