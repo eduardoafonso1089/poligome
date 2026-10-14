@@ -26,7 +26,21 @@ Poligome opens GeoTIFF and Cloud Optimized GeoTIFF (COG) files directly. COGs ca
 
 Files that are not proper COGs can still be opened, but large rasters are more efficient after conversion. Poligome provides an optional local COG converter for this workflow.
 
-See [Raster import and export](docs/RASTER_WORKFLOW.md) for supported formats, sidecars, memory limits, coordinate handling and verification instructions.
+GeoJSON exports use WGS84 longitude/latitude and preserve these feature properties:
+
+| Property | Meaning |
+| --- | --- |
+| `id` | Stable annotation identifier |
+| `class` | Class name, or its identifier if the class is unavailable |
+| `class_id` | Stable class identifier |
+| `color` | Class color, or null |
+| `shape` | Box, polygon, line or point |
+| `rotation` | Clockwise box rotation in radians; absent for other shapes |
+| `source_image` | Annotated image or crop filename |
+| `source_raster` | Source raster name or URL |
+| `crs` | Source CRS for provenance; exported coordinates remain WGS84 |
+
+QGIS styles and filters must use these English property names.
 
 ## Local AI and Poligome Runtime
 
@@ -110,7 +124,7 @@ For additional Windows troubleshooting, see [REINSTALL_WINDOWS.md](REINSTALL_WIN
 
 Poligome uses a FastAPI connector that runs on the user's computer; images and prompts are not sent to the Site. The **Enable local SAM** screen contains a catalog with requirements, license, checkpoint size, platform, and official benchmark — always paired with the hardware on which the figure was measured.
 
-The complete guide, including Meta approval for SAM 3, is in [docs/sam.md](docs/sam.md). Read the **What requires manual action** section first: the connector is a local process, must be running whenever AI is used, and does not restart itself after the terminal is closed or the computer restarts. The editor finds a running connector, but no web page can start one. A user service solves this on Linux; there is not yet an equivalent on Windows or macOS.
+The installation guide in **AI › Assisted** includes Meta approval for SAM 3. The connector is a local process, must be running whenever AI is used, and does not restart itself after the terminal is closed or the computer restarts. The editor finds a running connector, but no web page can start one. A user service solves this on Linux; there is not yet an equivalent on Windows or macOS.
 
 Available models:
 
@@ -126,11 +140,12 @@ Installation and startup:
 
 - `public/poligome-sam-macos-linux.sh <model-id>` installs on Linux, supported macOS versions, or WSL2, then starts the selected model;
 - `public/poligome-sam-windows.bat <model-id>` delegates installation to WSL2 while preserving the same menu and model ID;
+- `powershell -ExecutionPolicy Bypass -File public/poligome-sam-windows-native.ps1 <model-id>` installs and starts SAM directly on Windows, using `%USERPROFILE%\.poligome-sam`; run it again with the desired model to restart;
 - the `public/poligome-sam-start-macos-linux.sh` and `public/poligome-sam-start-windows.bat` launchers restart an existing installation and automatically resume an interrupted one;
 - `public/poligome-sam-local.py` is the unified manual connector, with the `--model`, `--checkpoint`, `--model-config` (SAM 2 Hydra name), `--device`, `--port`, and `--app-dir` CLI options;
 - `public/poligome-sam-service-linux.sh install` registers the connector as a systemd user service, so it starts at login and no terminal has to stay open (`status` and `uninstall` complete the lifecycle). On macOS and WSL2 without systemd, use the regular launcher.
 
-Model switching happens in the interface itself: `GET /models` lists what is installed in `~/.poligome-sam`, and `POST /load {"model_id"}` reloads the connector in the requested family's virtual environment. Because each family has its own runtime, switching uses `execv` to replace the process while preserving its PID, terminal, and parent process, so installers waiting for the connector remain valid. The port is unavailable briefly while the modal follows `/health` until it is `ready`. Models that are not installed are rejected with HTTP 409 explaining what is missing instead of starting in a broken state.
+Model switching happens in the interface itself: `GET /models` lists what is installed in `~/.poligome-sam`, and `POST /load {"model_id"}` reloads the connector in the requested family's virtual environment. Switching families on Unix uses `execv` to replace the process. On native Windows, the connector exits with code 75 and the PowerShell installer relaunches it in the selected family's runtime. The port is unavailable briefly while the modal follows `/health` until it is `ready`. Models that are not installed are rejected with HTTP 409 explaining what is missing instead of starting in a broken state.
 
 The default endpoint is `http://127.0.0.1:7860/predict`. The connector validates the requested model, exposes state and capabilities at `/health`, detects the compatible device, and caches the current image representation to accelerate refinements. Browser requests accept only the official origin, development loopback origins, and additional origins declared through `POLIGOME_ALLOWED_ORIGINS`; the launchers configure this from `POLIGOME_SITE_URL`. MedSAM2 is a medical-image fine-tuning of SAM 2.1 Hiera Tiny, published by Bo Wang's group. It loads with the official `sam2.1_hiera_t.yaml` configuration and reuses the SAM 2.1 runtime, so installation costs only the 156 MB checkpoint. Note the license: the project code is Apache 2.0, but the official weights card restricts use to research and education, so commercial use is not authorized; the catalog shows this before installation. On ordinary photography it performs worse than standard SAM 2.1, and box prompts work better than points, reflecting how the model was trained. Beyond the general model, the official repository publishes fine-tunings by modality — `medsam2-ct-lesion` (CT lesion), `medsam2-mri-liver-lesion` (MRI liver lesion), and `medsam2-us-heart` (cardiac ultrasound) — plus the `medsam2-2411` base weights, retained only for reproducibility. They all start from the same SAM 2.1 Hiera Tiny, load with the same `sam2.1_hiera_t.yaml`, and occupy about 156 MB each, so adding one to an existing installation costs only the checkpoint download. The ultrasound fine-tuning was trained upstream on video; because this editor supports images only, it is used frame by frame. The research-and-education license restriction applies to all of them.
 
@@ -146,13 +161,13 @@ The packaging mirrors Amazon SageMaker, so a container prepared for it runs here
 - the identifier must begin with `byom-`, and the endpoint may only be `127.0.0.1` or `localhost`: a remote address would move images off the user's machine;
 - `segmentation` becomes a polygon, `bbox` becomes a box, and `keypoints` becomes a point, with `categories[].name` defining the class.
 
-The connector exposes `GET /byom/models`, which lists registered containers and their state; `POST /byom/register`, which imports or edits a registration; `DELETE /byom/models/{id}`, which removes one; and `POST /byom/annotate`, which runs one against an image. A container may implement `GET /metadata` to declare its classes; when it does not, the connector retains a summary of the last run and the interface explains the model from that. In the interface, BYOM models live under the **AI** button, **Automatic** tab, as **Container** models next to the **Native** ones served by Poligome Runtime; **Add my model** gathers the contract, guide, downloadable files and import form, and **Pre-annotate** runs a model on the open image or on every image in the project, ending with a summary that can undo the whole run at once. The complete guide is in [docs/byom.md](docs/byom.md), starting with **What requires manual action**: BYOM depends on the connector and container, and containers are created without a restart policy, so restarting the machine or Docker leaves them stopped — the registration survives, but the process does not.
+The connector exposes `GET /byom/models`, which lists registered containers and their state; `POST /byom/register`, which imports or edits a registration; `DELETE /byom/models/{id}`, which removes one; and `POST /byom/annotate`, which runs one against an image. A container may implement `GET /metadata` to declare its classes; when it does not, the connector retains a summary of the last run and the interface explains the model from that. In the interface, BYOM models live under the **AI** button, **Automatic** tab, as **Container** models next to the **Native** ones served by Poligome Runtime; **Add my model** gathers the contract, guide, downloadable files and import form, and **Pre-annotate** runs a model on the open image or on every image in the project, ending with a summary that can undo the whole run at once. BYOM depends on the connector and container, and containers are created without a restart policy, so restarting the machine or Docker leaves them stopped — the registration survives, but the process does not.
 
-SAM 2.1 checkpoints come from Meta's official downloads; SAM 3 requires requesting access at https://huggingface.co/facebook/sam3, waiting for manual approval, and running `hf auth login` locally. The flow was verified end to end with an approved account: downloading the 3.45 GB checkpoint, loading on CUDA, point and box prompts, and text prompts returning multiple concept instances. The installers invoke the Hugging Face CLI through its console script when usable and, when its shebang points to an interpreter that no longer exists — which happens if the app folder is renamed — fall back to the entry point resolved by the package itself.
+SAM 2.1 checkpoints come from Meta's official downloads; SAM 3 requires requesting access at https://huggingface.co/facebook/sam3, waiting for manual approval, and running `hf auth login` locally. The native Windows installer resolves the Hugging Face CLI entry point through its installed package, so renaming the app folder does not leave the CLI pointing at a missing interpreter.
 
-The installers keep the Site URL and the public asset origin separate: `POLIGOME_SITE_URL` controls the page opened and CORS, while script updates use `https://raw.githubusercontent.com/eduardoafonso1089/epiaka/main/public` by default. The connector bootstrap uses an immutable public commit and verifies its SHA-256 checksum. `POLIGOME_ASSET_BASE_URL` can replace that HTTPS origin. During development or an offline Linux/macOS installation, `POLIGOME_CONNECTOR_PATH` explicitly accepts a local copy of the connector. The SAM 3 runtime pins `setuptools<81` while the upstream revision in use still depends on `pkg_resources`, and explicitly installs the dependencies used by the main import.
+The installers keep the Site URL and the public asset origin separate: `POLIGOME_SITE_URL` controls the page opened and CORS, while script updates use `https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public` by default. The default connector bootstrap verifies its SHA-256 checksum. `POLIGOME_ASSET_BASE_URL` can replace that HTTPS origin. During development or an offline installation, `POLIGOME_CONNECTOR_PATH` explicitly accepts a local copy of the connector. The SAM 3 runtime pins `setuptools<81` while the upstream revision in use still depends on `pkg_resources`, and explicitly installs the dependencies used by the main import.
 
-Selection is transactional: the chosen model remains in `pending-model.txt` during installation and is promoted to `selected-model.txt` only after its runtime, device, checkpoint, and exact-model `/health` pass validation. Launchers resume this pending state; incomplete checkpoints are not reused because all five artifacts are checked against their official sizes before activation.
+Selection is transactional: the chosen model remains in `pending-model.txt` during installation and is promoted to `selected-model.txt` only after its runtime, device, checkpoint, and exact-model `/health` pass validation. Installing another model while a connector is active preserves the current selection. A selection write failure aborts installation and retains the pending state. Launchers resume this pending state; incomplete checkpoints are not reused because all ten checkpoints are checked against their official sizes before activation.
 
 Weights and dependencies are never written to the checkout: Linux, macOS, and WSL2 use `~/.poligome-sam/`. The `.gitignore` also blocks checkpoint formats, virtual environments, and model directories as an additional safeguard.
 
@@ -196,7 +211,6 @@ app/editor/           editor components and interaction logic
 app/lib/              shared project, raster, SAM and i18n utilities
 app/raster/           raster-related route and UI
 public/               local helper installers, services and static assets
-docs/                 technical and workflow documentation
 install.sh            Linux local setup
 install.ps1           Windows local setup
 ```

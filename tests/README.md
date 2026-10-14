@@ -69,7 +69,7 @@ assert.match(region(WORKBENCH, "function duplicatePolygon", "function "), /makeI
 written on one line still matches after the file is wrapped or reformatted.
 `region` scopes an assertion to one function, `cssRule` to one CSS rule, and
 `lineCount` answers the rare question about a file's size.
-`architecture-guards.test.mjs` fails the build if a test reads `app/` or `docs/`
+`architecture-guards.test.mjs` fails the build if a test reads `app/` or `README.md`
 without the helper.
 
 ## Running the functional tier locally

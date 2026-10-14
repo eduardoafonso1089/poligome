@@ -5,7 +5,7 @@ import type { Language } from "./i18n";
  * "Adicionar meu modelo" do BYOM.
  *
  * Regra de escrita: direto e curto — o passo e o comando, sem justificativa. O
- * porquê de cada passo está em docs/sam.md e docs/byom.md.
+ * Os detalhes de funcionamento estão nas seções SAM e BYOM do README.md.
  *
  * Trechos entre crases viram `<code>` na tela: assim uma frase com nome de
  * arquivo ou comando continua inteira em cada idioma. `{nome}` é preenchido

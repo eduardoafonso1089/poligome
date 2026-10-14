@@ -232,7 +232,7 @@ export function buildGeoJson(assets: Asset[], labels: Label[], annotations: Edit
       geometry,
       // Breaking change: these were Portuguese (classe, cor, forma, rotacao,
       // recorte, origem) up to and including the 1.0 export. Documented in
-      // docs/RASTER_WORKFLOW.md; QGIS styles keyed on the old names need updating.
+      // README.md; QGIS styles keyed on the old names need updating.
       properties: {
         id: annotation.id,
         class: label?.name ?? annotation.label,

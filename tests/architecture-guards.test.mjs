@@ -105,7 +105,7 @@ test("the real source tree passes every architecture rule", async () => {
   assert.deepEqual(boundaryViolations, []);
 });
 
-const DIRECT_SOURCE_READ = /\breadFile(Sync)?\(\s*new URL\(\s*['"`]\.\.\/(app|docs)\//;
+const DIRECT_SOURCE_READ = /\breadFile(Sync)?\(\s*new URL\(\s*['"`]\.\.\/(?:app\/|README\.md)/;
 
 test("no test asserts on the formatting of a source file", async () => {
   // The suite used to break whenever a file was reformatted: one test required a
@@ -122,7 +122,7 @@ test("no test asserts on the formatting of a source file", async () => {
     if (!entry.endsWith(".test.mjs") || entry === "architecture-guards.test.mjs") continue;
     const source = await readFile(new URL(entry, tests), "utf8");
     // node:fs is legitimate for fixtures and directory listings; reading a file
-    // under app/ or docs/ for pattern matching is what belongs in the helper.
+    // under app/ or README.md for pattern matching belongs in the helper.
     if (DIRECT_SOURCE_READ.test(source)) offenders.push(entry);
   }
 
@@ -132,7 +132,7 @@ test("no test asserts on the formatting of a source file", async () => {
 test("the formatting guard recognises a direct read when there is one", () => {
   // A guard that cannot fail is not a guard.
   assert.ok(DIRECT_SOURCE_READ.test(`readFileSync(new URL("../app/x.ts", import.meta.url), "utf8")`));
-  assert.ok(DIRECT_SOURCE_READ.test(`await readFile(new URL('../docs/X.md', import.meta.url), 'utf8')`));
+  assert.ok(DIRECT_SOURCE_READ.test(`await readFile(new URL('../README.md', import.meta.url), 'utf8')`));
   assert.ok(!DIRECT_SOURCE_READ.test(`sourceOf("app/x.ts")`));
 });
 

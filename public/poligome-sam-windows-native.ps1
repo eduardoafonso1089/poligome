@@ -851,11 +851,17 @@ function Test-PortInUse {
 }
 
 function Save-Selection([string] $Path, [string] $Value) {
-  New-Item -ItemType Directory -Force $AppDir | Out-Null
   $partial = "$Path.part"
-  # Sem BOM: o conector e os iniciadores leem este arquivo como texto simples.
-  [System.IO.File]::WriteAllText($partial, "$Value`n", (New-Object System.Text.UTF8Encoding($false)))
-  Move-Item -LiteralPath $partial -Destination $Path -Force
+  try {
+    New-Item -ItemType Directory -Force $AppDir -ErrorAction Stop | Out-Null
+    # Sem BOM: o conector e os iniciadores leem este arquivo como texto simples.
+    [System.IO.File]::WriteAllText($partial, "$Value`n", (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $partial -Destination $Path -Force -ErrorAction Stop
+  } catch {
+    # Continue tolera stderr de executaveis, mas nunca uma selecao nao gravada.
+    # Abortar aqui preserva o modelo anterior e o estado de retomada.
+    Fail "nao foi possivel salvar a selecao em ${Path}: $($_.Exception.Message)"
+  }
 }
 
 function Get-SiteOrigin {

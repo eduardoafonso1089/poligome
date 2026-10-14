@@ -46,6 +46,50 @@ $save
     Write-Host "ok - native $state preserves the selected model or confirms the ready model"
   }
 
+  # Production uses Continue to tolerate native stderr. A failed selection
+  # write must still abort before the ready handler clears pending-model.txt.
+  foreach ($failure in @('write', 'commit')) {
+    $app = Join-Path $root "selection-$failure-failure"
+    New-Item -ItemType Directory -Path $app | Out-Null
+    $selected = Join-Path $app 'selected-model.txt'
+    $pending = Join-Path $app 'pending-model.txt'
+    [System.IO.File]::WriteAllText($selected, "sam2.1-hiera-small`n")
+    [System.IO.File]::WriteAllText($pending, "sam2.1-hiera-tiny`n")
+    $commitFailure = ''
+    if ($failure -eq 'write') {
+      New-Item -ItemType Directory -Path "$selected.part" | Out-Null
+    } else {
+      $commitFailure = @'
+function Move-Item {
+  [CmdletBinding()]
+  param([string] $LiteralPath, [string] $Destination, [switch] $Force)
+  Write-Error 'Injected selection commit failure'
+}
+'@
+    }
+    $runner = Join-Path $app 'run.ps1'
+    $readyClause = $selectionSwitch.Clauses | Where-Object { $_.Item1.Extent.Text -eq "'ready'" } | Select-Object -First 1
+    [System.IO.File]::WriteAllText($runner, @"
+`$ErrorActionPreference = 'Continue'
+`$AppDir = $(Quote-Literal $app)
+`$SelectedModelFile = $(Quote-Literal $selected)
+`$PendingModelFile = $(Quote-Literal $pending)
+`$modelId = 'sam2.1-hiera-tiny'
+`$Port = 7860
+function Fail([string] `$Message) { Write-Host `$Message; exit 1 }
+$commitFailure
+$save
+& $($readyClause.Item2.Extent.Text)
+"@)
+    $ErrorActionPreference = 'Continue'
+    try { & $pwsh -NoProfile -File $runner *> (Join-Path $app 'failure.log') }
+    finally { $ErrorActionPreference = 'Stop' }
+    if ($LASTEXITCODE -eq 0) { throw 'Failed selection write was reported as a successful installation' }
+    if ((Get-Content -LiteralPath $selected -Raw).Trim() -ne 'sam2.1-hiera-small') { throw 'Failed write changed the prior selection' }
+    if (-not (Test-Path -LiteralPath $pending)) { throw 'Failed write discarded the pending installation' }
+    Write-Host "ok - selection $failure failure aborts and preserves the prior selection and pending installation"
+  }
+
   $starter = [System.IO.File]::ReadAllText((Join-Path $project 'public/poligome-sam-start-windows.bat'))
   $match = [regex]::Match($starter, '(?ms)^:sync_wsl_selection\r?\n.*?^-?powershell .*?-Command "(.*?)" >nul 2>nul')
   if (-not $match.Success) { throw 'WSL selection sync command not found' }
