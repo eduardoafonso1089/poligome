@@ -18,6 +18,7 @@ import {
 import { DEFAULT_SAM_MODEL_ID, isByomModelId, isSamModelId } from "../../lib/sam-models";
 import { normalizeSamEndpoint } from "../../lib/local-endpoint";
 import type { ByomModel } from "../../lib/sam-models";
+import { useLocalNetworkAccess } from "./use-local-network-access";
 
 export type ConnectionState = "idle" | "checking" | "loading" | "ready" | "error" | "offline";
 
@@ -188,6 +189,19 @@ export function useSamCatalog(active: boolean) {
     void refresh(true);
   }, [active, refresh]);
 
+  // "Permitir" no aviso de rede local não tira o foco da aba, então nada
+  // sondava de novo: a tela seguia "desligado" com o conector já alcançável.
+  const networkAccess = useLocalNetworkAccess(active);
+  const previousAccess = useRef(networkAccess);
+  useEffect(() => {
+    const before = previousAccess.current;
+    previousAccess.current = networkAccess;
+    if (active && networkAccess === "granted" && (before === "prompt" || before === "denied")) {
+      setConnectionState((current) => (current === "idle" || current === "offline" ? "checking" : current));
+      void refresh(false);
+    }
+  }, [active, networkAccess, refresh]);
+
   useEffect(() => {
     if (!active) return;
     const onFocus = () => { if (document.visibilityState === "visible") void refresh(false); };
@@ -331,7 +345,7 @@ export function useSamCatalog(active: boolean) {
     recheck,
     endpoint, setEndpoint,
     selectedModelId, setSelectedModelId,
-    loadedModelId, connectionState, runtimeLabel, capabilities, availability, loadError, connectorHost,
+    loadedModelId, connectionState, networkAccess, runtimeLabel, capabilities, availability, loadError, connectorHost,
     byomModels, byomModelId, setByomModelId, byomBusy, activeByomModel,
     // Carregado no conector e em uso para anotar sao coisas diferentes: depois de
     // "desselecionar todos" o modelo continua carregado, e so deixa de ser usado.

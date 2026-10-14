@@ -114,8 +114,19 @@ for (const language of ['pt','en','fr','es']) {
     const copy=getInstallationCopy(language), sc=getSamCopy(language);
     const markup=render(SamSetupModal,samProps(language));
     assert.ok(text(markup).includes(fill(copy.samBeforeUnix,{version:'3.10+'})));
-    assert.ok(text(markup).includes(fill(copy.samBack,{action:sc.btnLoad})));
+    // Tiny não está instalado: não há o que "carregar" antes de rodar o instalador.
+    assert.ok(text(markup).includes(fill(copy.samBack,{action:sc.btnVerify})));
+    assert.ok(text(markup).includes(sc.stNotInstalled));
+    assert.ok(!text(markup).includes(sc.btnLoad));
     assert.ok(markup.includes('href="https://www.python.org/downloads/release/python-31210/"'));
+  });
+  test(`SAM setup names the browser's local network prompt instead of "connector off" in ${language}`,()=>{
+    const sc=getSamCopy(language);
+    const prompt=text(render(SamSetupModal,samProps(language,{connectionState:'offline',loadedModelId:null,availability:[],networkAccess:'prompt'})));
+    assert.ok(prompt.includes(sc.stNetworkPrompt) && prompt.includes(sc.stNetworkPromptHint));
+    assert.ok(!prompt.includes(sc.stOffline));
+    const denied=text(render(SamSetupModal,samProps(language,{connectionState:'offline',loadedModelId:null,availability:[],networkAccess:'denied'})));
+    assert.ok(denied.includes(sc.stNetworkDenied) && denied.includes(sc.stNetworkDeniedHint));
   });
   test(`SAM 3 setup shows the approval requirement before the download in ${language}`,()=>{
     const copy=getInstallationCopy(language);

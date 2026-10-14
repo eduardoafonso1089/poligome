@@ -13,6 +13,7 @@ import { localizeSamModel, translateSamText } from "../lib/sam-models-i18n";
 import { SAM_MODELS, getSamModel, DEFAULT_SAM_MODEL_ID } from "../lib/sam-models";
 import type { ByomModel, SamModelDefinition } from "../lib/sam-models";
 import type { RuntimeManifest } from "../lib/runtime-client";
+import type { LocalNetworkAccess } from "../editor/presentation/use-local-network-access";
 import { getInstallationCopy } from "../lib/installation-copy";
 import { preferredInstallPlatform } from "../lib/installation-commands";
 import { CommandCode } from "./InstallationGuide";
@@ -38,6 +39,8 @@ type Props = {
   selectedModelId: string;
   loadedModelId: string | null;
   connectionState: ConnectionState;
+  /** A permissão de rede local do navegador: pendente ou negada, ela é o motivo do "desligado". */
+  networkAccess?: LocalNetworkAccess;
   /** Se o SAM carregado está sendo usado para anotar, e não apenas carregado. */
   samActive: boolean;
   runtimeLabel: string;
@@ -100,13 +103,23 @@ const CAPABILITY_KEYS = {
   bidirectionalPropagation: "capBidirectional",
 } as const satisfies Record<string, keyof SamCopy>;
 
-function statusLabel(sc: SamCopy, state: ConnectionState, modelMatches: boolean) {
+function statusLabel(sc: SamCopy, state: ConnectionState, modelMatches: boolean, needsInstall: boolean, network: LocalNetworkAccess) {
   if (state === "checking") return sc.stChecking;
   if (state === "loading") return sc.stLoading;
   if (state === "error") return sc.stError;
   if (state === "ready" && modelMatches) return sc.stReady;
+  if (state === "ready" && needsInstall) return sc.stNotInstalled;
   if (state === "ready") return sc.stOtherLoaded;
+  if (network === "prompt") return sc.stNetworkPrompt;
+  if (network === "denied") return sc.stNetworkDenied;
   return sc.stOffline;
+}
+
+/** Sem resposta do conector, o que fazer depende de o navegador estar barrando a página. */
+function offlineHint(sc: SamCopy, network: LocalNetworkAccess) {
+  if (network === "prompt") return sc.stNetworkPromptHint;
+  if (network === "denied") return sc.stNetworkDeniedHint;
+  return sc.stOfflineHint;
 }
 
 function benchmarkSummary(sc: SamCopy, model: SamModelDefinition) {
@@ -131,6 +144,7 @@ export default function SamSetupModal({
   selectedModelId,
   loadedModelId,
   connectionState,
+  networkAccess = "unsupported",
   samActive,
   runtimeLabel,
   loadError,
@@ -201,7 +215,10 @@ export default function SamSetupModal({
   const needsInstall = selectedAvailability !== null && !selectedAvailability.installed;
   const benchmark = benchmarkSummary(sc, model);
   const modelMatches = connectionState === "ready" && loadedModelId === model.id;
-  const activationLabel = modelMatches ? sc.btnUse : connectionState === "ready" ? sc.btnLoad : sc.btnVerify;
+  // Um modelo sem checkpoint não tem o que carregar: o botão volta a ser o
+  // "Verificar e usar" que o passo a passo manda clicar depois do instalador.
+  const activationLabel = modelMatches ? sc.btnUse : connectionState === "ready" && !needsInstall ? sc.btnLoad : sc.btnVerify;
+  const status = loadError ? sc.stSwitchRefused : statusLabel(sc, connectionState, modelMatches, needsInstall, networkAccess);
   const pythonNotes = "notes" in model.requirements.python ? model.requirements.python.notes : null;
   const cudaTested = "tested" in model.requirements.cuda ? model.requirements.cuda.tested : null;
   // O que o editor realmente envia e desenha hoje. Fora desta lista, a capacidade
@@ -505,6 +522,7 @@ export default function SamSetupModal({
               onRetry: runtime.refresh,
             }}
             containers={byomModels}
+            networkNotice={networkAccess === "prompt" || networkAccess === "denied" ? `${statusLabel(sc, "offline", false, false, networkAccess)}. ${offlineHint(sc, networkAccess)}` : null}
             onShowInstall={() => { onTabChange("assisted"); setAssistedView("model"); }}
             onShowAddModel={() => { onTabChange("automatic"); setAutomaticView("docs"); }}
             onShowRuntimeInstall={() => { onTabChange("automatic"); setAutomaticView("runtime"); }}
@@ -561,14 +579,15 @@ export default function SamSetupModal({
           <section className={`sam-runtime-status ${loadError ? "error" : connectionState} ${!loadError && connectionState === "ready" && !modelMatches ? "mismatch" : ""}`}>
             <span />
             <div>
-              <b>{loadError ? sc.stSwitchRefused : statusLabel(sc, connectionState, modelMatches)}</b>
+              <b>{status}</b>
               {loadError && <small>{loadError}</small>}
               {runtimeLabel && <small>{loadError ? fill(sc.stStillUp, { label: runtimeLabel }) : runtimeLabel}</small>}
               {/* A dica sobre CUDA só serve quando o modelo existe e quebrou ao
                   carregar. Para um modelo que nem foi baixado ela mandava o
                   usuário investigar a placa de vídeo sem motivo. */}
               {!loadError && connectionState === "error" && <small>{sc.stErrorHint}</small>}
-              {!loadError && connectionState === "ready" && !modelMatches && <small><Rich text={fill(sc.stMismatchHint, { id: model.id })} /></small>}
+              {!loadError && connectionState === "ready" && !modelMatches && <small><Rich text={needsInstall ? sc.stNotInstalledHint : fill(sc.stMismatchHint, { id: model.id })} /></small>}
+              {!loadError && connectionState === "offline" && networkAccess !== "unsupported" && networkAccess !== "granted" && <small>{offlineHint(sc, networkAccess)}</small>}
               {/* Duas instalações disputam a mesma porta 7860 e só uma atende.
                   Sem esta linha, quem instalou nos dois caminhos via a lista do
                   outro e concluía que o registro tinha sumido. */}
@@ -635,9 +654,9 @@ export default function SamSetupModal({
         {tab === "assisted" && <span className={`sam-footer-status ${loadError ? "error" : connectionState}`} aria-live="polite">
           <em />
           <span>
-            <b>{loadError ? sc.stSwitchRefused : statusLabel(sc, connectionState, modelMatches)}</b>
+            <b>{status}</b>
             {loadError ? <small>{loadError}</small> : runtimeLabel ? <small>{runtimeLabel}</small> : null}
-            {!loadError && connectionState === "offline" && <small>{sc.stOfflineHint}</small>}
+            {!loadError && connectionState === "offline" && <small>{offlineHint(sc, networkAccess)}</small>}
           </span>
         </span>}
         <button onClick={onClose}>{ai.close}</button>
@@ -646,13 +665,7 @@ export default function SamSetupModal({
         </button>}
         {showFooterAction && <button className="connect" disabled={connectionState === "checking" || connectionState === "loading"} onClick={onConnect}>
           {connectionState === "checking" || connectionState === "loading" ? <Gauge className="spin" size={15} /> : <Link2 size={15} />}
-          {connectionState === "loading"
-            ? sc.btnLoading
-            : modelMatches
-              ? sc.btnUse
-              : connectionState === "ready"
-                ? sc.btnLoad
-                : sc.btnVerify}
+          {connectionState === "loading" ? sc.btnLoading : activationLabel}
         </button>}
       </footer>
     </section>

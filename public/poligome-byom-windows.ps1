@@ -322,7 +322,7 @@ function Invoke-Start([hashtable] $Options) {
   while ((Get-Date) -lt $deadline) {
     if (Test-Ping $endpoint) {
       Write-Host "Pronto: $($Options.ModelId) respondeu 200 em $endpoint/ping."
-      Write-Host 'No editor, abra o modelo de IA e rode este BYOM sobre a imagem.'
+      Write-Host "No editor, clique em Pre-anotar e escolha $($Options.ModelId)."
       return
     }
     $running = docker ps -q -f "name=^$container$" 2>$null

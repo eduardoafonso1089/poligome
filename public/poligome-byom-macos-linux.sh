@@ -360,7 +360,7 @@ with open(sys.argv[1], encoding="utf-8") as handle:
   while ((SECONDS < deadline)); do
     if ping_ok "$endpoint"; then
       printf 'Pronto: %s respondeu 200 em %s/ping.\n' "$model_id" "$endpoint"
-      printf 'No editor, abra o modelo de IA e rode este BYOM sobre a imagem.\n'
+      printf 'No editor, clique em Pré-anotar e escolha %s.\n' "$model_id"
       return 0
     fi
     if [[ -z "$(docker ps -q -f "name=^${container}$")" ]]; then

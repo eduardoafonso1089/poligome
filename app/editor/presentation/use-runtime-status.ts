@@ -9,6 +9,7 @@ import {
   fetchRuntimeManifest,
   type RuntimeManifest,
 } from "../../lib/runtime-client";
+import { useLocalNetworkAccess } from "./use-local-network-access";
 
 export type RuntimeState = "checking" | "ready" | "offline";
 
@@ -81,5 +82,14 @@ export function useRuntimeStatus(active: boolean) {
     };
   }, [active, refresh]);
 
-  return { endpoint, setEndpoint, state, manifest, occupied, refresh };
+  // Mesmo motivo do catálogo do conector: conceder a permissão não muda o foco.
+  const networkAccess = useLocalNetworkAccess(active);
+  const previousAccess = useRef(networkAccess);
+  useEffect(() => {
+    const before = previousAccess.current;
+    previousAccess.current = networkAccess;
+    if (active && networkAccess === "granted" && (before === "prompt" || before === "denied")) void refresh();
+  }, [active, networkAccess, refresh]);
+
+  return { endpoint, setEndpoint, state, manifest, occupied, networkAccess, refresh };
 }

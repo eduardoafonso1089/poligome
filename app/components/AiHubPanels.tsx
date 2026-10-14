@@ -374,12 +374,14 @@ function StatusPill({ copy, state }: { copy: AiCopy; state: ServiceState }) {
 }
 
 export function ConnectionsPanel({
-  copy, connector, runtime, containers, onShowInstall, onShowAddModel, onShowRuntimeInstall,
+  copy, connector, runtime, containers, networkNotice, onShowInstall, onShowAddModel, onShowRuntimeInstall,
 }: {
   copy: AiCopy;
   connector: { state: ServiceState; endpoint: string; host: string | null; serving: string; modelState?: "ready" | "loading" | "error"; onEndpoint: (value: string) => void; onRetry: () => void };
   runtime: { state: ServiceState; endpoint: string; serving: string; occupied?: boolean; onEndpoint: (value: string) => void; onRetry: () => void };
   containers: readonly ByomModel[];
+  /** Por que nada local responde, quando é o navegador que barra a página. */
+  networkNotice?: string | null;
   onShowInstall: () => void;
   onShowAddModel: () => void;
   onShowRuntimeInstall: () => void;
@@ -401,6 +403,7 @@ export function ConnectionsPanel({
         <details><summary>{copy.containerErrorDetail}</summary><code>{connector.serving}</code></details>
       </> : connector.state === "ready" && connector.modelState === "loading" ? <p className="ai-conn-detail">{copy.connModelLoading}</p>
         : connector.state === "ready" && <p className="ai-conn-detail">{fill(copy.connServing, { model: connector.serving })}{connector.host ? ` · ${fill(copy.connHost, { host: connector.host })}` : ""}</p>}
+      {connector.state === "offline" && networkNotice && <p className="ai-conn-warning"><AlertTriangle size={13} /><span>{networkNotice}</span></p>}
       {connector.state === "offline" && <p className="ai-conn-detail">{copy.connConnectorHow}</p>}
       <div className="ai-conn-row">
         <EndpointField copy={copy} value={connector.endpoint} placeholder="http://127.0.0.1:7860/predict" normalize={normalizeSamEndpoint} onCommit={connector.onEndpoint} onValidityChange={setConnectorAddressValid} />
@@ -412,6 +415,7 @@ export function ConnectionsPanel({
     <section className="ai-conn-card">
       <header><span className="ai-conn-icon"><Layers size={16} /></span><div><b>{copy.connRuntimeTitle}</b><small>{copy.connRuntimeRole}</small></div><StatusPill copy={copy} state={runtime.state} /></header>
       {runtime.state === "ready" && runtime.serving && <p className="ai-conn-detail">{fill(copy.connServing, { model: runtime.serving })}</p>}
+      {runtime.state === "offline" && networkNotice && <p className="ai-conn-warning"><AlertTriangle size={13} /><span>{networkNotice}</span></p>}
       {runtime.state === "offline" && <p className="ai-conn-detail">{copy.runtimeOfflineBody}</p>}
       {runtime.state === "offline" && runtime.occupied && <p className="ai-conn-warning"><AlertTriangle size={13} /><span>{fill(copy.connPortClash, { port: runtimePort || "7861" })}</span></p>}
       <div className="ai-conn-row">

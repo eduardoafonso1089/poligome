@@ -634,6 +634,9 @@ html[data-theme="light"]{--ink:#29262F;--muted:#6E6A75;--line:#DEDCE4;--green:#7
    imagem e o resultado chegando. Um lote continua correndo enquanto a pessoa
    olha outra foto, e ela precisa ver isso de onde estiver. */
 .ai-run-card{position:fixed;left:50%;bottom:54px;transform:translateX(-50%);z-index:110;width:min(460px,calc(100vw - 24px));padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);box-shadow:0 14px 40px rgba(15,29,20,.22)}
+/* Com a ferramenta SAM ativa, a barra dela ocupa o pé do canvas (até duas linhas):
+   o resultado da pré-anotação sobe para não esconder Salvar e Reiniciar. */
+body:has(.sam-controls) .ai-run-card{bottom:150px}
 .ai-run-head{display:flex;align-items:center;gap:9px}
 .ai-run-head>svg{flex:none;color:var(--green)}
 .ai-run-head>span{flex:1;min-width:0}

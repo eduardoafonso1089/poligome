@@ -32,6 +32,7 @@ export function commandFromKeyboard(event: Pick<KeyboardEvent, "key" | "ctrlKey"
     f: "freehand",
     l: "line",
     k: "point",
+    s: "sam",
   };
   if (drawingTools[key]) return { type: "tool", tool: drawingTools[key] };
   if (key === "o") return { type: "vector-tool", tool: "hole" };

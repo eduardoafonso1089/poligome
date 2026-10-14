@@ -92,6 +92,7 @@ function TopbarWithCatalog(props: PreRefactorChromeProps & { catalog: ReturnType
       selectedModelId={catalog.selectedModelId}
       loadedModelId={catalog.loadedModelId}
       connectionState={catalog.connectionState}
+      networkAccess={catalog.networkAccess}
       samActive={catalog.samActive}
       runtimeLabel={catalog.runtimeLabel}
       loadError={catalog.loadError}

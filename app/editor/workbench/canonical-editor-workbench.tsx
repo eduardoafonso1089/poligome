@@ -1313,7 +1313,8 @@ export function CanonicalEditorWorkbench() {
       if (tool !== "select") setTool("select"); else editor.dispatch({ type: "clear-selection" });
       return;
     }
-    if (command.type === "tool") { if (asset && !asset.missing) chooseTool(command.tool); return; }
+    // S alterna como o botão da barra, que promete "Desativar ferramenta SAM (S)".
+    if (command.type === "tool") { if (asset && !asset.missing) chooseTool(command.tool === "sam" && tool === "sam" ? "select" : command.tool); return; }
     if (command.type === "vector-tool") { if (activePolygon) chooseVectorTool(command.tool); return; }
     if (command.type === "label-key") {
       const label = labels.find((item) => item.key === command.key);

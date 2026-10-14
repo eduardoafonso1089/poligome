@@ -12,6 +12,8 @@ test('tool shortcuts map to canonical tools', () => {
   assert.deepEqual(commandFromKeyboard(key('f')), {type:'tool',tool:'freehand'});
   assert.deepEqual(commandFromKeyboard(key('l')), {type:'tool',tool:'line'});
   assert.deepEqual(commandFromKeyboard(key('k')), {type:'tool',tool:'point'});
+  assert.deepEqual(commandFromKeyboard(key('s')), {type:'tool',tool:'sam'});
+  assert.deepEqual(commandFromKeyboard(key('S',{shiftKey:true})), {type:'tool',tool:'sam'});
 });
 
 test('advanced vector shortcuts are distinct from drawing tools', () => {
