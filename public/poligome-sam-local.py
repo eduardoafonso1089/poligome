@@ -51,11 +51,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 # O SAM 2 chama torch.jit.script ao ser importado, e o PyTorch recente avisa que
-# isso está obsoleto. O aviso é para quem mantém o SAM 2: no terminal de quem
-# anota ele parecia um erro da instalação.
+# isso está obsoleto ("is deprecated"; no Python 3.14, "is not supported"). O
+# aviso é para quem mantém o SAM 2: no terminal de quem anota ele parecia um erro
+# da instalação, e a segmentação funciona igual.
 warnings.filterwarnings(
     "ignore",
-    message=r"`torch\.jit\.script` is deprecated",
+    message=r"`torch\.jit\.script` is (deprecated|not supported)",
     category=FutureWarning,
 )
 

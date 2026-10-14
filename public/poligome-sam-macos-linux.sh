@@ -6,7 +6,7 @@ POLIGOME_SAM_INSTALLER_API=2
 DEFAULT_SITE_URL="https://poligome.com"
 DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 DEFAULT_CONNECTOR_URL="${DEFAULT_ASSET_BASE_URL}/poligome-sam-local.py"
-DEFAULT_CONNECTOR_SHA256="0a3e981ad6efec61be66288a38599f1889f89edd9afcf9b82db3a4d58c466dac"
+DEFAULT_CONNECTOR_SHA256="9ecf9ba9be0e8952f5322111898e7c65bb8aafa4bb39874ba303eab2f5aab8d3"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE_URL="${POLIGOME_SITE_URL:-${DEFAULT_SITE_URL}}"
 SITE_URL="${SITE_URL%/}"
@@ -628,8 +628,18 @@ prepare_venv() {
       fail "não foi possível preservar o ambiente Python incompatível."
   fi
 
+  # No Debian/Ubuntu sem o pacote pythonX.Y-venv, `python -m venv` falha mas deixa
+  # bin/python sem pip. Na execução seguinte, já com o pacote instalado, esse
+  # ambiente parecia pronto e o pip morria com "No module named pip". Sem pip nada
+  # chegou a ser instalado nele, então recriá-lo não perde nada.
+  if [[ -x "$PYTHON" ]] && ! "$PYTHON" -c 'import pip' >/dev/null 2>&1 &&
+    ! "$PYTHON" -m ensurepip --upgrade >/dev/null 2>&1; then
+    printf 'Recriando o ambiente %s, que ficou incompleto numa tentativa anterior...\n' "$VENV_DIR"
+    rm -rf "$VENV_DIR"
+  fi
+
   if [[ ! -x "$PYTHON" ]]; then
-    local system_python
+    local system_python system_version
     if ! system_python="$(find_python "$minimum_minor" "$maximum_minor")"; then
       if [[ "$FAMILY" == "sam3" ]]; then
         fail "o SAM 3 precisa do Python 3.12 (nem mais antigo, nem mais novo: o pacote oficial depende do numpy 1.26, que só existe pronto até o 3.12). Instale o python3.12 (no Ubuntu: sudo apt install python3.12 python3.12-venv; ele convive com outras versões) e execute novamente."
@@ -638,8 +648,11 @@ prepare_venv() {
     fi
     printf 'Criando ambiente isolado da família %s com %s...\n' "$FAMILY" "$system_python"
     mkdir -p "$VENVS_DIR"
-    "$system_python" -m venv "$VENV_DIR" ||
-      fail "não foi possível criar o ambiente virtual. No Linux, instale também o pacote python3-venv."
+    if ! "$system_python" -m venv "$VENV_DIR"; then
+      rm -rf "$VENV_DIR"
+      system_version="$("$system_python" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")' 2>/dev/null || printf '3')"
+      fail "não foi possível criar o ambiente virtual do Python. No Debian/Ubuntu, instale o módulo venv com: sudo apt install python${system_version}-venv — e rode este mesmo comando de novo."
+    fi
   fi
 
   python_in_range "$PYTHON" "$minimum_minor" "$maximum_minor" ||
@@ -655,17 +668,20 @@ decide_device() {
   [[ "$DEVICE" == "auto" ]] || return 0
   [[ "$OS_NAME" == "Linux" ]] || return 0
 
-  # O SAM 2.1 em auto sem GPU já cai em CPU sozinho no conector. O SAM 3 precisa
-  # decidir aqui: o PyTorch dele é outro conforme o device, e o de CUDA são
-  # gigabytes que uma máquina sem NVIDIA nunca usaria.
-  if [[ "$FAMILY" == "sam3" ]] &&
-    { ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L >/dev/null 2>&1; }; then
-    printf 'Nenhuma GPU NVIDIA encontrada: o SAM 3 vai rodar em CPU.\n'
-    printf 'Cada imagem nova leva %s para ser preparada; os cliques seguintes são mais rápidos.\n\n' "$SAM3_CPU_IMAGE_TIME"
+  # Sem GPU NVIDIA o modelo roda em CPU de qualquer jeito, e decidir isso aqui é o
+  # que escolhe o PyTorch de CPU: a roda que o PyPI entrega para Linux traz cerca
+  # de 4 GB de bibliotecas CUDA que uma máquina sem NVIDIA nunca usaria — era o
+  # que todo notebook sem placa baixava para o SAM 2.1.
+  if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L >/dev/null 2>&1; then
+    if [[ "$FAMILY" == "sam3" ]]; then
+      printf 'Nenhuma GPU NVIDIA encontrada: o SAM 3 vai rodar em CPU.\n'
+      printf 'Cada imagem nova leva %s para ser preparada; os cliques seguintes são mais rápidos.\n\n' "$SAM3_CPU_IMAGE_TIME"
+    else
+      printf 'Nenhuma GPU NVIDIA encontrada: o SAM vai rodar em CPU (alguns segundos por clique).\n\n'
+    fi
     DEVICE="cpu"
     return 0
   fi
-  command -v nvidia-smi >/dev/null 2>&1 || return 0
 
   local capability major minor gpu_name resposta minimo ritmo
   # `|| true`: com pipefail, o erro de um driver antigo que não conhece o campo

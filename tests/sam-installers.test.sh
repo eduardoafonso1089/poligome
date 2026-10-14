@@ -170,6 +170,17 @@ for python_arg in "$@"; do
   python_log_line+=$'\t'"$python_arg"
 done
 printf '%s\n' "$python_log_line" >>"${POLIGOME_TEST_LOG:?}"
+# Um venv criado sem o python3-venv do Debian/Ubuntu fica sem pip até o
+# ensurepip devolvê-lo.
+if [[ "${POLIGOME_TEST_VENV_WITHOUT_PIP:-}" == 1 && "${1:-}" == -c && "${2:-}" == "import pip" &&
+      ! -e "${POLIGOME_TEST_LOG}.pip-restored" ]]; then
+  printf 'pip-missing\n' >>"$POLIGOME_TEST_LOG"
+  exit 1
+fi
+if [[ "${1:-}" == -m && "${2:-}" == ensurepip ]]; then
+  : >"${POLIGOME_TEST_LOG}.pip-restored"
+  exit 0
+fi
 if [[ "${1:-}" == - && $# -eq 4 ]]; then
   probe_program="$(cat)"
   printf 'health-model-probe\t%s\n' "${2:-}" >>"$POLIGOME_TEST_LOG"
@@ -390,6 +401,7 @@ run_isolated() {
     POLIGOME_TEST_FAIL_DEEP_IMPORT="${POLIGOME_TEST_FAIL_DEEP_IMPORT:-}" \
     POLIGOME_TEST_ALLOW_PIP="${POLIGOME_TEST_ALLOW_PIP:-}" \
     POLIGOME_TEST_NO_GPU="${POLIGOME_TEST_NO_GPU:-}" \
+    POLIGOME_TEST_VENV_WITHOUT_PIP="${POLIGOME_TEST_VENV_WITHOUT_PIP:-}" \
     POLIGOME_TEST_GPU_CAP="${POLIGOME_TEST_GPU_CAP:-}" \
     POLIGOME_TEST_HEALTH_MATCH="${POLIGOME_TEST_HEALTH_MATCH:-}" \
     POLIGOME_TEST_PORT_IN_USE="${POLIGOME_TEST_PORT_IN_USE:-}" \
@@ -1143,6 +1155,57 @@ test_sam3_cpu_path() {
   pass "SAM 3 vai para CPU sem GPU, com GPU antiga, com driver antigo e troca o torch de GPU pelo de CPU"
 }
 
+# Duas decisões do Linux que só apareceram num distro limpo: sem GPU NVIDIA o
+# SAM 2.1 instala o torch do índice de CPU (a roda do PyPI para Linux traz cerca
+# de 4 GB de CUDA que nunca rodaria), e um venv que ficou sem pip numa tentativa
+# sem o python3-venv é reparado, em vez de quebrar com "No module named pip".
+test_linux_sam2_cpu_and_pipless_venv() {
+  local model="sam2.1-hiera-tiny"
+  local case_name home_dir app_dir venv_dir log output expected_call
+  for case_name in sem-gpu venv-sem-pip; do
+    home_dir="${TEMP_ROOT}/home-linux-${case_name}"
+    app_dir="${home_dir}/.poligome-sam"
+    venv_dir="${app_dir}/venvs/sam2"
+    log="${TEMP_ROOT}/linux-${case_name}.log"
+    prepare_model_home "$model" "$home_dir"
+    create_sparse_checkpoint "$model" "$home_dir"
+    : >"$log"
+    if ! output="$(
+      POLIGOME_TEST_NO_GPU="$([[ "$case_name" == sem-gpu ]] && printf 1)" \
+      POLIGOME_TEST_ALLOW_PIP="$([[ "$case_name" == sem-gpu ]] && printf 1)" \
+      POLIGOME_TEST_VENV_WITHOUT_PIP="$([[ "$case_name" == venv-sem-pip ]] && printf 1)" \
+        run_isolated "$home_dir" "$log" bash "$INSTALLER" "$model" </dev/null 2>&1
+    )"; then
+      printf '%s\n' "$output" >&2
+      fail "Linux (${case_name}): o instalador falhou"
+    fi
+    expected_call="$(expected_connector_call "$model" "$app_dir")"
+    case "$case_name" in
+      sem-gpu)
+        # prepare_model_home marca como pronto só o ambiente de GPU: sem GPU o
+        # instalador precisa trocar para a roda do índice de CPU.
+        grep -Fq $'pip\t-m pip install --index-url https://download.pytorch.org/whl/cpu torch>=2.5.1 torchvision>=0.20.1' "$log" || {
+          grep '^pip' "$log" >&2 || true
+          fail "SAM 2.1 sem GPU: o torch não veio do índice de CPU"
+        }
+        assert_file_line "${expected_call/--device$'\t'auto/--device$'\t'cpu}" "$log" \
+          "SAM 2.1 sem GPU chama o conector com --device cpu"
+        assert_contains "$output" 'Nenhuma GPU NVIDIA encontrada: o SAM vai rodar em CPU' \
+          "aviso de CPU do SAM 2.1 sem GPU"
+        [[ -e "${venv_dir}/${READY_FILE[sam2]%.ok}-cpu.ok" ]] ||
+          fail "SAM 2.1 sem GPU: o marcador do sabor CPU não foi gravado"
+        ;;
+      venv-sem-pip)
+        assert_file_line $'python\t-m\tensurepip\t--upgrade' "$log" \
+          "venv sem pip é reparado com ensurepip"
+        assert_file_line "$expected_call" "$log" "venv reparado segue até o conector"
+        assert_no_unexpected_work "$log" "venv sem pip"
+        ;;
+    esac
+  done
+  pass "Linux sem GPU usa o torch de CPU e um venv que ficou sem pip é reparado"
+}
+
 bash -n "$INSTALLER" "$STARTER" "$SERVICE"
 pass "sintaxe dos scripts Bash"
 
@@ -1167,6 +1230,7 @@ test_service_covers_every_model
 test_device_is_choosable
 test_sam3_rejects_old_gpu
 test_sam3_cpu_path
+test_linux_sam2_cpu_and_pipless_venv
 
 for model in "${MODELS[@]}"; do
   [[ "$model" == sam3-concepts ]] && continue
