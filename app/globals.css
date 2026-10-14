@@ -672,6 +672,28 @@ html[data-theme="light"]{--ink:#29262F;--muted:#6E6A75;--line:#DEDCE4;--green:#7
 .sam-model-detail{min-width:0}.byom-import{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 74px auto}.byom-import label,.byom-edit label{min-width:0}.byom-import input,.byom-edit input,.byom-edit textarea{width:100%;min-width:0}
 @media(max-width:760px){.sam-catalog-backdrop{padding:6px}.byom-import{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
 .command-copy{position:relative}.command-copy>code{padding-right:74px!important}.command-copy>button{position:absolute;right:5px;bottom:5px;height:22px;padding:0 7px;display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:6px;background:var(--control-bg);color:var(--text-soft);font-size:9.5px;font-weight:600;cursor:pointer}.command-copy>button:hover{border-color:var(--green);color:var(--ink)}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.command-copy{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:8px;margin-top:7px;min-width:0}
+.command-copy>code{display:block;min-width:0;margin:0!important;padding:10px 12px!important;border:1px solid var(--line);border-radius:8px;background:var(--surface);font:13px/1.55 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal}
+.command-copy>button{position:static;min-height:44px;height:auto;min-width:80px;padding:9px 12px;justify-content:center;align-self:start;font-size:13px}
+.command-copy-feedback{grid-column:1 / -1;font-size:13px;line-height:1.5;color:var(--ink)}
+.install-guide p,.install-guide .byom-import-hint{font-size:14px;line-height:1.55;overflow-wrap:anywhere}
+.install-guide h4,.install-guide>.sam-steps b,.install-guide>div:first-child>b{font-size:15px;line-height:1.4}
+.install-platform-picker,.byom-path-picker{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0;min-width:0}
+.install-platform-picker>p{flex-basis:100%;margin:0;font-weight:600;color:var(--ink)}
+.install-platform-picker button,.byom-path-picker button,.install-check{min-height:44px;max-width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--control-bg);color:var(--ink);font-size:13px;line-height:1.4;cursor:pointer;white-space:normal}
+.install-platform-picker button.active,.byom-path-picker button.active{border-color:var(--green);background:var(--tool-active-bg);color:var(--btn-accent-ink);font-weight:650}
+.byom-path-picker{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.byom-path-picker button{text-align:left}
+.install-prerequisites{margin-top:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface-soft)}.install-prerequisites h4{margin:0 0 8px}.install-prerequisites p{margin:8px 0}
+.install-check{display:inline-flex;align-items:center;justify-content:center;gap:7px;margin-top:8px;border-color:var(--green);background:var(--green);color:var(--on-brand)}
+.install-downloads,.install-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;min-width:0}
+.install-downloads .sam-step-download,.install-guide>.sam-step-download{min-height:44px;max-width:100%;margin-top:0;font-size:13px;overflow-wrap:anywhere;word-break:break-word}
+.install-downloads svg{flex:none}.install-links .ai-link{display:inline-flex;align-items:center;min-height:36px;font-size:13px}
+.install-guide .sam-steps{gap:18px;margin-top:18px}.install-guide .sam-steps b{font-size:15px}.install-guide .sam-steps p{margin:5px 0 0;font-size:14px}
+.install-help{margin:14px 0 0;border:1px solid var(--line);border-radius:9px;background:var(--surface-soft);min-width:0}.install-help>summary{min-height:44px;padding:12px;font-size:14px;font-weight:600;line-height:1.4;cursor:pointer}.install-help>p,.install-help>.command-copy{margin:0 12px 12px;font-size:14px;line-height:1.55}.install-help>.sam-install-panel{margin:0 12px 12px}
+.install-note{padding:10px 12px;border-left:3px solid var(--green);background:var(--surface-soft);border-radius:0 8px 8px 0}
+.install-guide .byom-import input,.install-guide .byom-add{min-height:44px;height:auto;font-size:14px}.install-guide .byom-import label{font-size:13px}
+@media(max-width:600px){.command-copy{grid-template-columns:minmax(0,1fr)}.command-copy>button{justify-self:end}.byom-path-picker{grid-template-columns:minmax(0,1fr)}.install-platform-picker>button{flex:1 1 140px}.install-downloads{flex-direction:column;align-items:stretch}.install-downloads .sam-step-download{justify-content:flex-start}.install-guide .byom-import{grid-template-columns:minmax(0,1fr)}.install-guide .byom-add{justify-content:center}}
 /* Celular: o lado esquerdo do cabeçalho não pode transbordar sobre as ações. Antes, o nome do projeto e o Início ficavam embaixo do "+" e do Pré-anotar em todo telefone até 414px. */
 @media(max-width:860px){.head-actions{flex:none}.brand-side{flex:1 1 auto}.project-name{min-width:0;flex:0 1 auto}.project-name>span{min-width:0}}@media(max-width:420px){.brand-static,.topbar .source-link{display:none}.brand-side,.head-actions{gap:6px}.project-name>em{display:none}.project-name>span{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}.project-name>svg{opacity:1}}
 /* Gerenciar classes no celular: o fundo tinha margem maior que a sobra da tela e o diálogo escorregava para fora pela direita; a grade esticava a linha de cima num vão vazio; e os botões deixavam ~70px para o nome, que aparecia cortado ("Vegetaçã"). */

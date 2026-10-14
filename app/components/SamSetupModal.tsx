@@ -3,17 +3,19 @@
 import { useEffect, useRef, useState } from "react";
 import { containModalFocus } from "../lib/modal-focus";
 import {
-  AlertTriangle, Check, Copy, Cpu, Download, ExternalLink, Gauge, HardDrive,
+  AlertTriangle, Check, Cpu, Download, ExternalLink, Gauge, HardDrive,
   KeyRound, Laptop, Layers, Link2, Network, Plus, PowerOff, ScanSearch, Server, ShieldCheck, Sparkles, Terminal, WandSparkles, X,
 } from "lucide-react";
 import { fill, type Language } from "../lib/i18n";
 import { getAiCopy } from "../lib/ai-copy";
 import { getSamCopy, type SamCopy } from "../lib/sam-copy";
 import { localizeSamModel, translateSamText } from "../lib/sam-models-i18n";
-import { SAM_MODELS, getSamModel } from "../lib/sam-models";
-import { BYOM_MODEL_ID_PATTERN } from "../lib/sam-models";
+import { SAM_MODELS, getSamModel, DEFAULT_SAM_MODEL_ID } from "../lib/sam-models";
 import type { ByomModel, SamModelDefinition } from "../lib/sam-models";
 import type { RuntimeManifest } from "../lib/runtime-client";
+import { getInstallationCopy } from "../lib/installation-copy";
+import { CommandCode } from "./InstallationGuide";
+import { ByomPanel } from "./ByomInstallPanel";
 import {
   AutomaticGuidePanel, ConnectionsPanel, ContainerModelPanel, HowItWorksPanel, RuntimeModelPanel,
 } from "./AiHubPanels";
@@ -97,46 +99,6 @@ const CAPABILITY_KEYS = {
   bidirectionalPropagation: "capBidirectional",
 } as const satisfies Record<string, keyof SamCopy>;
 
-/**
- * Um comando para colar no terminal, com o botão de copiar.
- *
- * Selecionar o texto à mão levava junto o que estivesse em volta — e o comando
- * que chegava ao terminal com o prompt "PS C:\...>" na frente fazia o
- * PowerShell chamar Get-Process e falhar com um erro que não diz nada. O botão
- * copia exatamente o comando, nem um caractere a mais.
- */
-function CommandCode({ text, sc }: { text: string; sc: SamCopy }) {
-  const [copied, setCopied] = useState(false);
-  const codeRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 1600);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
-  // Sem a API de área de transferência (página fora de HTTPS, permissão negada),
-  // o comando fica selecionado: o botão nunca termina em "não aconteceu nada".
-  const selectCommand = () => {
-    const code = codeRef.current;
-    const selection = window.getSelection();
-    if (!code || !selection) return false;
-    const range = document.createRange();
-    range.selectNodeContents(code);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    try { return document.execCommand("copy"); } catch { return false; }
-  };
-  const copy = () => {
-    if (!navigator.clipboard) { setCopied(selectCommand()); return; }
-    navigator.clipboard.writeText(text).then(() => setCopied(true), () => setCopied(selectCommand()));
-  };
-  return <div className="command-copy">
-    <code ref={codeRef}>{text}</code>
-    <button type="button" onClick={copy} aria-label={copied ? sc.copiedCommand : sc.copyCommand} title={copied ? sc.copiedCommand : sc.copyCommand}>
-      {copied ? <Check size={12} /> : <Copy size={12} />}<span>{copied ? sc.copiedCommand : sc.copyCommand}</span>
-    </button>
-  </div>;
-}
-
 function statusLabel(sc: SamCopy, state: ConnectionState, modelMatches: boolean) {
   if (state === "checking") return sc.stChecking;
   if (state === "loading") return sc.stLoading;
@@ -158,179 +120,6 @@ function benchmarkSummary(sc: SamCopy, model: SamModelDefinition) {
     return { value: `${model.benchmark.latencyMs} ms`, label: model.benchmark.hardware, details: sc.benchSam3 };
   }
   return { value: sc.benchNone, label: model.benchmark.hardware, details: model.benchmark.notes[0] };
-}
-
-function ByomPanel({
-  language,
-  models,
-  onRegister,
-  host,
-}: {
-  language: Language;
-  models: readonly ByomModel[];
-  onRegister: (entry: { modelId: string; name: string; port: number; notes?: string }) => Promise<ByomWriteOutcome>;
-  host: string | null;
-}) {
-  const sc = getSamCopy(language);
-  const [draftId, setDraftId] = useState("byom-");
-  const [draftName, setDraftName] = useState("");
-  const [draftPort, setDraftPort] = useState("8080");
-  // Esta aba não desenha o bloco de estado do conector, então a falha do registro
-  // precisa aparecer aqui: sem isto o botão limpava os campos e não dizia nada.
-  const [importError, setImportError] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [chosenCommandOs, setCommandOs] = useState<"unix" | "native" | null>(null);
-  const commandOs = chosenCommandOs ?? (host === "Windows" ? "native" : host ? "unix" : preferredInstallOs());
-  const cli = commandOs === "native" ? "powershell -ExecutionPolicy Bypass -File .\\poligome-byom-windows.ps1" : "bash poligome-byom-macos-linux.sh";
-  const portNumber = Number(draftPort);
-  const validId = BYOM_MODEL_ID_PATTERN.test(draftId.trim().toLowerCase());
-  const validPort = Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535;
-  const canRegister = validId && validPort;
-  const steps = [
-    { title: sc.byomStep1Title, body: sc.byomStep1Body, command: commandOs === "native" ? `cd "$env:USERPROFILE\\Downloads"   ${sc.byomStep1Comment}` : `cd ~/Downloads   ${sc.byomStep1Comment}` },
-    { title: sc.byomStep2Title, body: sc.byomStep2Body, command: "docker build -t meu-modelo ." },
-    { title: sc.byomStep3Title, body: sc.byomStep3Body, command: `${cli} register --model-id byom-meu-modelo --image meu-modelo --name "Meu modelo" --port 8080` },
-    { title: sc.byomStep4Title, body: sc.byomStep4Body, command: `${cli} start --model-id byom-meu-modelo` },
-    { title: sc.byomStep5Title, body: sc.byomStep5Body, command: `${cli} start --model-id byom-meu-modelo` },
-  ];
-
-  return <div className="byom-panel">
-    <section className="sam-model-hero">
-      <div><span className="family byom">BYOM</span><span className="experimental">{sc.byomBadge}</span></div>
-      <h3>{sc.byomTitle}</h3>
-      <p>{sc.byomIntro}</p>
-      <p><Rich text={sc.byomSagemaker} /></p>
-    </section>
-
-    <section className="byom-registered">
-      <h4>{sc.byomImportTitle}</h4>
-      <p className="byom-import-hint"><Rich text={sc.byomImportHint} /></p>
-      <div className="byom-import">
-        <label>{sc.byomFieldId}<input value={draftId} onChange={(event) => setDraftId(event.target.value)} placeholder="byom-meu-modelo" spellCheck={false} /></label>
-        <label>{sc.byomFieldName}<input value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder={sc.byomNamePlaceholder} /></label>
-        <label>{sc.byomFieldPort}<input type="number" min={1} max={65535} value={draftPort} onChange={(event) => setDraftPort(event.target.value)} /></label>
-        <button
-          className="byom-add"
-          disabled={!canRegister || importing}
-          onClick={async () => {
-            setImportError("");
-            setImporting(true);
-            const outcome = await onRegister({ modelId: draftId.trim().toLowerCase(), name: draftName.trim(), port: portNumber });
-            setImporting(false);
-            // Limpar só no sucesso: quem errou a porta corrige o que digitou em
-            // vez de reescrever tudo.
-            if (outcome.ok) { setDraftId("byom-"); setDraftName(""); }
-            else setImportError(outcome.detail);
-          }}
-        >
-          {importing ? <Gauge className="spin" size={14} /> : <Plus size={14} />}{importing ? sc.byomImporting : sc.byomImport}
-        </button>
-      </div>
-      {!validId && draftId.trim() !== "byom-" && <p className="byom-reason"><Rich text={sc.byomIdRule} /></p>}
-      {!validPort && <p className="byom-reason" role="alert">{sc.byomPortRule}</p>}
-      {importError && <p className="byom-reason" role="alert">{fill(sc.byomImportFailed, { detail: importError })}</p>}
-
-      <p className="byom-import-hint">{models.length === 0
-        ? <Rich text={sc.byomNoneRegistered} />
-        : models.length === 1 ? sc.byomOneRegistered : fill(sc.byomManyRegistered, { n: models.length })}</p>
-    </section>
-
-    <details className="byom-setup-guide">
-      <summary>{sc.byomSetupGuide}</summary>
-      <div className="sam-os-picker" role="tablist" aria-label={sc.osPicker}>
-        <button role="tab" aria-selected={commandOs === "native"} className={commandOs === "native" ? "active" : ""} onClick={() => setCommandOs("native")}>Windows · PowerShell</button>
-        <button role="tab" aria-selected={commandOs === "unix"} className={commandOs === "unix" ? "active" : ""} onClick={() => setCommandOs("unix")}>Linux / macOS / WSL2 · bash</button>
-      </div>
-    <section className="byom-steps">
-      <h4>{sc.byomBefore}</h4>
-      <article><b>{sc.byomDockerTitle}</b><p>{sc.byomDockerBody}</p></article>
-      <article><b>{sc.byomConnectorTitle}</b><p><Rich text={sc.byomConnectorBody} /></p></article>
-      <article>
-        <b>{sc.byomWindowsTitle}</b>
-        <p><Rich text={sc.byomWindowsBody} /></p>
-        <code>{"wsl bash poligome-byom-macos-linux.sh list\npowershell -ExecutionPolicy Bypass -File .\\poligome-byom-windows.ps1 list"}</code>
-      </article>
-    </section>
-
-    <section className="byom-contract">
-      <h4>{sc.byomContract}</h4>
-      <table>
-        <tbody>
-          <tr><th>{sc.byomPort}</th><td><Rich text={sc.byomPortValue} /></td></tr>
-          <tr><th>{sc.byomCommand}</th><td><code>docker run &lt;image&gt; serve</code></td></tr>
-          <tr><th>{sc.byomHealth}</th><td><Rich text={sc.byomHealthValue} /></td></tr>
-          <tr><th>{sc.byomInference}</th><td><Rich text={sc.byomInferenceValue} /></td></tr>
-          <tr><th>{sc.byomWeights}</th><td><Rich text={sc.byomWeightsValue} /></td></tr>
-          <tr><th>{sc.byomDescription}</th><td><Rich text={sc.byomDescriptionValue} /></td></tr>
-        </tbody>
-      </table>
-      <p className="byom-io">
-        <b>{sc.byomInput}</b> <Rich text={sc.byomInputValue} />
-        <br />
-        <b>{sc.byomOutput}</b> <Rich text={sc.byomOutputValue} />
-        <br />
-        <b>{sc.byomErrors}</b> <Rich text={sc.byomErrorsValue} />
-      </p>
-      <p className="byom-import-hint"><Rich text={sc.byomMetadataHint} /></p>
-    </section>
-
-    {/* Os arquivos vêm antes do passo a passo porque o primeiro passo é baixá-los. */}
-    <section className="sam-install-panel">
-      <div><b>{sc.byomFiles}</b><p>{sc.byomFilesBody}</p></div>
-      <div className="sam-install-actions">
-        <a className="primary" href="/poligome-byom-macos-linux.sh" download><Download size={15} /><span><strong>{sc.byomCliUnix}</strong><small>register · start · status · logs</small></span></a>
-        {/* Sem este botão, quem instalou o SAM pelo caminho nativo de Windows não
-            tinha como obter a CLI que escreve no registro que o conector dele lê. */}
-        <a href="/poligome-byom-windows.ps1" download><Download size={15} /><span><strong>{sc.byomCliNative}</strong><small>{sc.byomCliNativeHint}</small></span></a>
-        <a href="/byom/Dockerfile" download><Download size={15} /><span><strong>{sc.byomDockerfile}</strong><small>{sc.byomDockerfileHint}</small></span></a>
-        <a href="/byom/serve.py" download><Download size={15} /><span><strong>{sc.byomServe}</strong><small>{sc.byomServeHint}</small></span></a>
-      </div>
-      <code>{`${cli} help`}</code>
-    </section>
-
-    <section className="byom-steps">
-      <h4>{sc.byomExamples}</h4>
-      <article>
-        <b>{sc.byomRepoTitle}</b>
-        <p>{sc.byomRepoBody}</p>
-        <code>{`${cli} examples`}</code>
-      </article>
-      <article>
-        <b>{sc.byomFilesOnlyTitle}</b>
-        <p>{sc.byomFilesOnlyBody}</p>
-        <code>{`docker build -t poligome-byom-exemplo .\n${cli} register --model-id byom-otsu --image poligome-byom-exemplo --name "Exemplo Otsu" --port 8080 --env METHOD=otsu\n${cli} register --model-id byom-watershed --image poligome-byom-exemplo --name "Exemplo Watershed" --port 8081 --env METHOD=watershed\n${cli} start --model-id byom-otsu\n${cli} start --model-id byom-watershed`}</code>
-      </article>
-      <article>
-        <b>{sc.byomCheckTitle}</b>
-        <p>{sc.byomCheckBody}</p>
-        <code>{`${cli} list\n${cli} logs --model-id byom-otsu`}</code>
-      </article>
-    </section>
-
-    <section className="byom-steps">
-      <h4>{sc.byomSteps}</h4>
-      {/* Os comandos abaixo são os de bash. Quem instalou pelo caminho nativo de
-          Windows precisa saber que os mesmos passos existem lá, com o mesmo nome,
-          antes de tentar rodar bash no PowerShell e achar que o BYOM não serve. */}
-      <p className="byom-import-hint"><Rich text={sc.byomStepsShell} /></p>
-
-      {steps.map((step) => <article key={step.title}>
-        <b>{step.title}</b>
-        {step.body && <p>{step.body}</p>}
-        <code>{step.command}</code>
-      </article>)}
-    </section>
-
-
-
-    <section className="byom-limits">
-      <AlertTriangle size={15} />
-      <div><b>{sc.byomEmptyTitle}</b><p><Rich text={sc.byomEmptyBody} /></p></div>
-    </section>
-
-    <section className="sam-privacy"><ShieldCheck size={16} /><div><b>{sc.privacyTitle}</b><p><Rich text={sc.byomPrivacy} /></p></div></section>
-    </details>
-  </div>;
 }
 
 export default function SamSetupModal({
@@ -362,6 +151,7 @@ export default function SamSetupModal({
 }: Props) {
   const ai = getAiCopy(language);
   const sc = getSamCopy(language);
+  const guide = getInstallationCopy(language);
   const dialogRef = useRef<HTMLElement>(null);
   useEffect(() => dialogRef.current ? containModalFocus(dialogRef.current) : undefined, []);
   // O que a área de detalhe mostra em cada aba. No Assistido, "model" é a ficha
@@ -410,6 +200,7 @@ export default function SamSetupModal({
   const needsInstall = selectedAvailability !== null && !selectedAvailability.installed;
   const benchmark = benchmarkSummary(sc, model);
   const modelMatches = connectionState === "ready" && loadedModelId === model.id;
+  const activationLabel = modelMatches ? sc.btnUse : connectionState === "ready" ? sc.btnLoad : sc.btnVerify;
   const pythonNotes = "notes" in model.requirements.python ? model.requirements.python.notes : null;
   const cudaTested = "tested" in model.requirements.cuda ? model.requirements.cuda.tested : null;
   // O que o editor realmente envia e desenha hoje. Fora desta lista, a capacidade
@@ -456,11 +247,11 @@ export default function SamSetupModal({
       file: "poligome-sam-macos-linux.sh",
       href: "/poligome-sam-macos-linux.sh",
       steps: [
-        { title: sc.stepDownloadTitle, body: sc.stepDownloadUnix, command: null },
+        { title: sc.stepDownloadTitle, body: guide.downloadFolder, command: null },
         { title: sc.stepUnixTerminalTitle, body: sc.stepUnixTerminalBody, command: "cd ~/Downloads" },
         { title: sc.stepUnixRunTitle, body: sc.stepUnixRunBody, command: unixCommand },
         { title: sc.stepUnixKeepTitle, body: sc.stepUnixKeepBody, command: null },
-        { title: sc.stepBackTitle, body: sc.stepBackBody, command: null },
+        { title: guide.backTitle, body: fill(guide.samBack, { action: activationLabel }), command: null },
       ],
     },
     wsl: {
@@ -468,24 +259,24 @@ export default function SamSetupModal({
       file: "poligome-sam-windows.bat",
       href: "/poligome-sam-windows.bat",
       steps: [
-        { title: sc.stepDownloadTitle, body: sc.stepDownloadWin, command: null },
-        { title: sc.stepWslClickTitle, body: sc.stepWslClickBody, command: null },
-        { title: sc.stepWslTypeTitle, body: sc.stepWslTypeBody, command: String.raw`cd %USERPROFILE%\Downloads` + "\n" + windowsCommand },
+        { title: sc.stepDownloadTitle, body: guide.downloadFolder, command: null },
+        { title: sc.stepWslTypeTitle, body: sc.stepWslTypeBody, command: String.raw`cd /d "%USERPROFILE%\Downloads"` },
+        { title: sc.stepUnixRunTitle, body: sc.stepUnixRunBody, command: windowsCommand },
         { title: sc.stepWslKeepTitle, body: sc.stepWslKeepBody, command: null },
-        { title: sc.stepBackTitle, body: sc.stepBackBody, command: null },
+        { title: guide.backTitle, body: fill(guide.samBack, { action: activationLabel }), command: null },
       ],
     },
     native: {
-      label: sc.osNative,
+      label: guide.windows,
       file: "poligome-sam-windows-native.ps1",
       href: "/poligome-sam-windows-native.ps1",
       steps: [
-        { title: sc.stepDownloadTitle, body: sc.stepDownloadWin, command: null },
+        { title: sc.stepDownloadTitle, body: guide.downloadFolder, command: null },
         { title: sc.stepNativeOpenTitle, body: sc.stepNativeOpenBody, command: null },
         { title: sc.stepNativeFolderTitle, body: sc.stepNativeFolderBody, command: String.raw`cd "$env:USERPROFILE\Downloads"` },
         { title: sc.stepNativeRunTitle, body: sc.stepNativeRunBody, command: nativeWindowsCommand },
         { title: sc.stepNativeKeepTitle, body: sc.stepNativeKeepBody, command: null },
-        { title: sc.stepBackTitle, body: sc.stepBackBody, command: null },
+        { title: guide.backTitle, body: fill(guide.samBack, { action: activationLabel }), command: null },
       ],
     },
   } as const;
@@ -618,10 +409,12 @@ export default function SamSetupModal({
           : tab === "automatic" ? (
             automaticView === "runtime" ? <RuntimeModelPanel
               copy={ai}
+              language={language}
               manifest={runtime.state === "ready" ? runtime.manifest : null}
               endpoint={runtime.endpoint}
               onPreannotate={() => onPreannotate("runtime")}
               onOpenConnections={() => onTabChange("connections")}
+              onRecheck={runtime.refresh}
             />
             : automaticView === "container" && viewedContainer ? <ContainerModelPanel
               copy={ai}
@@ -632,7 +425,10 @@ export default function SamSetupModal({
               onRemove={(modelId) => { setAutomaticView("guide"); onRemoveByomModel(modelId); }}
               onSave={onRegisterByomModel}
             />
-            : automaticView === "docs" ? <ByomPanel language={language} models={byomModels} onRegister={onRegisterByomModel} host={connectorHost?.host ?? null} />
+            : automaticView === "docs" ? <ByomPanel language={language} models={byomModels} onRegister={onRegisterByomModel} host={connectorHost?.host ?? null}
+              connected={connectionState === "ready" || connectionState === "loading" || connectionState === "error"}
+              onInstallConnector={() => { onSelectModel(DEFAULT_SAM_MODEL_ID); onTabChange("assisted"); setAssistedView("model"); }}
+              onCheck={() => { onRecheckConnector(); onTabChange("connections"); }} />
             : <AutomaticGuidePanel copy={ai} />
           )
           : assistedView === "how" ? <HowItWorksPanel language={language} />
@@ -674,7 +470,7 @@ export default function SamSetupModal({
                   {step.body && <p>{step.body}</p>}
                   {index === 0
                     ? <a className="sam-step-download" href={chosenPath.href} download><Download size={14} />{fill(sc.download, { file: chosenPath.file })}</a>
-                    : step.command ? <CommandCode text={step.command} sc={sc} /> : null}
+                    : step.command ? <CommandCode text={step.command} language={language} /> : null}
                 </li>)}
               </ol>
               {/* Escolher CPU deixou de ser folclore de variável de ambiente: o
@@ -691,10 +487,10 @@ export default function SamSetupModal({
                 {installOs === "unix" && <>
                   <p>{sc.relaunchUnix}</p>
                   <a className="sam-step-download" href="/poligome-sam-start-macos-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-start-macos-linux.sh" })}</a>
-                  <CommandCode text={`cd ~/Downloads\n${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`} sc={sc} />
+                  <CommandCode text={`cd ~/Downloads\n${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`} language={language} />
                   <p>{sc.relaunchService}</p>
                   <a className="sam-step-download" href="/poligome-sam-service-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-service-linux.sh" })}</a>
-                  <CommandCode text={`${unixCpuPrefix}bash poligome-sam-service-linux.sh install`} sc={sc} />
+                  <CommandCode text={`${unixCpuPrefix}bash poligome-sam-service-linux.sh install`} language={language} />
                 </>}
                 {installOs === "wsl" && <>
                   <p>{sc.relaunchWsl}</p>
@@ -704,12 +500,12 @@ export default function SamSetupModal({
                       comando, não do atalho. */}
                   {forceCpu && <>
                     <p>{sc.relaunchWslCpu}</p>
-                    <CommandCode text={String.raw`cd %USERPROFILE%\Downloads` + "\n" + 'set "POLIGOME_DEVICE=cpu" && poligome-sam-start-windows.bat'} sc={sc} />
+                    <CommandCode text={String.raw`cd %USERPROFILE%\Downloads` + "\n" + 'set "POLIGOME_DEVICE=cpu" && poligome-sam-start-windows.bat'} language={language} />
                   </>}
                 </>}
                 {installOs === "native" && <>
                   <p>{sc.relaunchNative}</p>
-                  <CommandCode text={nativeWindowsCommand} sc={sc} />
+                  <CommandCode text={nativeWindowsCommand} language={language} />
                 </>}
               </div>
               <p className="sam-manual-note">{model.family === "sam3" ? sc.sam3CpuSlow : sc.oldGpuNote}</p>
@@ -837,7 +633,7 @@ export default function SamSetupModal({
                   {step.body && <p>{step.body}</p>}
                   {index === 0
                     ? <a className="sam-step-download" href={chosenPath.href} download><Download size={14} />{fill(sc.download, { file: chosenPath.file })}</a>
-                    : step.command ? <CommandCode text={step.command} sc={sc} /> : null}
+                    : step.command ? <CommandCode text={step.command} language={language} /> : null}
                 </li>)}
               </ol>
               {/* Escolher CPU deixou de ser folclore de variável de ambiente: o
@@ -854,10 +650,10 @@ export default function SamSetupModal({
                 {installOs === "unix" && <>
                   <p>{sc.relaunchUnix}</p>
                   <a className="sam-step-download" href="/poligome-sam-start-macos-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-start-macos-linux.sh" })}</a>
-                  <CommandCode text={`cd ~/Downloads\n${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`} sc={sc} />
+                  <CommandCode text={`cd ~/Downloads\n${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`} language={language} />
                   <p>{sc.relaunchService}</p>
                   <a className="sam-step-download" href="/poligome-sam-service-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-service-linux.sh" })}</a>
-                  <CommandCode text={`${unixCpuPrefix}bash poligome-sam-service-linux.sh install`} sc={sc} />
+                  <CommandCode text={`${unixCpuPrefix}bash poligome-sam-service-linux.sh install`} language={language} />
                 </>}
                 {installOs === "wsl" && <>
                   <p>{sc.relaunchWsl}</p>
@@ -867,12 +663,12 @@ export default function SamSetupModal({
                       comando, não do atalho. */}
                   {forceCpu && <>
                     <p>{sc.relaunchWslCpu}</p>
-                    <CommandCode text={String.raw`cd %USERPROFILE%\Downloads` + "\n" + 'set "POLIGOME_DEVICE=cpu" && poligome-sam-start-windows.bat'} sc={sc} />
+                    <CommandCode text={String.raw`cd %USERPROFILE%\Downloads` + "\n" + 'set "POLIGOME_DEVICE=cpu" && poligome-sam-start-windows.bat'} language={language} />
                   </>}
                 </>}
                 {installOs === "native" && <>
                   <p>{sc.relaunchNative}</p>
-                  <CommandCode text={nativeWindowsCommand} sc={sc} />
+                  <CommandCode text={nativeWindowsCommand} language={language} />
                 </>}
               </div>
               <p className="sam-manual-note">{model.family === "sam3" ? sc.sam3CpuSlow : sc.oldGpuNote}</p>

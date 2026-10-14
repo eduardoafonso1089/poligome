@@ -9,6 +9,9 @@ import { fill, type Language } from "../lib/i18n";
 import { countAnnotations, getAiCopy, joinList, type AiCopy } from "../lib/ai-copy";
 import type { ByomModel } from "../lib/sam-models";
 import type { RuntimeManifest } from "../lib/runtime-client";
+import { getInstallationCopy } from "../lib/installation-copy";
+import { RUNTIME_REPO, preferredInstallPlatform, runtimeSetupCommands, type InstallPlatform } from "../lib/installation-commands";
+import { CommandCode, InstallationPlatformPicker, terminalInstructions } from "./InstallationGuide";
 
 type ByomWriteOutcome = { ok: true } | { ok: false; detail: string };
 
@@ -73,8 +76,6 @@ export function HowItWorksPanel({ language }: { language: Language }) {
   </div>;
 }
 
-const RUNTIME_REPO = "https://github.com/eduardoafonso1089/poligome-runtime";
-
 /**
  * Como pôr um modelo nativo para rodar, do zero.
  *
@@ -82,26 +83,41 @@ const RUNTIME_REPO = "https://github.com/eduardoafonso1089/poligome-runtime";
  * na porta padrão: sem eles, "inicie o Poligome Runtime" deixava a pessoa sem
  * saber o que é nem onde conseguir.
  */
-export function RuntimeInstallPanel({ copy }: { copy: AiCopy }) {
+export function RuntimeInstallPanel({ copy, language, platform, onPlatformChange, onRecheck }: {
+  copy: AiCopy; language: Language; platform: InstallPlatform;
+  onPlatformChange: (value: InstallPlatform) => void; onRecheck: () => void;
+}) {
+  const guide = getInstallationCopy(language);
+  const commands = runtimeSetupCommands(platform);
   const steps = [
-    { title: copy.rtStepClone, body: "", command: `git clone ${RUNTIME_REPO}.git\ncd poligome-runtime` },
-    {
-      title: copy.rtStepInstall,
-      body: copy.rtStepInstallBody,
-      command: "python3 -m venv .venv\n.venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu\n.venv/bin/pip install -e \".[server]\" -e adapters/fasterrcnn",
-    },
-    { title: copy.rtStepRun, body: copy.rtStepRunBody, command: ".venv/bin/python examples/serve_runtime.py --adapter fasterrcnn" },
+    { title: guide.terminalTitle, body: terminalInstructions(guide, platform), command: commands.terminal },
+    { title: guide.runtimeCheckTitle, body: guide.runtimeCheckBody, command: commands.check },
+    { title: copy.rtStepClone, body: guide.runtimeCloneBody, command: commands.clone },
+    { title: copy.rtStepInstall, body: guide.runtimeInstallBody, command: commands.install },
+    { title: copy.rtStepRun, body: guide.runtimeRunBody, command: commands.run },
   ];
-  return <section className="sam-install-panel">
-    <div><b>{copy.rtInstallTitle}</b><p>{copy.rtInstallIntro}</p></div>
-    <p className="sam-manual-note">{copy.rtWindowsNote}</p>
+  return <section className="sam-install-panel install-guide runtime-install-guide">
+    <div><b>{copy.rtInstallTitle}</b><p>{guide.runtimeBefore}</p></div>
+    <InstallationPlatformPicker copy={guide} platform={platform} onChange={onPlatformChange} />
+    <div className="install-links">
+      <a className="ai-link" href="https://www.python.org/downloads/release/python-31210/" target="_blank" rel="noreferrer">{guide.pythonLink}</a>
+      <a className="ai-link" href="https://git-scm.com/downloads" target="_blank" rel="noreferrer">{guide.gitLink}</a>
+      {platform === "wsl" && <a className="ai-link" href="https://learn.microsoft.com/windows/wsl/install" target="_blank" rel="noreferrer">{guide.wslHelp}</a>}
+    </div>
+    <p className="install-note">{guide.runtimeExample}</p>
     <ol className="sam-steps">
       {steps.map((step) => <li key={step.title}>
         <b>{step.title}</b>
         {step.body && <p>{step.body}</p>}
-        <code>{step.command}</code>
+        {step.command && <CommandCode text={step.command} language={language} title={step.title} />}
       </li>)}
+      <li><b>{guide.backTitle}</b><p>{guide.runtimeBack}</p><button type="button" className="install-check" onClick={onRecheck}><RefreshCw size={15} />{guide.checkConnection}</button></li>
     </ol>
+    <details className="install-help"><summary>{guide.restart}</summary><p>{guide.runtimeRestart}</p>
+      {commands.terminal && <CommandCode text={commands.terminal} language={language} title={guide.terminalTitle} />}
+      <CommandCode text={commands.restart} language={language} title={guide.restart} />
+    </details>
+    <details className="install-help"><summary>{guide.troubleshooting}</summary><p>{guide.runtimeTrouble}</p></details>
     <a className="sam-step-download" href={RUNTIME_REPO} target="_blank" rel="noreferrer">{copy.rtRepo}</a>
   </section>;
 }
@@ -158,14 +174,18 @@ function describeTerms(copy: AiCopy, terms: readonly string[], keys: Record<stri
 }
 
 export function RuntimeModelPanel({
-  copy, manifest, endpoint, onPreannotate, onOpenConnections,
+  copy, manifest, endpoint, onPreannotate, onOpenConnections, language = "pt", onRecheck,
 }: {
   copy: AiCopy;
   manifest: RuntimeManifest | null;
   endpoint: string;
   onPreannotate: () => void;
   onOpenConnections: () => void;
+  language?: Language;
+  onRecheck: () => void;
 }) {
+  const [platform, setPlatform] = useState<InstallPlatform>(preferredInstallPlatform);
+  const installPanel = <RuntimeInstallPanel copy={copy} language={language} platform={platform} onPlatformChange={setPlatform} onRecheck={onRecheck} />;
   if (!manifest) {
     return <div className="byom-panel">
       <section className="sam-model-hero">
@@ -173,7 +193,7 @@ export function RuntimeModelPanel({
         <h3>{copy.runtimeOfflineTitle}</h3>
         <p>{copy.runtimeOfflineBody}</p>
       </section>
-      <RuntimeInstallPanel copy={copy} />
+      {installPanel}
       <p className="byom-import-hint">{fill(copy.runtimeOfflineAddress, { endpoint })}{" "}
         <button className="ai-link" onClick={onOpenConnections}><Server size={12} />{copy.openConnections}</button>
       </p>
@@ -194,6 +214,7 @@ export function RuntimeModelPanel({
       <article><b>{copy.nativeParams}</b><p>{manifest.params?.length ? manifest.params.map((param) => param.label).join(" · ") : copy.nativeNoParams}</p></article>
     </section>
     <div className="byom-entry-actions"><button className="byom-run" onClick={onPreannotate}><ScanSearch size={14} />{copy.usePreannotate}</button></div>
+    <details className="install-help"><summary>{getInstallationCopy(language).installationDetails}</summary>{installPanel}</details>
   </div>;
 }
 
