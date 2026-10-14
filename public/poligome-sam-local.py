@@ -27,7 +27,9 @@ import sys
 import threading
 import warnings
 import urllib.error
+import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -338,6 +340,9 @@ def _parse_byom_registration(path: Path) -> ByomRegistration:
             f"endpoint inválido: {endpoint!r}. Só é aceito http://127.0.0.1:<porta> "
             "ou http://localhost:<porta>, porque a inferência precisa ficar local."
         )
+    port = urllib.parse.urlsplit(endpoint).port
+    if port is not None and not 1 <= port <= 65_535:
+        raise ValueError(f"porta inválida no endpoint: {endpoint!r}")
 
     raw_env = raw.get("env")
     env = (
@@ -1537,10 +1542,9 @@ def byom_models():
     Separado de /models de propósito: BYOM não é um modelo que o conector
     carrega, e sim um serviço externo para o qual ele encaminha.
     """
-    entries = []
-    for registration in byom_registrations().values():
+    def describe(registration: ByomRegistration) -> dict[str, Any]:
         ready, reason = _byom_container_ready(registration)
-        entries.append({
+        return {
             "model_id": registration.model_id,
             "name": registration.name,
             "image": registration.image,
@@ -1551,7 +1555,12 @@ def byom_models():
             "metadata": _byom_metadata(registration) if ready else None,
             "ready": ready,
             "unavailable_reason": reason,
-        })
+        }
+    registrations = list(byom_registrations().values())
+    # Cada modelo pode gastar até dois timeouts (/ping e /metadata). Em série,
+    # poucos contêineres lentos excediam o prazo do navegador e apagavam a lista.
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        entries = list(pool.map(describe, registrations))
     return {
         "service": SERVICE_NAME,
         "api_version": API_VERSION,
@@ -1666,13 +1675,10 @@ def _persist_selection(spec: ModelSpec) -> None:
     Sem isso, uma troca feita pela interface seria esquecida no próximo arranque.
     """
     target = _app_dir / "selected-model.txt"
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        partial = target.with_suffix(".txt.part")
-        partial.write_text(f"{spec.model_id}\n", encoding="utf-8")
-        partial.replace(target)
-    except OSError as error:  # a troca continua valendo, mas o próximo boot não herda
-        print(f"Aviso: não foi possível salvar a seleção: {error}", flush=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(".txt.part")
+    partial.write_text(f"{spec.model_id}\n", encoding="utf-8")
+    partial.replace(target)
 
 
 def _exec_with_model(spec: ModelSpec, port: int) -> None:
@@ -1757,9 +1763,14 @@ def load(payload: LoadRequest):
                 status_code=409,
                 detail=f"uma troca para {_switch_target} ja esta em andamento.",
             )
+        try:
+            _persist_selection(spec)
+        except OSError as error:
+            # No Windows o lançador depende deste arquivo para decidir qual
+            # modelo subir. Sair sem salvá-lo recarregaria o modelo anterior.
+            raise HTTPException(status_code=500, detail=f"não foi possível salvar a seleção; o modelo atual foi mantido: {error}") from error
         _switch_target = spec.model_id
 
-    _persist_selection(spec)
     _update_runtime(status="loading", error=None)
     # A resposta precisa sair antes do execv, senao o cliente perde a conexao.
     threading.Timer(

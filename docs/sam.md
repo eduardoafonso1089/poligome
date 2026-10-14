@@ -30,7 +30,17 @@ bash poligome-sam-macos-linux.sh sam2.1-hiera-small
 poligome-sam-windows.bat sam2.1-hiera-small
 ```
 
-O `.bat` não instala nada no Windows em si: ele repassa tudo para o WSL2, onde o
+Também existe o caminho nativo, sem WSL2, pelo painel do editor:
+
+```powershell
+cd "$env:USERPROFILE\Downloads"
+powershell -ExecutionPolicy Bypass -File .\poligome-sam-windows-native.ps1 sam2.1-hiera-small
+```
+
+O `.ps1` instala em `%USERPROFILE%\.poligome-sam`; mantenha sua janela aberta.
+Para reiniciar, repita o comando: ele reaproveita o ambiente e o checkpoint.
+
+O `.bat` repassa tudo para o WSL2, onde o
 modelo e o ambiente Python ficam. Você precisa do WSL2 instalado antes; se não
 tiver, o próprio `.bat` diz isso e para.
 
@@ -163,6 +173,14 @@ O SAM 3 não é oferecido no macOS: o caminho de CPU dele foi testado só em Lin
 e Windows.
 
 ### Windows
+
+**Nativo, sem WSL2:** baixe `poligome-sam-windows-native.ps1`, abra o PowerShell
+na pasta Downloads e use o comando do começo rápido. Os dez IDs e aliases são
+os mesmos. Python deve estar instalado no Windows; SAM 3 exige Python 3.12.
+O lançador precisa permanecer aberto: ele relança o processo ao trocar de modelo.
+Use a CLI `poligome-byom-windows.ps1` para registrar BYOM nessa instalação.
+
+**WSL2:**
 
 ```
 poligome-sam-windows.bat sam2.1-hiera-small
@@ -326,9 +344,10 @@ A troca acontece pela própria interface. `GET /models` lista o que está
 instalado em `~/.poligome-sam` e `POST /load {"model_id"}` recarrega o conector
 no ambiente da família pedida.
 
-Como cada família tem runtime próprio, a troca usa `execv` para substituir o
-processo preservando PID, terminal e processo pai — assim os instaladores que
-aguardam o conector continuam válidos. A porta fica indisponível por instantes e
+Como cada família tem runtime próprio, no Linux/macOS/WSL2 a troca usa `execv`
+para substituir o processo preservando PID, terminal e processo pai. No Windows
+nativo, o conector sai com código 75 e o lançador PowerShell lê a seleção salva
+e inicia o ambiente correto. A porta fica indisponível por instantes e
 o modal acompanha o `/health` até o `ready`. Modelos não instalados são recusados
 com HTTP 409 explicando o que falta.
 

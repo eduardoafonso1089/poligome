@@ -212,11 +212,21 @@ function Read-Options([string[]] $Arguments) {
   while ($i -lt $Arguments.Count) {
     $flag = $Arguments[$i]
     $value = if ($i + 1 -lt $Arguments.Count) { $Arguments[$i + 1] } else { $null }
+    if ($flag -match '^-{1,2}(ModelId|model-id|Image|Name|Port|Path|Env)$' -and
+        ([string]::IsNullOrEmpty($value) -or $value -match '^--?[A-Za-z]')) {
+      Fail "a opcao $flag precisa de um valor."
+    }
     switch -regex ($flag) {
       '^-{1,2}(ModelId|model-id)$' { $options.ModelId = $value; $i += 2 }
       '^-{1,2}(Image|image)$'      { $options.Image = $value; $i += 2 }
       '^-{1,2}(Name|name)$'        { $options.Name = $value; $i += 2 }
-      '^-{1,2}(Port|port)$'        { $options.Port = [int]$value; $i += 2 }
+      '^-{1,2}(Port|port)$'        {
+        $parsedPort = 0
+        if (-not [int]::TryParse($value, [ref]$parsedPort) -or $parsedPort -lt 1 -or $parsedPort -gt 65535) {
+          Fail "porta invalida: $value. Use um inteiro entre 1 e 65535."
+        }
+        $options.Port = $parsedPort; $i += 2
+      }
       '^-{1,2}(Path|path)$'        { $options.Path = $value; $i += 2 }
       '^-{1,2}(Env|env)$'          { $options.Env += $value; $i += 2 }
       '^-{1,2}(Follow|follow)$'    { $options.Follow = $true; $i += 1 }
@@ -281,6 +291,10 @@ function Invoke-Start([hashtable] $Options) {
   if (Test-Ping $endpoint) {
     Write-Host "O modelo $($Options.ModelId) ja esta respondendo em $endpoint."
     return
+  }
+
+  if (-not $registration.image) {
+    Fail 'este registro foi importado pelo editor e nao informa uma imagem Docker. Inicie o conteiner original ou use register -Image NOME antes de start.'
   }
 
   docker rm -f $container *> $null

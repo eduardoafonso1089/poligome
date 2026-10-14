@@ -37,6 +37,7 @@ function ToolButton({ title, keyHint, active, disabled, onClick, children, class
 }
 
 export type PreRefactorChromeProps = {
+  samCatalog?: ReturnType<typeof useSamCatalog>;
   projectName: string; assetsCount: number; annotationsCount: number; language: Language; loading: boolean; dirty: boolean; hasAsset: boolean; hasAssets: boolean; imageIndex: number; zoom: number; tool: DrawingTool; vectorTool: VectorTool; snapEnabled: boolean; touchMode: boolean; addToSelection: boolean; coordinatesGuide: boolean; canFinishDraft: boolean; canRemoveDraftPoint: boolean; hasDraft: boolean; canSimplify: boolean; canDuplicate: boolean; canMerge: boolean; canEditPolygon: boolean; canUndo: boolean; canRedo: boolean; hasSelection: boolean; selectionIsBox: boolean; imagePixels: number; preannotating: boolean; strokePx: number; statusMessage: string; fileMenuExtras?: ReactNode;
   /** Mostra a seção GeoTIFF/COG do menu Arquivo; o editor monta o RasterImportControl que a atende. */
   rasterImport?: boolean;
@@ -44,13 +45,24 @@ export type PreRefactorChromeProps = {
 };
 
 export function PreRefactorTopbar(props: PreRefactorChromeProps) {
+  return props.samCatalog
+    ? <TopbarWithCatalog {...props} catalog={props.samCatalog} />
+    : <StandaloneTopbar {...props} />;
+}
+
+function StandaloneTopbar(props: PreRefactorChromeProps) {
+  const catalog = useSamCatalog(true);
+  return <TopbarWithCatalog {...props} catalog={catalog} />;
+}
+
+function TopbarWithCatalog(props: PreRefactorChromeProps & { catalog: ReturnType<typeof useSamCatalog> }) {
   const copy = getCopy(props.language); const projectLabel = props.projectName.trim() || copy.defaultProjectName;
   const [fileOpen, setFileOpen] = useState(false); const [editing, setEditing] = useState(false); const [draft, setDraft] = useState(projectLabel); const [renameNotice, setRenameNotice] = useState(""); const [preferencesOpen, setPreferencesOpen] = useState(false); const [preferencesTab, setPreferencesTab] = useState<"appearance" | "language">("appearance"); const [themeMode, setThemeModeState] = useState<ThemeMode>("system"); const [hubTab, setHubTab] = useState<AiHubTab | null>(null); const [hubAutomaticView, setHubAutomaticView] = useState<"guide" | "runtime">("guide"); const [preannotate, setPreannotate] = useState<{ model: string | null } | null>(null); const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => setDraft(projectLabel), [projectLabel]); useEffect(() => setThemeModeState(storedTheme()), []); useEffect(() => { const open = () => setHubTab("assisted"); window.addEventListener("poligome:open-sam", open); return () => window.removeEventListener("poligome:open-sam", open); }, []); useEffect(() => { if (!renameNotice) return; const timeout = window.setTimeout(() => setRenameNotice(""), 2500); return () => window.clearTimeout(timeout); }, [renameNotice]); useEffect(() => { const close = (event: PointerEvent) => { if (menuRef.current && !menuRef.current.contains(event.target as Node)) setFileOpen(false); }; window.addEventListener("pointerdown", close); return () => window.removeEventListener("pointerdown", close); }, []);
   // Sondar sempre, e não só com o catálogo aberto: é o que a aba "Como funciona"
   // promete ("ao abrir o editor... a página procura o conector") e é a única
   // forma de o botão do topo dizer o que está em uso sem obrigar a abrir a tela.
-  const catalog = useSamCatalog(true);
+  const catalog = props.catalog;
   const runtime = useRuntimeStatus(true);
   const ai = getAiCopy(props.language);
   const samInUse = catalog.samActive && catalog.connectionState === "ready";
@@ -93,7 +105,7 @@ export function PreRefactorTopbar(props: PreRefactorChromeProps) {
       onPreannotate={(model) => openPreannotate(model)}
       onRegisterByomModel={(entry) => catalog.registerByom(entry)}
       onRemoveByomModel={(modelId) => void catalog.removeByom(modelId)}
-      onUnselectAll={catalog.unselectAll}
+      onUnselectAll={() => { catalog.unselectAll(); if (props.tool === "sam") props.onTool("select"); }}
       onEndpointChange={catalog.setEndpoint}
       onRecheckConnector={catalog.recheck}
       onConnect={() => { void catalog.connect().then((ok) => { if (ok) setHubTab(null); }); }}

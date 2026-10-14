@@ -75,6 +75,7 @@ export function useSamCatalog(active: boolean) {
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const [runtimeLabel, setRuntimeLabel] = useState("");
+  const [capabilities, setCapabilities] = useState<readonly string[]>([]);
   // O conector já diz quais checkpoints existem no disco; guardar isso é o que
   // permite marcar na lista o que está instalado, em vez de o usuário descobrir
   // só depois de pedir a troca.
@@ -94,6 +95,8 @@ export function useSamCatalog(active: boolean) {
   // que veria a porta fora do ar e declararia offline no meio do caminho.
   const switching = useRef(false);
   const latest = useRef(0);
+  const adoptionAllowed = useRef(true);
+  const currentEndpoint = useRef(endpoint);
 
   useEffect(() => {
     const storedModel = readStored(MODEL_KEY);
@@ -106,9 +109,13 @@ export function useSamCatalog(active: boolean) {
     const normalized = normalizeSamEndpoint(value);
     writeStored(ENDPOINT_KEY, normalized);
     if (normalized === endpoint) return;
+    currentEndpoint.current = normalized;
     latest.current += 1;
     switching.current = false;
+    adoptionAllowed.current = true;
     setLoadedModelId(null);
+    setCapabilities([]);
+    setConnectorHost(null);
     setRuntimeLabel("");
     setLoadError(null);
     setAvailability([]);
@@ -118,6 +125,7 @@ export function useSamCatalog(active: boolean) {
   }, [endpoint]);
 
   const setSelectedModelId = useCallback((value: string) => {
+    setLoadError(null);
     setSelectedModelIdState(value);
     writeStored(MODEL_KEY, value);
   }, []);
@@ -136,6 +144,7 @@ export function useSamCatalog(active: boolean) {
     if (!health) {
       setConnectionState("offline");
       setLoadedModelId(null);
+      setCapabilities([]);
       setRuntimeLabel("");
       setByomModels([]);
       setAvailability([]);
@@ -144,26 +153,31 @@ export function useSamCatalog(active: boolean) {
     }
     setConnectorHost(describeHost(health));
     setLoadedModelId(health.model_id ?? null);
+    setCapabilities(Array.isArray(health.capabilities) ? health.capabilities : []);
     setRuntimeLabel(describeRuntime(health));
     setConnectionState(health.status === "ready" ? "ready" : health.status === "loading" ? "loading" : "error");
     // Adotar o modelo que já está carregado evita uma troca de três a nove
     // segundos que ninguém pediu; só vale na primeira passada.
-    if (adopt && health.status === "ready" && isSamModelId(health.model_id)) {
+    const shouldAdopt = adopt || adoptionAllowed.current;
+    if (shouldAdopt && health.status === "ready" && isSamModelId(health.model_id)) {
       setSelectedModelId(health.model_id);
       setSamActive(true);
+      adoptionAllowed.current = false;
     }
 
     const [catalog, containers] = await Promise.all([fetchModels(base), fetchByomModels(base)]);
     if (mine !== latest.current) return;
     setAvailability(catalog?.models ?? []);
     setByomModels(containers);
-    if (adopt) {
+    if (shouldAdopt) {
       setByomModelIdState((current) => {
         if (current && containers.some((entry) => entry.model_id === current && entry.ready)) return current;
         // Com um único contêiner disponível e nenhuma escolha anterior, adotá-lo
         // é óbvio; com vários, escolher por conta seria chutar.
         const ready = containers.filter((entry) => entry.ready);
-        return ready.length === 1 && !current ? ready[0].model_id : current;
+        const next = ready.length === 1 && !current ? ready[0].model_id : current;
+        writeStored(BYOM_KEY, next);
+        return next;
       });
     }
   }, [endpoint, setSelectedModelId]);
@@ -175,6 +189,7 @@ export function useSamCatalog(active: boolean) {
   }, [active, refresh]);
 
   useEffect(() => {
+    if (!active) return;
     const onFocus = () => { if (document.visibilityState === "visible") void refresh(false); };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
@@ -182,7 +197,15 @@ export function useSamCatalog(active: boolean) {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
     };
-  }, [refresh]);
+  }, [active, refresh]);
+
+  // Um conector encontrado durante o primeiro carregamento precisa ser
+  // acompanhado até ficar pronto, mesmo sem outra mudança de foco da aba.
+  useEffect(() => {
+    if (!active || connectionState !== "loading") return;
+    const timer = window.setInterval(() => { void refresh(false); }, 1_200);
+    return () => window.clearInterval(timer);
+  }, [active, connectionState, refresh]);
 
   /**
    * Carrega no conector o modelo escolhido, ou apenas o adota se já for o dele.
@@ -194,6 +217,7 @@ export function useSamCatalog(active: boolean) {
   const connect = useCallback(async (): Promise<boolean> => {
     if (switching.current) return false;
     switching.current = true;
+    adoptionAllowed.current = false;
     const mine = ++latest.current;
     const base = connectorBaseUrl(endpoint);
     setLoadError(null);
@@ -203,6 +227,11 @@ export function useSamCatalog(active: boolean) {
     if (!health) {
       switching.current = false;
       setConnectionState("offline");
+      setLoadedModelId(null);
+      setCapabilities([]);
+      setConnectorHost(null);
+      setAvailability([]);
+      setByomModels([]);
       setRuntimeLabel("");
       return false;
     }
@@ -210,6 +239,8 @@ export function useSamCatalog(active: boolean) {
       switching.current = false;
       setLoadedModelId(health.model_id ?? null);
       setRuntimeLabel(describeRuntime(health));
+      setCapabilities(Array.isArray(health.capabilities) ? health.capabilities : []);
+      setConnectorHost(describeHost(health));
       setConnectionState("ready");
       setSamActive(true);
       return true;
@@ -242,7 +273,7 @@ export function useSamCatalog(active: boolean) {
     setConnectionState("ready");
     setSamActive(true);
     await refresh(false);
-    return true;
+    return endpoint === currentEndpoint.current;
   }, [endpoint, refresh, selectedModelId]);
 
   /**
@@ -255,6 +286,7 @@ export function useSamCatalog(active: boolean) {
     setByomBusy(true);
     const outcome = await registerByomModel(base, entry);
     setByomBusy(false);
+    if (endpoint !== currentEndpoint.current) return outcome;
     if (!outcome.ok) {
       await refresh(false);
       return outcome;
@@ -268,6 +300,7 @@ export function useSamCatalog(active: boolean) {
     setByomBusy(true);
     const outcome = await removeByomModel(base, modelId);
     setByomBusy(false);
+    if (endpoint !== currentEndpoint.current) return outcome;
     if (!outcome.ok) {
       await refresh(false);
       return outcome;
@@ -279,9 +312,12 @@ export function useSamCatalog(active: boolean) {
 
   /** Deixa de usar SAM e BYOM para anotar; nada é desinstalado nem desconectado. */
   const unselectAll = useCallback(() => {
+    adoptionAllowed.current = false;
     setSamActive(false);
     setByomModelId(null);
   }, [setByomModelId]);
+
+  const activateSam = useCallback(() => { setSamActive(true); }, []);
 
   const activeByomModel = byomModels.find((candidate) => candidate.model_id === byomModelId) ?? null;
 
@@ -295,12 +331,12 @@ export function useSamCatalog(active: boolean) {
     recheck,
     endpoint, setEndpoint,
     selectedModelId, setSelectedModelId,
-    loadedModelId, connectionState, runtimeLabel, availability, loadError, connectorHost,
+    loadedModelId, connectionState, runtimeLabel, capabilities, availability, loadError, connectorHost,
     byomModels, byomModelId, setByomModelId, byomBusy, activeByomModel,
     // Carregado no conector e em uso para anotar sao coisas diferentes: depois de
     // "desselecionar todos" o modelo continua carregado, e so deixa de ser usado.
     samActive,
-    connect, registerByom, removeByom, unselectAll,
-    anyModelSelected: (samActive && connectionState === "ready") || activeByomModel !== null,
+    connect, registerByom, removeByom, unselectAll, activateSam,
+    anyModelSelected: (samActive && connectionState === "ready") || activeByomModel?.ready === true,
   };
 }

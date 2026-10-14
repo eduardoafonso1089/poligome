@@ -35,6 +35,7 @@ const results = [];
 await fs.mkdir("interaction-audit", { recursive: true });
 const manifest = { protocol:"1.0",id:"qa",name:"QA Runtime",version:"1",produces:["box"],accepts:[],stateful:false,tiling:"runtime",maxEdge:1024,params:[{key:"threshold",label:"Limiar QA",type:"number",min:0,max:1,step:.1,default:.5}] };
 const container = {model_id:"byom-qa",name:"QA Contêiner",endpoint:"http://127.0.0.1:8080",ready:true,notes:"Synthetic QA fixture"};
+const samIds = ["sam2.1-hiera-tiny", "sam2.1-hiera-small", "sam2.1-hiera-base-plus", "sam2.1-hiera-large", "medsam2-latest", "medsam2-ct-lesion", "medsam2-mri-liver-lesion", "medsam2-us-heart", "medsam2-2411", "sam3-concepts"];
 const frame = (annotations, partial=false) => `data:${JSON.stringify({type:"result",annotations,partial})}\r\n\r\n`;
 const annotation = {kind:"box",box:{x:100,y:100,width:80,height:70},label:"QA resultado"};
 const json = (route, body, status=200) => route.fulfill({status,contentType:"application/json",headers:{"Access-Control-Allow-Origin":"*"},body:JSON.stringify(body)});
@@ -47,7 +48,7 @@ async function fixture(options={}) {
     const request=route.request(), path=new URL(request.url()).pathname;
     if(request.method()==="OPTIONS")return json(route,{});
     if(state.connectorOffline)return route.abort("connectionrefused");
-    if(path==="/health")return json(route,{service:"Poligome SAM local",api_version:2,status:"ready",model_id:state.loaded,family:"sam2",device:"cpu",capabilities:state.capabilities??["point","box"]});
+    if(path==="/health")return json(route,{service:"Poligome SAM local",api_version:2,status:state.modelStatus??"ready",model_id:state.loaded,family:state.loaded==="sam3-concepts"?"sam3":"sam2",device:"cpu",host:state.host,app_dir:state.appDir,capabilities:state.capabilities??(state.loaded==="sam3-concepts"?["point","box","text"]:["point","box"])});
     if(path==="/predict") {
       state.samCalls++;state.lastSam=request.postDataJSON();
       if(state.samSlow)await new Promise(resolve=>setTimeout(resolve,700));
@@ -58,12 +59,13 @@ async function fixture(options={}) {
       } catch { /* A canceled browser request may have closed its route. */ }
       return;
     }
-    if(path==="/models")return json(route,{models:[{model_id:"sam2.1-hiera-small",family:"sam2",installed:true},{model_id:"sam2.1-hiera-tiny",family:"sam2",installed:true}]});
+    if(path==="/models")return json(route,{models:(state.allInstalled?samIds:["sam2.1-hiera-small","sam2.1-hiera-tiny"]).map(model_id=>({model_id,family:model_id==="sam3-concepts"?"sam3":"sam2",installed:true}))});
     if(path==="/byom/models")return json(route,{models:state.containers});
     if(path==="/load") {state.loads++;if(state.loadFail)return json(route,{detail:"checkpoint QA indisponível"},400);state.loaded=request.postDataJSON().model_id;return json(route,{switching:true})}
     if(path==="/byom/register") {if(state.registerFail)return json(route,{detail:"Porta QA ocupada"},400);return json(route,{})}
     if(path==="/byom/annotate") {
       const input=request.postDataJSON();
+      state.lastByom=input;
       if(state.byomMode==="error")return json(route,{detail:"Falha QA no contêiner"},503);
       if(state.byomMode==="missing")return json(route,{});
       return json(route,{coco:{images:[{id:1,file_name:input.file_name,width:1200,height:780}],categories:[{id:1,name:"QA BYOM"}],annotations:state.byomMode==="empty"?[]:[{id:1,image_id:1,category_id:1,bbox:[100,100,80,70]}]}});
@@ -110,6 +112,9 @@ async function preannotate(page,{byom=false,all=false,region=false}={}) {
   await dialog.getByRole("button",{name:"Pré-anotar",exact:true}).click();
 }
 const done=page=>page.locator(".ai-run-card.done");
+const activateSam=async page=>{await page.getByRole("button",{name:"Segmentar com SAM (S)",exact:true}).click();await expect(page.locator(".sam-controls").getByRole("button",{name:"Caixa",exact:true})).toBeVisible()};
+const samPoint=async(page,dx=0)=>{const b=await page.locator(".stage svg").first().boundingBox();assert.ok(b);await page.mouse.click(b.x+b.width*.45+dx,b.y+b.height*.45)};
+const saveSam=page=>page.locator(".sam-controls").getByRole("button",{name:/Salvar e editar/});
 try {
   await check("empty project disables preannotation",{demo:false},async({page})=>{await expect(page.getByRole("button",{name:"Pré-anotar",exact:true})).toBeDisabled();await close(await hub(page))});
   await check("BYOM import fields fit mobile viewport without horizontal scrolling",{},async({page})=>{
@@ -140,10 +145,42 @@ try {
   });
   await check("already loaded SAM closes on Verify without reload",{},async({page,state})=>{const d=await hub(page);await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d).toBeHidden();expect(state.loads).toBe(0)});
   await check("SAM model switch succeeds",{},async({page,state})=>{const d=await hub(page);await d.getByRole("button",{name:/SAM 2.1 Hiera Tiny/}).click();await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d).toBeHidden();expect(state.loaded).toBe("sam2.1-hiera-tiny")});
+  await check("all ten SAM models switch while the tool is active and refresh capabilities",{allInstalled:true},async({page,state})=>{
+    await activateSam(page);
+    for(let index=0;index<samIds.length;index++){
+      const d=await hub(page);
+      const models=d.getByRole("button").filter({hasText:/^SAM 2\.1 Hiera|^MedSAM2|^SAM 3 —/});
+      await models.nth(index).click();
+      await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();
+      await expect(d).toBeHidden();expect(state.loaded).toBe(samIds[index]);
+      await expect(page.locator(".sam-controls").getByRole("button",{name:"Texto",exact:true})).toHaveCount(samIds[index]==="sam3-concepts"?1:0);
+    }
+    const d=await hub(page);await d.getByRole("button",{name:/SAM 2.1 Hiera Small/}).click();await d.getByRole("button",{name:"Carregar este modelo",exact:true}).click();await expect(d).toBeHidden();
+    await expect(page.locator(".sam-controls").getByRole("button",{name:"Texto",exact:true})).toHaveCount(0);
+  });
+  await check("first installation is adopted after returning to the offline tab",{connectorOffline:true,runtime:false},async({page,state})=>{
+    await expect(page.getByRole("button",{name:/Modelos de IA:/})).toContainText("IA");state.connectorOffline=false;
+    await page.evaluate(()=>window.dispatchEvent(new Event("focus")));
+    await expect(page.getByRole("button",{name:/Modelos de IA:.*sam2.1-hiera-small/})).toBeVisible();expect(state.loads).toBe(0);
+  });
+  await check("initial loading settles without requiring another focus event",{modelStatus:"loading",runtime:false},async({page,state})=>{
+    const d=await hub(page);await expect(d.locator(".sam-footer-status")).toContainText("Carregando");
+    state.modelStatus="ready";
+    await expect(page.getByRole("button",{name:/Modelos de IA:.*sam2.1-hiera-small/})).toBeVisible();
+  });
+  await check("stopping SAM leaves the drawing tool and remains stopped after recheck",{runtime:false},async({page})=>{
+    await activateSam(page);await samPoint(page);await expect(saveSam(page)).toBeEnabled();
+    const d=await hub(page);await d.getByRole("button",{name:"Parar de usar o SAM",exact:true}).click();await close(d);
+    await expect(page.locator(".sam-controls")).toHaveCount(0);await expect(page.locator(".sam-mask-preview")).toHaveCount(0);
+    await page.evaluate(()=>window.dispatchEvent(new Event("focus")));
+    await expect(page.getByRole("button",{name:/Modelos de IA:.*sam2.1-hiera-small/})).toHaveCount(0);
+  });
+  await check("changing SAM clears proposals from the previous model",{},async({page})=>{
+    await activateSam(page);await samPoint(page);await expect(saveSam(page)).toBeEnabled();
+    const d=await hub(page);await d.getByRole("button",{name:/SAM 2.1 Hiera Tiny/}).click();await d.getByRole("button",{name:"Carregar este modelo",exact:true}).click();await expect(d).toBeHidden();
+    await expect(page.locator(".sam-mask-preview")).toHaveCount(0);await expect(saveSam(page)).toBeDisabled();
+  });
   await check("failed switch keeps previous SAM connected",{loadFail:true},async({page})=>{const d=await hub(page);await d.getByRole("button",{name:/SAM 2.1 Hiera Tiny/}).click();await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d.getByText(/checkpoint QA indisponível/).first()).toBeVisible();await expect(page.getByRole("button",{name:/Modelos de IA:.*sam2.1-hiera-small/})).toBeVisible()});
-  const activateSam=async page=>{await page.getByRole("button",{name:"Segmentar com SAM (S)",exact:true}).click();await expect(page.locator(".sam-controls").getByRole("button",{name:"Caixa",exact:true})).toBeVisible()};
-  const samPoint=async(page,dx=0)=>{const b=await page.locator(".stage svg").first().boundingBox();assert.ok(b);await page.mouse.click(b.x+b.width*.45+dx,b.y+b.height*.45)};
-  const saveSam=page=>page.locator(".sam-controls").getByRole("button",{name:/Salvar e editar/});
   await check("SAM equivalent base URL preserves ready connection and routes inference to predict",{},async({page,state})=>{
     const d=await hub(page);await d.getByRole("tab",{name:/Conexões/}).click();
     const card=d.locator(".ai-conn-card").first();await expect(card.getByText("Conectado",{exact:true})).toBeVisible();
@@ -163,6 +200,18 @@ try {
   await check("SAM failure explains the error without saving annotations",{samError:true},async({page})=>{const before=await count(page);await activateSam(page);await samPoint(page);await expect(page.locator("main")).toContainText("Falha QA SAM");await expect(saveSam(page)).toBeDisabled();expect(await count(page)).toBe(before)});
   await check("BYOM invalid port explains the port",{},async({page})=>{const d=await hub(page);await d.getByRole("tab",{name:/Conexões/}).click();await d.getByRole("button",{name:"Adicionar",exact:true}).click();await d.getByRole("textbox",{name:"Identificador"}).fill("byom-qa");await d.getByRole("spinbutton",{name:"Porta"}).fill("0");await expect(d.getByRole("alert")).toContainText("1 e 65535");await expect(d.getByRole("button",{name:"Importar",exact:true})).toBeDisabled()});
   await check("BYOM registration failure preserves fields and SAM connection",{registerFail:true},async({page})=>{const d=await hub(page);await d.getByRole("tab",{name:/Conexões/}).click();await d.getByRole("button",{name:"Adicionar",exact:true}).click();await d.getByRole("textbox",{name:"Identificador"}).fill("byom-qa");await d.getByRole("textbox",{name:"Nome",exact:true}).fill("QA nome");await d.getByRole("button",{name:"Importar",exact:true}).click();await expect(d.getByRole("alert")).toContainText("Porta QA ocupada");await expect(d.getByRole("textbox",{name:"Nome",exact:true})).toHaveValue("QA nome");await expect(page.getByRole("button",{name:/Modelos de IA:.*sam2.1-hiera-small/})).toBeVisible()});
+  for(const host of ["Windows","WSL2","Linux","macOS"])await check(`BYOM guide selects the CLI for the connector host ${host}`,{host,appDir:"fixture"},async({page})=>{
+    const d=await hub(page);await d.getByRole("tab",{name:/Automático/}).click();await d.getByRole("button",{name:/Adicionar meu modelo/}).click();
+    await d.locator(".byom-setup-guide summary").click();
+    const chosen=d.locator('.byom-setup-guide [role="tab"][aria-selected="true"]');
+    await expect(chosen).toContainText(host==="Windows"?"PowerShell":"bash");
+    await expect(d.locator(".byom-panel code").filter({hasText:host==="Windows"?/poligome-byom-windows.ps1 examples/:/poligome-byom-macos-linux.sh examples/}).first()).toBeVisible();
+  });
+  await check("choosing different BYOM models routes each run correctly and preserves other results",{containers:[container,{...container,model_id:"byom-second",name:"Segundo contêiner",endpoint:"http://127.0.0.1:8081"}]},async({page,state})=>{
+    const before=await count(page);await preannotate(page,{byom:true});await expect(done(page)).toBeVisible();expect(state.lastByom.model_id).toBe("byom-qa");
+    await done(page).getByRole("button",{name:/Manter/}).click();await page.getByRole("button",{name:"Pré-anotar",exact:true}).click();
+    const d=page.getByRole("dialog",{name:"Pré-anotar",exact:true});await d.getByRole("radio",{name:/Segundo contêiner/}).check();await d.getByRole("button",{name:"Pré-anotar",exact:true}).click();await expect(done(page)).toBeVisible();expect(state.lastByom.model_id).toBe("byom-second");expect(await count(page)).toBe(before+2);
+  });
   await check("invalid runtime manifest is not ready",{badManifest:true},async({page})=>{await page.getByRole("button",{name:"Pré-anotar",exact:true}).click();await expect(page.getByRole("dialog").getByText(/Nenhum modelo/)).toBeVisible()});
   await check("native result settles drafts, Undo removes only generated work",{},async({page})=>{const before=await count(page);await preannotate(page);await expect(done(page)).toBeVisible();expect(await count(page)).toBe(before+1);await done(page).getByRole("button",{name:/Desfazer/}).click();await expect.poll(()=>count(page)).toBe(before)});
   await check("native empty result preserves manual annotations",{mode:"empty"},async({page})=>{const before=await count(page);await preannotate(page);await expect(done(page)).toBeVisible();expect(await count(page)).toBe(before)});

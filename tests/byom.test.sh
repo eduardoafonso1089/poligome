@@ -414,4 +414,16 @@ test_connector_registry
 test_catalog_alignment
 test_invalid_inference_inputs
 
+connector_python="$(find_capable_python)" || connector_python=""
+if [[ -n "$connector_python" ]] && "$connector_python" -c 'import fastapi, uvicorn' >/dev/null 2>&1; then
+  "$connector_python" "${PROJECT_ROOT}/tests/sam-connector-lifecycle.test.py" ||
+    fail "ciclo de vida de troca SAM e descoberta BYOM"
+else
+  printf 'ok - # SKIP ciclo de vida do conector sem dependências instaladas\n'
+fi
+
+if command -v pwsh >/dev/null 2>&1; then
+  pwsh -NoProfile -File "${PROJECT_ROOT}/tests/byom-native.test.ps1" || fail "CLI BYOM nativa"
+fi
+
 printf '\nTodos os testes locais do BYOM passaram.\n'

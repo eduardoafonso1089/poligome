@@ -29,7 +29,8 @@ import { CogTiledLayer } from "../raster/cog-tiled-layer";
 import { demoRouteTarget } from "../session/demo-route";
 import { importCocoDocument, type CocoDocumentInput } from "../import/coco-document-import";
 import { assetAsDataUrl } from "../../lib/sam";
-import { connectorBaseUrl, fetchHealth, DEFAULT_SAM_ENDPOINT } from "../../lib/sam-connector";
+import { connectorBaseUrl } from "../../lib/sam-connector";
+import { useSamCatalog } from "../presentation/use-sam-catalog";
 import {
   registerRuntimeImage,
   runtimeInfer,
@@ -113,10 +114,10 @@ export function CanonicalEditorWorkbench() {
   const [samNegative, setSamNegative] = useState(false);
   // O que o modelo carregado aceita agora, dito pelo próprio conector: o catálogo
   // descreve o modelo escolhido, e escolhido não é o mesmo que carregado.
-  const [samCapabilities, setSamCapabilities] = useState<readonly string[]>([]);
-  // null enquanto a sondagem não voltou: dizer "não encontrado" antes de ter
-  // procurado acusaria o usuário de um problema que talvez não exista.
-  const [samConnectorFound, setSamConnectorFound] = useState<boolean | null>(null);
+  const samCatalog = useSamCatalog(true);
+  const samCapabilities = samCatalog.capabilities;
+  // A ferramenta e a central usam a mesma saúde, inclusive depois de uma troca.
+  const samConnectorFound = samCatalog.connectionState === "ready";
   const [activeLabel, setActiveLabel] = useState("");
   const [tool, setTool] = useState<DrawingTool>("select");
   const [vectorTool, setVectorTool] = useState<VectorTool>(null);
@@ -445,8 +446,7 @@ export function CanonicalEditorWorkbench() {
     modelName: string,
     signal: AbortSignal,
   ): Promise<{ ids: string[]; replaced: number; previous: EditorAnnotation[] }> => {
-    const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
-    const base = connectorBaseUrl(stored || DEFAULT_SAM_ENDPOINT);
+    const base = connectorBaseUrl(samCatalog.endpoint);
     if (!base) throw new PreannotateError(aiCopy.runConnectorUnreachable);
     const { url } = await assetAsDataUrl(target, copy, signal);
     let response: Response;
@@ -498,7 +498,7 @@ export function CanonicalEditorWorkbench() {
     });
     setSessionDirty(true);
     return { ids: result.annotations.map((annotation) => annotation.id), replaced: previous.length, previous };
-  }, [aiCopy, assets, copy, editor, makeId]);
+  }, [aiCopy, assets, copy, editor, makeId, samCatalog.endpoint]);
 
   /**
    * Roda o poligome-runtime sobre uma imagem, desenhando conforme chega.
@@ -743,26 +743,20 @@ export function CanonicalEditorWorkbench() {
   useEffect(() => () => preannotateRunRef.current?.abort(), []);
 
   /**
-   * Pergunta ao conector o que o modelo carregado aceita.
-   *
-   * Vem do conector, e não do catálogo, porque o catálogo descreve o modelo que
-   * você escolheu na tela e aqui o que importa é o que está carregado: oferecer
-   * "Texto" sobre um SAM 2.1 seria prometer algo que o pedido recusaria.
+   * A proposta pertence ao modelo e endereço que a produziram. O estado
+   * compartilhado da central invalida essa proposta ao trocar de conexão.
    */
   useEffect(() => {
-    if (tool !== "sam") return;
-    let cancelled = false;
-    const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
-    const base = connectorBaseUrl(stored || DEFAULT_SAM_ENDPOINT);
-    // A escrita fica no retorno da promessa, e não no corpo do efeito: um setState
-    // síncrono aqui dispara uma renderização em cascata por nada.
-    void (base ? fetchHealth(base) : Promise.resolve(null)).then((health) => {
-      if (cancelled) return;
-      setSamConnectorFound(health !== null);
-      setSamCapabilities(Array.isArray(health?.capabilities) ? health.capabilities : []);
-    });
-    return () => { cancelled = true; };
-  }, [tool]);
+    // Trocar o modelo/endereço ou perder a conexão invalida a proposta antiga.
+    // Cancelar antes de limpar impede uma resposta tardia de repor a máscara.
+    samRunRef.current?.abort();
+    samRunRef.current = null;
+    setSamLoading(false);
+    setSamPrompts([]);
+    setSamBoxStart(null);
+    setSamBox(null);
+    setSamPreviews([]);
+  }, [samCatalog.endpoint, samCatalog.loadedModelId, samCatalog.connectionState]);
 
   // Um modo que o modelo carregado não aceita não vale — trocar de modelo pelo
   // painel deixaria a barra em “Texto” sobre um SAM 2.1. Derivado, e não corrigido
@@ -787,18 +781,18 @@ export function CanonicalEditorWorkbench() {
     text?: string;
   }) => {
     if (!asset) return;
+    if (samCatalog.connectionState !== "ready") { setMessage(copy.errSamUnreachable); return; }
     if (!prompts?.length && !box && !text?.trim()) { setSamPreviews([]); return; }
     samRunRef.current?.abort();
     const controller = new AbortController();
     samRunRef.current = controller;
-    const stored = (() => { try { return localStorage.getItem("poligome-sam-endpoint"); } catch { return null; } })();
     setSamLoading(true);
     try {
       const annotations = await requestSamAnnotations({
         makeId,
         asset,
         label: activeLabel,
-        endpoint: stored || DEFAULT_SAM_ENDPOINT,
+        endpoint: samCatalog.endpoint,
         prompts,
         box,
         text,
@@ -819,7 +813,7 @@ export function CanonicalEditorWorkbench() {
         setSamLoading(false);
       }
     }
-  }, [activeLabel, aiCopy, asset, copy, makeId, samThreshold]);
+  }, [activeLabel, aiCopy, asset, copy, makeId, samThreshold, samCatalog.endpoint, samCatalog.connectionState]);
 
   function addSamPrompt(point: { x: number; y: number }, negative: boolean) {
     const next: SamPrompt[] = [...samPrompts, { x: point.x, y: point.y, label: negative ? 0 : 1 }];
@@ -1017,6 +1011,7 @@ export function CanonicalEditorWorkbench() {
   }
 
   function chooseTool(next: DrawingTool) {
+    if (next === "sam") samCatalog.activateSam();
     // Sair da ferramenta SAM descarta os prompts e a proposta: guardá-los faria a
     // máscara reaparecer numa ferramenta que não a produziu.
     if (next !== "sam" && (samPrompts.length || samBox || samPreviews.length)) clearSamPrompts();
@@ -1600,7 +1595,7 @@ export function CanonicalEditorWorkbench() {
     <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/bmp,image/gif" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />
     <input ref={relinkInputRef} type="file" accept="image/*,.tif,.tiff" multiple hidden onChange={(event) => { void relinkProjectImages(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />
 
-    <PreRefactorTopbar {...chromeProps} rasterImport fileMenuExtras={<div className="canonical-file-extras">
+    <PreRefactorTopbar {...chromeProps} samCatalog={samCatalog} rasterImport fileMenuExtras={<div className="canonical-file-extras">
       <ExportControls assets={assets} labels={labels} annotations={editor.annotations} language={language} disabled={loading} onMessage={setMessage} />
     </div>} />
     {/* Fora do menu de propósito: o menu desmonta ao fechar, e o controle tem de

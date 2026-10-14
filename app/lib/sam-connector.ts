@@ -89,7 +89,7 @@ export async function fetchModels(base: string, timeoutMs = 6_000): Promise<Mode
   return getJson<ModelsResponse>(`${base}/models`, timeoutMs);
 }
 
-export async function fetchByomModels(base: string, timeoutMs = 8_000): Promise<readonly ByomModel[]> {
+export async function fetchByomModels(base: string, timeoutMs = 30_000): Promise<readonly ByomModel[]> {
   if (!base) return [];
   const payload = await getJson<{ models?: ByomModel[] }>(`${base}/byom/models`, timeoutMs);
   return Array.isArray(payload?.models) ? payload.models.filter((entry) => entry && typeof entry.model_id === "string") : [];
@@ -141,9 +141,9 @@ export async function waitForModel(
     onTick?.(health);
     if (health) {
       downSince = null;
+      if (health.status === "error") return { ok: false, detail: health.error || "o modelo falhou ao carregar." };
       if (health.model_id === modelId) {
         if (health.status === "ready") return { ok: true };
-        if (health.status === "error") return { ok: false, detail: health.error || "o modelo falhou ao carregar." };
       }
     } else {
       // Sumir por instantes é o caminho feliz: o conector está se recarregando.

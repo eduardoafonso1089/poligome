@@ -299,8 +299,17 @@ MOCK_WGET
 
 cat >"${MOCK_BIN}/uname" <<'MOCK_UNAME'
 #!/usr/bin/env bash
-printf '%s\n' "${POLIGOME_TEST_UNAME:-Linux}"
+if [[ "${1:-}" == -m ]]; then
+  printf '%s\n' "${POLIGOME_TEST_ARCH:-x86_64}"
+else
+  printf '%s\n' "${POLIGOME_TEST_UNAME:-Linux}"
+fi
 MOCK_UNAME
+
+cat >"${MOCK_BIN}/sw_vers" <<'MOCK_SW_VERS'
+#!/usr/bin/env bash
+printf '%s\n' "${POLIGOME_TEST_MACOS_VERSION:-14.0}"
+MOCK_SW_VERS
 
 cat >"${MOCK_BIN}/nvidia-smi" <<'MOCK_NVIDIA'
 #!/usr/bin/env bash
@@ -384,6 +393,9 @@ run_isolated() {
     POLIGOME_TEST_GPU_CAP="${POLIGOME_TEST_GPU_CAP:-}" \
     POLIGOME_TEST_HEALTH_MATCH="${POLIGOME_TEST_HEALTH_MATCH:-}" \
     POLIGOME_TEST_PORT_IN_USE="${POLIGOME_TEST_PORT_IN_USE:-}" \
+    POLIGOME_TEST_UNAME="${POLIGOME_TEST_UNAME:-Linux}" \
+    POLIGOME_TEST_ARCH="${POLIGOME_TEST_ARCH:-x86_64}" \
+    POLIGOME_TEST_MACOS_VERSION="${POLIGOME_TEST_MACOS_VERSION:-14.0}" \
     POLIGOME_TEST_CONNECTOR_EXIT="${POLIGOME_TEST_CONNECTOR_EXIT:-}" \
     POLIGOME_TEST_CONNECTOR_FAIL_BEFORE_READY="${POLIGOME_TEST_CONNECTOR_FAIL_BEFORE_READY:-}" \
     "$@"
@@ -429,7 +441,7 @@ create_sparse_checkpoint() {
 
 test_bash_model() {
   local model="$1"
-  local safe_model="${model//[^[:alnum:]]/_}"
+  local safe_model="${model//[^[:alnum:]]/_}-${POLIGOME_TEST_UNAME:-Linux}"
   local home_dir="${TEMP_ROOT}/home-${safe_model}"
   local app_dir="${home_dir}/.poligome-sam"
   local install_log="${TEMP_ROOT}/${safe_model}-install.log"
@@ -1155,6 +1167,29 @@ test_service_covers_every_model
 test_device_is_choosable
 test_sam3_rejects_old_gpu
 test_sam3_cpu_path
+
+for model in "${MODELS[@]}"; do
+  [[ "$model" == sam3-concepts ]] && continue
+  POLIGOME_TEST_UNAME=Darwin POLIGOME_TEST_ARCH=arm64 test_bash_model "$model"
+done
+for scenario in intel old-os sam3; do
+  model=sam2.1-hiera-small
+  arch=arm64
+  version=14.0
+  expected='Apple Silicon'
+  case "$scenario" in
+    intel) arch=x86_64 ;;
+    old-os) version=13.0; expected='macOS 14' ;;
+    sam3) model=sam3-concepts; expected='SAM 3 não é oferecido no macOS' ;;
+  esac
+  platform_log="${TEMP_ROOT}/platform-${scenario}.log"
+  : >"$platform_log"
+  if output="$(POLIGOME_TEST_UNAME=Darwin POLIGOME_TEST_ARCH="$arch" POLIGOME_TEST_MACOS_VERSION="$version" run_isolated "${TEMP_ROOT}/platform-${scenario}" "$platform_log" bash "$INSTALLER" "$model" 2>&1)"; then
+    fail "macOS aceitou plataforma incompatível: $scenario"
+  fi
+  assert_contains "$output" "$expected" "diagnóstico macOS $scenario"
+done
+pass "macOS Apple Silicon instala os nove modelos compatíveis; Intel, macOS antigo e SAM 3 são recusados antes dos downloads"
 
 # O instalador nativo de Windows repete o catálogo em PowerShell, porque é um
 # arquivo que o usuário baixa sozinho e não pode depender do .sh. Repetição é o

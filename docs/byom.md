@@ -25,7 +25,7 @@ do Poligome, que é assunto do [sam.md](sam.md), e o Docker.
 bash public/poligome-byom-macos-linux.sh examples
 
 # confere o estado sem abrir o editor
-bash poligome-byom-macos-linux.sh list
+bash public/poligome-byom-macos-linux.sh list
 ```
 
 O `list` deve mostrar os dois no ar:
@@ -36,15 +36,16 @@ O `list` deve mostrar os dois no ar:
   byom-watershed    poligome-byom-exemplo   no ar      200     http://127.0.0.1:8081
 ```
 
-No editor, abra o botão do modelo de IA: os dois aparecem sob **BYOM · seu
-modelo**. Escolha um, abra uma imagem e clique em **Rodar BYOM**. O resultado
+No editor, abra **Modelos de IA → Automático**: os dois aparecem na lista de
+contêineres. Abra uma imagem, clique em **Pré-anotar** e escolha o modelo. O resultado
 entra direto na lista de anotações, já desenhado e pronto para você revisar.
 
 Os dois exemplos existem para serem um molde. Quando quiser trocar o miolo pelo
 seu modelo, o **Passo a passo** mais abaixo mostra o caminho inteiro: você
 substitui a função `predict()` e mantém o resto.
 
-No Windows, tudo isso roda dentro do WSL2 — veja a seção logo adiante.
+No Windows, use a CLI correspondente ao conector: PowerShell para instalação
+nativa, bash dentro do WSL2 para instalação pelo `.bat`.
 
 ---
 
@@ -97,8 +98,21 @@ bash poligome-byom-macos-linux.sh list
 
 ## No Windows
 
-Não há `.bat` para o BYOM, e não falta nenhum: no Windows o conector já roda
-dentro do WSL2 — é para lá que `poligome-sam-windows.bat` delega. O registro
+Há dois caminhos. Confira **Modelos de IA → Conexões** para saber qual
+instalação respondeu e qual pasta ela lê.
+
+**Windows nativo:** se instalou o conector com `poligome-sam-windows-native.ps1`,
+use a CLI PowerShell, na pasta dos arquivos baixados:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\poligome-byom-windows.ps1 examples
+powershell -ExecutionPolicy Bypass -File .\poligome-byom-windows.ps1 list
+```
+
+O registro fica em `%USERPROFILE%\.poligome-sam\byom`. Docker precisa responder
+no PowerShell; use Docker Desktop em modo de contêineres Linux.
+
+**WSL2:** é para lá que `poligome-sam-windows.bat` delega. O registro
 fica em `~/.poligome-sam/byom` **dentro da distribuição WSL**, não em
 `C:\Users\...`, e é só esse diretório que o conector lê.
 
@@ -118,6 +132,15 @@ dessa mesma distribuição**. Há dois caminhos:
 
 Sem isso, a CLI para antes de tentar qualquer coisa e diz que o `docker` não foi
 encontrado no PATH.
+
+No macOS e Linux, use a CLI bash com Docker em execução e `python3` disponível.
+Registros nativos e do WSL2 ficam em pastas diferentes: use a CLI do mesmo
+ambiente do conector. Ao importar pela interface, o registro já é salvo na pasta
+do conector que respondeu.
+
+Um modelo importado pela interface registra somente o endereço. Se ele parar,
+inicie seu contêiner original; para usar o comando `start` da CLI, registre
+também a imagem Docker com `register --image NOME` (PowerShell: `-Image NOME`).
 
 ## O contrato
 

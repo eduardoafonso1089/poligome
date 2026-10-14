@@ -4,7 +4,7 @@ import {parseEventStream,runtimeInfer,fetchRuntimeHealth,fetchRuntimeManifest} f
 import {sameGeometry,reconcileDrafts,toEditorAnnotations} from '../app/lib/runtime-annotations.ts';
 import {createPolygon} from '../app/editor/models/annotation-factory.ts';
 import {polygonRle} from '../app/editor/import/coco-rle.ts';
-import {fetchByomModels} from '../app/lib/sam-connector.ts';
+import {fetchByomModels,waitForModel} from '../app/lib/sam-connector.ts';
 import {normalizeSamEndpoint, localEndpointError} from '../app/lib/local-endpoint.ts';
 
 const final={type:'result',annotations:[],partial:false};
@@ -75,6 +75,11 @@ test('invalid manifests are rejected before rendering model controls',async(t)=>
 });
 test('malformed BYOM catalog does not crash the AI hub',async(t)=>{
  t.mock.method(globalThis,'fetch',async()=>Response.json({models:{bad:true}}));assert.deepEqual(await fetchByomModels('http://localhost:7860'),[]);
+});
+
+test('failed process replacement reports its error even while health still names the old model', async(t)=>{
+ t.mock.method(globalThis,'fetch',async()=>Response.json({service:'Poligome SAM local',api_version:2,model_id:'sam2.1-hiera-small',status:'error',error:'não foi possível recarregar o conector'}));
+ assert.deepEqual(await waitForModel('http://localhost:7860','sam3-concepts',{timeoutMs:100}),{ok:false,detail:'não foi possível recarregar o conector'});
 });
 test('adding or changing a hole protects a draft from replacement',()=>{
  const original=createPolygon({id:'a',asset:'i',label:'u'},[[0,0],[10,0],[10,10],[0,10]]);

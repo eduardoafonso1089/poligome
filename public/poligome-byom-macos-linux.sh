@@ -333,6 +333,9 @@ cmd_start() {
     return 0
   fi
 
+  [[ -n "$image" ]] ||
+    fail "este registro foi importado pelo editor e não informa uma imagem Docker. Inicie o contêiner original ou use register --image NOME antes de start."
+
   docker rm -f "$container" >/dev/null 2>&1 || true
   # As variáveis guardadas no registro voltam aqui, para que dois modelos saiam
   # da mesma imagem mudando só a configuração.

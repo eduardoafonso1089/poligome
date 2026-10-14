@@ -49,7 +49,7 @@ $POLIGOME_SAM_INSTALLER_API = 2
 
 $DefaultSiteUrl = 'https://poligome.com'
 $DefaultAssetBaseUrl = 'https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public'
-$DefaultConnectorSha256 = '25421160b10e032ab3fbc14617e66f34d4b0976bf11f46c652f02d37fa719387'
+$DefaultConnectorSha256 = 'e63003f93f55e8c34ec15885e8c19bb93c55540048f80adf368544dc7fb8c02a'
 
 $SiteUrl = if ($env:POLIGOME_SITE_URL) { $env:POLIGOME_SITE_URL.TrimEnd('/') } else { $DefaultSiteUrl }
 $AssetBaseUrl = if ($env:POLIGOME_ASSET_BASE_URL) { $env:POLIGOME_ASSET_BASE_URL.TrimEnd('/') } else { $DefaultAssetBaseUrl }
@@ -993,6 +993,13 @@ while ($true) {
 
   if (-not (Test-Path -LiteralPath $venvPython)) {
     Fail "a troca pediu $modelId, mas o ambiente da familia $family nao esta instalado. Rode este instalador para esse modelo."
+  }
+
+  if (-not $firstRun) {
+    # A escolha automatica da familia anterior pode ter sido CUDA enquanto o
+    # novo runtime so tem torch de CPU (ou o contrario). Reavaliar como no Unix.
+    $Device = if ($RequestedDevice -eq 'cpu') { 'cpu' } else { 'auto' }
+    $Device = Resolve-RuntimeDevice $family $venvPython
   }
 
   $arguments = @($Connector, '--model', $modelId, '--checkpoint', $checkpoint)

@@ -164,10 +164,12 @@ function ByomPanel({
   language,
   models,
   onRegister,
+  host,
 }: {
   language: Language;
   models: readonly ByomModel[];
   onRegister: (entry: { modelId: string; name: string; port: number; notes?: string }) => Promise<ByomWriteOutcome>;
+  host: string | null;
 }) {
   const sc = getSamCopy(language);
   const [draftId, setDraftId] = useState("byom-");
@@ -177,7 +179,8 @@ function ByomPanel({
   // precisa aparecer aqui: sem isto o botão limpava os campos e não dizia nada.
   const [importError, setImportError] = useState("");
   const [importing, setImporting] = useState(false);
-  const [commandOs, setCommandOs] = useState<"unix" | "native">(preferredInstallOs);
+  const [chosenCommandOs, setCommandOs] = useState<"unix" | "native" | null>(null);
+  const commandOs = chosenCommandOs ?? (host === "Windows" ? "native" : host ? "unix" : preferredInstallOs());
   const cli = commandOs === "native" ? "powershell -ExecutionPolicy Bypass -File .\\poligome-byom-windows.ps1" : "bash poligome-byom-macos-linux.sh";
   const portNumber = Number(draftPort);
   const validId = BYOM_MODEL_ID_PATTERN.test(draftId.trim().toLowerCase());
@@ -479,7 +482,7 @@ export default function SamSetupModal({
       steps: [
         { title: sc.stepDownloadTitle, body: sc.stepDownloadWin, command: null },
         { title: sc.stepNativeOpenTitle, body: sc.stepNativeOpenBody, command: null },
-        { title: sc.stepNativeFolderTitle, body: sc.stepNativeFolderBody, command: String.raw`cd $env:USERPROFILE\Downloads` },
+        { title: sc.stepNativeFolderTitle, body: sc.stepNativeFolderBody, command: String.raw`cd "$env:USERPROFILE\Downloads"` },
         { title: sc.stepNativeRunTitle, body: sc.stepNativeRunBody, command: nativeWindowsCommand },
         { title: sc.stepNativeKeepTitle, body: sc.stepNativeKeepBody, command: null },
         { title: sc.stepBackTitle, body: sc.stepBackBody, command: null },
@@ -629,7 +632,7 @@ export default function SamSetupModal({
               onRemove={(modelId) => { setAutomaticView("guide"); onRemoveByomModel(modelId); }}
               onSave={onRegisterByomModel}
             />
-            : automaticView === "docs" ? <ByomPanel language={language} models={byomModels} onRegister={onRegisterByomModel} />
+            : automaticView === "docs" ? <ByomPanel language={language} models={byomModels} onRegister={onRegisterByomModel} host={connectorHost?.host ?? null} />
             : <AutomaticGuidePanel copy={ai} />
           )
           : assistedView === "how" ? <HowItWorksPanel language={language} />
