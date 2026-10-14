@@ -107,16 +107,30 @@ const CAPABILITY_KEYS = {
  */
 function CommandCode({ text, sc }: { text: string; sc: SamCopy }) {
   const [copied, setCopied] = useState(false);
+  const codeRef = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!copied) return;
     const timer = window.setTimeout(() => setCopied(false), 1600);
     return () => window.clearTimeout(timer);
   }, [copied]);
+  // Sem a API de área de transferência (página fora de HTTPS, permissão negada),
+  // o comando fica selecionado: o botão nunca termina em "não aconteceu nada".
+  const selectCommand = () => {
+    const code = codeRef.current;
+    const selection = window.getSelection();
+    if (!code || !selection) return false;
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    try { return document.execCommand("copy"); } catch { return false; }
+  };
   const copy = () => {
-    navigator.clipboard?.writeText(text).then(() => setCopied(true), () => setCopied(false));
+    if (!navigator.clipboard) { setCopied(selectCommand()); return; }
+    navigator.clipboard.writeText(text).then(() => setCopied(true), () => setCopied(selectCommand()));
   };
   return <div className="command-copy">
-    <code>{text}</code>
+    <code ref={codeRef}>{text}</code>
     <button type="button" onClick={copy} aria-label={copied ? sc.copiedCommand : sc.copyCommand} title={copied ? sc.copiedCommand : sc.copyCommand}>
       {copied ? <Check size={12} /> : <Copy size={12} />}<span>{copied ? sc.copiedCommand : sc.copyCommand}</span>
     </button>

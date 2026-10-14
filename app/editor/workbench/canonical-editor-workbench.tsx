@@ -4,7 +4,7 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { Asset, Label } from "../../lib/types";
 import { fill, getCopy, storedLanguage, storedTheme, type Language } from "../../lib/i18n";
-import { aiFailureMessage, countAnnotations, getAiCopy } from "../../lib/ai-copy";
+import { aiFailureMessage, countAnnotations, getAiCopy, runtimeFailureMessage } from "../../lib/ai-copy";
 import { preannotationUndoPlan } from "../../lib/preannotation-undo";
 import { translateErrorCode } from "../../lib/error-message";
 import type { EditorAnnotation } from "../models/annotation-model";
@@ -631,7 +631,7 @@ export function CanonicalEditorWorkbench() {
   // Mandar verificar o SAM quando quem não respondeu foi o runtime manda a
   // pessoa mexer no serviço errado.
   const describeFailure = useCallback((error: unknown, source: PreannotateRequest["source"]) => aiFailureMessage(
-    error instanceof RuntimeError ? fill(aiCopy.runRuntimeError, { detail: error.message })
+    error instanceof RuntimeError ? runtimeFailureMessage(error.code, error.message, aiCopy)
       : error instanceof PreannotateError ? error.message
         : source === "runtime" ? aiCopy.runRuntimeUnreachable : aiCopy.runConnectorUnreachable, aiCopy), [aiCopy]);
 
@@ -1600,10 +1600,12 @@ export function CanonicalEditorWorkbench() {
     <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/bmp,image/gif" multiple hidden onChange={(event) => { void addImages(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />
     <input ref={relinkInputRef} type="file" accept="image/*,.tif,.tiff" multiple hidden onChange={(event) => { void relinkProjectImages(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />
 
-    <PreRefactorTopbar {...chromeProps} fileMenuExtras={<div className="canonical-file-extras">
-      <RasterImportControl makeId={makeId} language={language} disabled={loading} onImported={applyRasterImport} onMessage={setMessage} />
+    <PreRefactorTopbar {...chromeProps} rasterImport fileMenuExtras={<div className="canonical-file-extras">
       <ExportControls assets={assets} labels={labels} annotations={editor.annotations} language={language} disabled={loading} onMessage={setMessage} />
     </div>} />
+    {/* Fora do menu de propósito: o menu desmonta ao fechar, e o controle tem de
+        sobreviver ao seletor de arquivos e ao diálogo de recorte que vem depois. */}
+    <RasterImportControl makeId={makeId} language={language} disabled={loading} showTrigger={false} onImported={applyRasterImport} onMessage={setMessage} />
     <CocoImportControl ref={annotationImportRef} assets={assets} labels={labels} annotations={editor.annotations} makeId={makeId} language={language} disabled={loading} showTrigger={false} onImported={applyCocoImport} />
 
     <div className="workspace">

@@ -55,6 +55,7 @@ export AUDIT_BASE_URL="${base}"
 
 audits=(
   "ai-flow-audit.mjs"
+  "raster-menu-audit.mjs"
   "run-demo-entry-audit.mjs"
   "image-reorder-audit.mjs"
   "mobile-restored-demo-state-audit.mjs"

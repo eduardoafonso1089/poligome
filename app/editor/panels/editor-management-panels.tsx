@@ -98,6 +98,24 @@ export function EditorManagementPanels(props: Props) {
     };
   }, []);
 
+  // Esc fecha a gaveta aberta no celular ou tablet com teclado, como fecha os
+  // diálogos. Um diálogo por cima, ou um campo em edição, ficam com a tecla.
+  useEffect(() => {
+    if (!leftOpen && !rightOpen) return;
+    const onKeydown = (event: globalThis.KeyboardEvent) => {
+      // defaultPrevented não conta: o atalho do editor também usa Esc (limpa a
+      // seleção) e marca o evento; com a gaveta aberta, fazer os dois é o certo.
+      if (event.key !== "Escape") return;
+      if (document.querySelector("[role=dialog],[role=menu]")) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input,textarea,select,[contenteditable=true]")) return;
+      setLeftOpen(false);
+      setRightOpen(false);
+    };
+    window.addEventListener("keydown", onKeydown);
+    return () => window.removeEventListener("keydown", onKeydown);
+  }, [leftOpen, rightOpen]);
+
   useEffect(() => {
     if (!labels.some((label) => label.id === batchLabel)) {
       setBatchLabel(labels.some((label) => label.id === activeLabelId) ? activeLabelId : labels[0]?.id ?? UNLABELED_ID);

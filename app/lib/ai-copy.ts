@@ -214,6 +214,10 @@ const pt = {
   runNoCoco: "{model}: resposta sem COCO.",
   runHttp: "{model}: HTTP {status}",
   runRuntimeError: "Runtime: {detail}",
+  runRuntimeCrashed: "O modelo falhou ao processar esta imagem. Detalhe técnico: {detail}",
+  runRuntimeNotLoaded: "O runtime ainda está carregando o modelo. Tente de novo em alguns segundos.",
+  runRuntimeRegionTooLarge: "A região é grande demais para este modelo. Selecione uma área menor.",
+  runRuntimeUnsupported: "Este modelo não aceita esse tipo de pedido. {detail}",
   runRuntimeUnreachable: "Poligome Runtime não respondeu. Veja em Modelos de IA › Conexões.",
   runConnectorUnreachable: "Conector local não respondeu. Veja em Modelos de IA › Conexões.",
 
@@ -443,6 +447,10 @@ const en: AiCopy = {
   runNoCoco: "{model}: response without COCO.",
   runHttp: "{model}: HTTP {status}",
   runRuntimeError: "Runtime: {detail}",
+  runRuntimeCrashed: "The model failed while processing this image. Technical detail: {detail}",
+  runRuntimeNotLoaded: "The runtime is still loading the model. Try again in a few seconds.",
+  runRuntimeRegionTooLarge: "The region is too large for this model. Select a smaller area.",
+  runRuntimeUnsupported: "This model does not accept this kind of request. {detail}",
   runRuntimeUnreachable: "Poligome Runtime did not answer. See AI models › Connections.",
   runConnectorUnreachable: "Local connector did not answer. See AI models › Connections.",
 
@@ -669,6 +677,10 @@ const fr: AiCopy = {
   runNoCoco: "{model} : réponse sans COCO.",
   runHttp: "{model} : HTTP {status}",
   runRuntimeError: "Runtime : {detail}",
+  runRuntimeCrashed: "Le modèle a échoué en traitant cette image. Détail technique : {detail}",
+  runRuntimeNotLoaded: "Le runtime charge encore le modèle. Réessayez dans quelques secondes.",
+  runRuntimeRegionTooLarge: "La région est trop grande pour ce modèle. Sélectionnez une zone plus petite.",
+  runRuntimeUnsupported: "Ce modèle n’accepte pas ce type de demande. {detail}",
   runRuntimeUnreachable: "Poligome Runtime ne répond pas. Voir Modèles d’IA › Connexions.",
   runConnectorUnreachable: "Le connecteur local ne répond pas. Voir Modèles d’IA › Connexions.",
 
@@ -895,6 +907,10 @@ const es: AiCopy = {
   runNoCoco: "{model}: respuesta sin COCO.",
   runHttp: "{model}: HTTP {status}",
   runRuntimeError: "Runtime: {detail}",
+  runRuntimeCrashed: "El modelo falló al procesar esta imagen. Detalle técnico: {detail}",
+  runRuntimeNotLoaded: "El runtime todavía está cargando el modelo. Inténtalo de nuevo en unos segundos.",
+  runRuntimeRegionTooLarge: "La región es demasiado grande para este modelo. Selecciona un área más pequeña.",
+  runRuntimeUnsupported: "Este modelo no acepta este tipo de solicitud. {detail}",
   runRuntimeUnreachable: "Poligome Runtime no respondió. Mira en Modelos de IA › Conexiones.",
   runConnectorUnreachable: "El conector local no respondió. Mira en Modelos de IA › Conexiones.",
 
@@ -924,6 +940,22 @@ const es: AiCopy = {
 const translations: Record<Language, AiCopy> = { pt, en, fr, es };
 
 /** Translate actionable model failures while retaining other domain explanations. */
+/**
+ * A falha do runtime em palavras de quem anota. O código vem do contrato; o
+ * texto do modelo só aparece como detalhe, sem o nome da exceção Python na
+ * frente ("RuntimeError: ..."), que não diz nada a quem está anotando.
+ */
+export function runtimeFailureMessage(code: string, message: string, copy: AiCopy): string {
+  const detail = message.replace(/^[A-Z][A-Za-z]*(?:Error|Exception):\s*/, "").trim();
+  switch (code) {
+    case "adapter_crashed": return copy.runRuntimeCrashed.replace("{detail}", detail);
+    case "model_not_loaded": return copy.runRuntimeNotLoaded;
+    case "region_too_large": return copy.runRuntimeRegionTooLarge;
+    case "unsupported_prompt": return copy.runRuntimeUnsupported.replace("{detail}", detail).trim();
+    default: return copy.runRuntimeError.replace("{detail}", detail);
+  }
+}
+
 export function aiFailureMessage(detail: string, copy: AiCopy): string {
   if (/out of memory|memoryerror|sem mem[oó]ria|cuda.*\boom\b/i.test(detail)) return copy.runMemoryRecovery;
   if (/cuda.*(?:error|unavailable|not available|n[aã]o|indispon[ií]vel)|device-side assert|no kernel image|torch\.cuda/i.test(detail)) return copy.runCudaRecovery;

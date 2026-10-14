@@ -44,12 +44,16 @@ test("the workbench owns one hidden input per kind of file the editor accepts", 
     ".plgm,application/vnd.poligome.project+zip",
     "image/png,image/jpeg,image/webp,image/bmp,image/gif",
     "image/*,.tif,.tiff",
+    // GeoTIFF/COG: recorte e em blocos. Ficam no editor, e não no menu Arquivo,
+    // porque o menu desmonta ao fechar e levava o arquivo escolhido junto.
+    ".tif,.tiff,.geotiff,.btf,.tf8,.btf8,.tfw,.tifw,.wld,.prj,.aux.xml,image/tiff",
+    ".tif,.tiff,.geotiff,.btf,.tf8,.btf8,.tfw,.tifw,.wld,.prj,.aux.xml,image/tiff",
     "application/json,application/zip,text/plain,.json,.zip,.txt,.names",
   ]);
   assert.ok(inputs.every((input) => input.includes("hidden")), "file inputs are opened by buttons, never shown");
   // Images, rasters and annotations all arrive in batches. A project file does
   // not: opening one replaces the session, so there is nothing to batch.
-  assert.deepEqual(inputs.map((input) => input.includes("multiple")), [false, true, true, true]);
+  assert.deepEqual(inputs.map((input) => input.includes("multiple")), [false, true, true, true, true, true]);
 });
 
 test("a new project starts empty, with the way in offered on the stage", () => {

@@ -116,3 +116,15 @@ test('SAM annotation boundary forwards cancellation before image preparation', a
  await assert.rejects(requestSamAnnotations({makeId:()=> 'qa',asset:{id:'qa',src:'data:image/png;base64,eA==',width:100,height:100},label:'qa',endpoint:'http://localhost:7860/predict',prompts:[{x:1,y:1,label:1}],copy:getCopy('pt'),signal:controller.signal}),{message:getCopy('pt').errSamCanceled});
  assert.equal(fetched,false);
 });
+
+test('runtime failures speak to the person, not in Python', async () => {
+  const { runtimeFailureMessage, getAiCopy } = await import('../app/lib/ai-copy.ts');
+  const copy = getAiCopy('pt');
+  const crashed = runtimeFailureMessage('adapter_crashed', 'RuntimeError: CUDA kernel died', copy);
+  assert.match(crashed, /^O modelo falhou/);
+  assert.ok(crashed.endsWith('CUDA kernel died'));
+  assert.ok(!crashed.includes('RuntimeError'));
+  assert.equal(runtimeFailureMessage('model_not_loaded', 'x', copy), copy.runRuntimeNotLoaded);
+  assert.equal(runtimeFailureMessage('internal', 'boom', copy), 'Runtime: boom');
+  for (const language of ['en', 'fr', 'es']) assert.ok(!runtimeFailureMessage('region_too_large', '', getAiCopy(language)).includes('{'));
+});
