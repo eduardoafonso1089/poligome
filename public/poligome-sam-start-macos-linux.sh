@@ -213,7 +213,9 @@ read_saved_model() {
 }
 
 open_site() {
-  if command -v open >/dev/null 2>&1; then
+  # Só no macOS: no Ubuntu /usr/bin/open é o openvt, que falha calado e fazia o
+  # site nunca abrir por ali.
+  if [[ "$(uname -s)" == Darwin ]] && command -v open >/dev/null 2>&1; then
     open "$SITE_URL" >/dev/null 2>&1 || true
   elif command -v xdg-open >/dev/null 2>&1; then
     xdg-open "$SITE_URL" >/dev/null 2>&1 || true
