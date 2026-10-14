@@ -242,6 +242,9 @@ function describeContainer(copy: AiCopy, model: ByomModel): string {
 
 type ContainerModelPanelProps = {
   commandOs?: "native" | "unix";
+  language?: Language;
+  platform?: InstallPlatform;
+  onCheck?: () => void;
   copy: AiCopy;
   model: ByomModel;
   busy: boolean;
@@ -256,7 +259,8 @@ export function ContainerModelPanel(props: ContainerModelPanelProps) {
   return <ContainerModelForm key={formKey} {...props} />;
 }
 
-function ContainerModelForm({ copy, model, busy, commandOs = "unix", onPreannotate, onRemove, onSave }: ContainerModelPanelProps) {
+function ContainerModelForm({ copy, model, busy, commandOs = "unix", language = "pt", platform, onCheck, onPreannotate, onRemove, onSave }: ContainerModelPanelProps) {
+  const guide = getInstallationCopy(language);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(model.name);
   const [port, setPort] = useState(String(Number(model.endpoint.split(":").at(-1)) || 8080));
@@ -282,10 +286,13 @@ function ContainerModelForm({ copy, model, busy, commandOs = "unix", onPreannota
     {!model.ready && <section className="byom-limits ai-stopped">
       <AlertTriangle size={15} />
       <div>
-        <b>{copy.containerStoppedHint}</b>
-        <code>{commandOs === "native"
+        {model.image ? <><b>{copy.containerStoppedHint}</b><p>{guide.byomStartFolder}</p>
+        {platform === "wsl" && <><p>{guide.terminalWsl}</p><CommandCode text="wsl" language={language} title={guide.terminalTitle} /></>}
+        <CommandCode text={commandOs === "native"
           ? `powershell -ExecutionPolicy Bypass -File .\\poligome-byom-windows.ps1 start -ModelId ${model.model_id}`
-          : `bash poligome-byom-macos-linux.sh start --model-id ${model.model_id}`}</code>
+          : `bash poligome-byom-macos-linux.sh start --model-id ${model.model_id}`} language={language} title={copy.containerStoppedHint} />
+        </> : <p>{guide.byomImportedStopped}</p>}
+        {onCheck && <button type="button" className="install-check" onClick={onCheck}><RefreshCw size={15} />{guide.checkConnection}</button>}
         {model.unavailable_reason && <details><summary>{copy.containerErrorDetail}</summary><p>{model.unavailable_reason}</p></details>}
       </div>
     </section>}

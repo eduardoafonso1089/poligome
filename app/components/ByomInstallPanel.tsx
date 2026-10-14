@@ -20,7 +20,7 @@ export function ByomSetupGuide({ language, platform, custom, onCheck }: { langua
   const steps = custom ? [
     { title: copy.byomFolder, body: copy.byomFolderBody, command: commands.prepare },
     { title: title(sc.byomStep2Title), body: "", command: commands.build },
-    { title: title(sc.byomStep3Title), body: sc.byomStep3Body, command: commands.register },
+    { title: title(sc.byomStep3Title), body: `${sc.byomStep3Body} ${copy.byomCustomPort}`, command: commands.register },
     { title: title(sc.byomStep4Title), body: sc.byomStep4Body, command: commands.start },
   ] : [
     { title: copy.byomExamplesRun, body: copy.byomExamplesBody, command: commands.examples },

@@ -40,6 +40,16 @@ No editor, abra **Modelos de IA → Automático**: os dois aparecem na lista de
 contêineres. Abra uma imagem, clique em **Pré-anotar** e escolha o modelo. O resultado
 entra direto na lista de anotações, já desenhado e pronto para você revisar.
 
+Em **Adicionar meu modelo**, o guia separa três caminhos: **Experimentar os
+exemplos**, **Preparar meu modelo** e **Importar contêiner em execução**. Escolha
+o sistema do conector antes de copiar os comandos. No WSL2, o primeiro bloco
+abre o Linux a partir do PowerShell; os seguintes são executados no terminal
+Linux. Os comandos têm botão de copiar e os textos seguem o idioma do editor.
+
+Para um modelo próprio, a construção usa uma pasta separada, `poligome-byom`,
+com a CLI, `Dockerfile` e `serve.py`. Assim, `docker build` recebe somente os
+arquivos preparados para o modelo.
+
 Os dois exemplos existem para serem um molde. Quando quiser trocar o miolo pelo
 seu modelo, o **Passo a passo** mais abaixo mostra o caminho inteiro: você
 substitui a função `predict()` e mantém o resto.

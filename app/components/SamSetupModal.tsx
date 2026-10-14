@@ -14,6 +14,7 @@ import { SAM_MODELS, getSamModel, DEFAULT_SAM_MODEL_ID } from "../lib/sam-models
 import type { ByomModel, SamModelDefinition } from "../lib/sam-models";
 import type { RuntimeManifest } from "../lib/runtime-client";
 import { getInstallationCopy } from "../lib/installation-copy";
+import { preferredInstallPlatform } from "../lib/installation-commands";
 import { CommandCode } from "./InstallationGuide";
 import { ByomPanel } from "./ByomInstallPanel";
 import {
@@ -249,7 +250,7 @@ export default function SamSetupModal({
       steps: [
         { title: sc.stepDownloadTitle, body: guide.downloadFolder, command: null },
         { title: sc.stepUnixTerminalTitle, body: sc.stepUnixTerminalBody, command: "cd ~/Downloads" },
-        { title: sc.stepUnixRunTitle, body: sc.stepUnixRunBody, command: unixCommand },
+        { title: sc.stepUnixRunTitle, body: guide.samRunBody, command: unixCommand },
         { title: sc.stepUnixKeepTitle, body: sc.stepUnixKeepBody, command: null },
         { title: guide.backTitle, body: fill(guide.samBack, { action: activationLabel }), command: null },
       ],
@@ -260,8 +261,8 @@ export default function SamSetupModal({
       href: "/poligome-sam-windows.bat",
       steps: [
         { title: sc.stepDownloadTitle, body: guide.downloadFolder, command: null },
-        { title: sc.stepWslTypeTitle, body: sc.stepWslTypeBody, command: String.raw`cd /d "%USERPROFILE%\Downloads"` },
-        { title: sc.stepUnixRunTitle, body: sc.stepUnixRunBody, command: windowsCommand },
+        { title: guide.samCmdTitle, body: guide.samCmdBody, command: String.raw`cd /d "%USERPROFILE%\Downloads"` },
+        { title: sc.stepUnixRunTitle, body: guide.samRunBody, command: windowsCommand },
         { title: sc.stepWslKeepTitle, body: sc.stepWslKeepBody, command: null },
         { title: guide.backTitle, body: fill(guide.samBack, { action: activationLabel }), command: null },
       ],
@@ -274,13 +275,115 @@ export default function SamSetupModal({
         { title: sc.stepDownloadTitle, body: guide.downloadFolder, command: null },
         { title: sc.stepNativeOpenTitle, body: sc.stepNativeOpenBody, command: null },
         { title: sc.stepNativeFolderTitle, body: sc.stepNativeFolderBody, command: String.raw`cd "$env:USERPROFILE\Downloads"` },
-        { title: sc.stepNativeRunTitle, body: sc.stepNativeRunBody, command: nativeWindowsCommand },
+        { title: sc.stepNativeRunTitle, body: guide.samRunBody, command: nativeWindowsCommand },
         { title: sc.stepNativeKeepTitle, body: sc.stepNativeKeepBody, command: null },
         { title: guide.backTitle, body: fill(guide.samBack, { action: activationLabel }), command: null },
       ],
     },
   } as const;
   const chosenPath = installPaths[installOs];
+  const installationPanel = (
+    <section className="sam-install-panel install-guide">
+      <div><b>{sc.installTitle}</b><p>{sc.installBody}</p></div>
+      {needsInstall && <p className="sam-needs-install"><AlertTriangle size={14} /><span><b>{fill(sc.needsInstall, { name: model.name })}</b> {sc.needsInstallBody}</span></p>}
+      <div className="sam-os-picker" role="tablist" aria-label={sc.osPicker}>
+        {(["unix", "wsl", "native"] as const).map((key) => <button
+          key={key}
+          role="tab"
+          aria-selected={installOs === key}
+          className={installOs === key ? "active" : ""}
+          onClick={() => setInstallOs(key)}
+        >{installPaths[key].label}</button>)}
+      </div>
+      {installOs === "unix" && model.family === "sam3" && <p className="sam-manual-note">{sc.sam3NoMac}</p>}
+      {installOs === "native" && model.family === "sam3" && <p className="sam-manual-note">{sc.sam3Native}</p>}
+
+      <section className="install-prerequisites">
+        <h4>{guide.before}</h4>
+        <p>{fill(installOs === "native" ? guide.samBeforeWindows : installOs === "wsl" ? guide.samBeforeWsl : guide.samBeforeUnix, { version: model.family === "sam3" ? "3.12" : `${model.requirements.python.minimum}+` })}</p>
+        <a className="ai-link" href="https://www.python.org/downloads/release/python-31210/" target="_blank" rel="noreferrer">{guide.pythonLink}</a>
+        {installOs === "wsl" && <a className="ai-link" href="https://learn.microsoft.com/windows/wsl/install" target="_blank" rel="noreferrer">{guide.wslHelp}</a>}
+        {model.family === "sam3" && <><h4>{guide.samGatedTitle}</h4><p>{guide.samGatedBody}</p>
+          <a className="ai-link" href="https://huggingface.co/facebook/sam3" target="_blank" rel="noreferrer">{guide.samGatedLink}</a>
+        </>}
+      </section>
+      <label className="sam-device-choice">
+        <input type="checkbox" checked={forceCpu} onChange={(event) => setForceCpu(event.target.checked)} />
+        <span><b>{sc.cpuTitle}</b><small>{guide.samCpuBody}</small></span>
+      </label>
+
+      <ol className="sam-steps">
+        {chosenPath.steps.map((step, index) => <li key={step.title}>
+          <b>{step.title}</b>
+          {step.body && <p>{step.body}</p>}
+          {index === 0
+            ? <a className="sam-step-download" href={chosenPath.href} download><Download size={14} />{fill(sc.download, { file: chosenPath.file })}</a>
+            : step.command ? <CommandCode text={step.command} language={language} title={step.title} /> : null}
+        </li>)}
+      </ol>
+      {/* Depois de instalado, o caminho de volta é outro e mais curto. Ele
+          muda por sistema como o de instalação, então acompanha a aba. */}
+      <details className="sam-relaunch install-help">
+        <summary>{sc.relaunchTitle}</summary>
+        {installOs === "unix" && <>
+          <p>{sc.relaunchUnix}</p>
+          <a className="sam-step-download" href="/poligome-sam-start-macos-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-start-macos-linux.sh" })}</a>
+          <CommandCode text={`cd ~/Downloads\n${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`} language={language} />
+          <p>{sc.relaunchService}</p>
+          <a className="sam-step-download" href="/poligome-sam-service-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-service-linux.sh" })}</a>
+          <CommandCode text={`${unixCpuPrefix}bash poligome-sam-service-linux.sh install`} language={language} />
+        </>}
+        {installOs === "wsl" && <>
+          <p>{sc.relaunchWsl}</p>
+          <a className="sam-step-download" href="/poligome-sam-start-windows.bat" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-start-windows.bat" })}</a>
+          {/* Dois cliques não carregam variável de ambiente, e sem ela o
+              iniciador volta para `auto`. Quem escolheu CPU precisa do
+              comando, não do atalho. */}
+          {forceCpu && <>
+            <p>{sc.relaunchWslCpu}</p>
+            <CommandCode text={String.raw`cd %USERPROFILE%\Downloads` + "\n" + 'set "POLIGOME_DEVICE=cpu" && poligome-sam-start-windows.bat'} language={language} />
+          </>}
+        </>}
+        {installOs === "native" && <>
+          <p>{sc.relaunchNative}</p>
+          <CommandCode text={nativeWindowsCommand} language={language} />
+        </>}
+      </details>
+      <p className="sam-manual-note">{model.family === "sam3" ? sc.sam3CpuSlow : sc.oldGpuNote}</p>
+      <details className="install-help"><summary>{guide.troubleshooting}</summary><p>{guide.samTrouble}</p></details>
+      <details className="sam-uninstall sam-platform-details">
+        <summary>{sc.platformDetails}</summary>
+        <p><b>Linux:</b> {model.platformSupport.linux.notes}</p>
+        <p><b>Windows:</b> {model.platformSupport.windows.notes}</p>
+        <p><b>macOS:</b> {model.platformSupport.macos.notes}</p>
+      </details>
+
+      {/* Onde isso fica e como sair: um instalador que não diz como se
+          desfazer obriga o usuário a caçar gigabytes pelo disco. Tudo mora
+          numa pasta só por sistema, então apagar a pasta desinstala. */}
+      <details className="sam-uninstall">
+        <summary>{sc.uninstallTitle}</summary>
+        <p><Rich text={sc.uninstallBody} /></p>
+        <table>
+          <tbody>
+            <tr>
+              <th>{sc.uninstallUnix}</th>
+              <td><code>~/.poligome-sam</code><br /><code>rm -rf ~/.poligome-sam</code></td>
+            </tr>
+            <tr>
+              <th>{sc.uninstallNative}</th>
+              <td><code>{String.raw`$env:USERPROFILE\.poligome-sam`}</code><br /><code>{String.raw`Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '.poligome-sam') -Recurse -Force`}</code></td>
+            </tr>
+            <tr>
+              <th>{sc.uninstallWsl}</th>
+              <td><Rich text={sc.uninstallWslBody} /></td>
+            </tr>
+          </tbody>
+        </table>
+        <p><Rich text={sc.uninstallService} /></p>
+      </details>
+    </section>
+  );
 
   return <div
     className="modal-backdrop sam-catalog-backdrop"
@@ -418,6 +521,9 @@ export default function SamSetupModal({
             />
             : automaticView === "container" && viewedContainer ? <ContainerModelPanel
               copy={ai}
+              language={language}
+              platform={preferredInstallPlatform(connectorHost?.host)}
+              onCheck={() => { onRecheckConnector(); onTabChange("connections"); }}
               commandOs={connectorHost?.host === "Windows" ? "native" : connectorHost?.host ? "unix" : preferredInstallOs()}
               model={viewedContainer}
               busy={byomBusy}
@@ -448,102 +554,10 @@ export default function SamSetupModal({
 
           {/* Quem ainda não usa este modelo vem aqui para instalá-lo: o passo a
               passo vem primeiro, e a ficha técnica fica recolhida abaixo. */}
-          {!modelMatches && <>
-            <section className="sam-install-panel">
-              <div><b>{sc.installTitle}</b><p>{sc.installBody}</p></div>
-              {needsInstall && <p className="sam-needs-install"><AlertTriangle size={14} /><span><b>{fill(sc.needsInstall, { name: model.name })}</b> {sc.needsInstallBody}</span></p>}
-              <div className="sam-os-picker" role="tablist" aria-label={sc.osPicker}>
-                {(["unix", "wsl", "native"] as const).map((key) => <button
-                  key={key}
-                  role="tab"
-                  aria-selected={installOs === key}
-                  className={installOs === key ? "active" : ""}
-                  onClick={() => setInstallOs(key)}
-                >{installPaths[key].label}</button>)}
-              </div>
-              {installOs === "unix" && model.family === "sam3" && <p className="sam-manual-note">{sc.sam3NoMac}</p>}
-              {installOs === "native" && model.family === "sam3" && <p className="sam-manual-note">{sc.sam3Native}</p>}
-
-              <ol className="sam-steps">
-                {chosenPath.steps.map((step, index) => <li key={step.title}>
-                  <b>{step.title}</b>
-                  {step.body && <p>{step.body}</p>}
-                  {index === 0
-                    ? <a className="sam-step-download" href={chosenPath.href} download><Download size={14} />{fill(sc.download, { file: chosenPath.file })}</a>
-                    : step.command ? <CommandCode text={step.command} language={language} /> : null}
-                </li>)}
-              </ol>
-              {/* Escolher CPU deixou de ser folclore de variável de ambiente: o
-                  controle fica aqui e reescreve os três comandos acima com a
-                  sintaxe certa de cada sistema. */}
-              <label className="sam-device-choice">
-                <input type="checkbox" checked={forceCpu} onChange={(event) => setForceCpu(event.target.checked)} />
-                <span><b>{sc.cpuTitle}</b><small>{sc.cpuBody}</small></span>
-              </label>
-              {/* Depois de instalado, o caminho de volta é outro e mais curto. Ele
-                  muda por sistema como o de instalação, então acompanha a aba. */}
-              <div className="sam-relaunch">
-                <b>{sc.relaunchTitle}</b>
-                {installOs === "unix" && <>
-                  <p>{sc.relaunchUnix}</p>
-                  <a className="sam-step-download" href="/poligome-sam-start-macos-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-start-macos-linux.sh" })}</a>
-                  <CommandCode text={`cd ~/Downloads\n${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`} language={language} />
-                  <p>{sc.relaunchService}</p>
-                  <a className="sam-step-download" href="/poligome-sam-service-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-service-linux.sh" })}</a>
-                  <CommandCode text={`${unixCpuPrefix}bash poligome-sam-service-linux.sh install`} language={language} />
-                </>}
-                {installOs === "wsl" && <>
-                  <p>{sc.relaunchWsl}</p>
-                  <a className="sam-step-download" href="/poligome-sam-start-windows.bat" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-start-windows.bat" })}</a>
-                  {/* Dois cliques não carregam variável de ambiente, e sem ela o
-                      iniciador volta para `auto`. Quem escolheu CPU precisa do
-                      comando, não do atalho. */}
-                  {forceCpu && <>
-                    <p>{sc.relaunchWslCpu}</p>
-                    <CommandCode text={String.raw`cd %USERPROFILE%\Downloads` + "\n" + 'set "POLIGOME_DEVICE=cpu" && poligome-sam-start-windows.bat'} language={language} />
-                  </>}
-                </>}
-                {installOs === "native" && <>
-                  <p>{sc.relaunchNative}</p>
-                  <CommandCode text={nativeWindowsCommand} language={language} />
-                </>}
-              </div>
-              <p className="sam-manual-note">{model.family === "sam3" ? sc.sam3CpuSlow : sc.oldGpuNote}</p>
-              <details className="sam-uninstall sam-platform-details">
-                <summary>{sc.platformDetails}</summary>
-                <p><b>Linux:</b> {model.platformSupport.linux.notes}</p>
-                <p><b>Windows:</b> {model.platformSupport.windows.notes}</p>
-                <p><b>macOS:</b> {model.platformSupport.macos.notes}</p>
-              </details>
-
-              {/* Onde isso fica e como sair: um instalador que não diz como se
-                  desfazer obriga o usuário a caçar gigabytes pelo disco. Tudo mora
-                  numa pasta só por sistema, então apagar a pasta desinstala. */}
-              <details className="sam-uninstall">
-                <summary>{sc.uninstallTitle}</summary>
-                <p><Rich text={sc.uninstallBody} /></p>
-                <table>
-                  <tbody>
-                    <tr>
-                      <th>{sc.uninstallUnix}</th>
-                      <td><code>~/.poligome-sam</code><br /><code>rm -rf ~/.poligome-sam</code></td>
-                    </tr>
-                    <tr>
-                      <th>{sc.uninstallNative}</th>
-                      <td><code>{String.raw`$env:USERPROFILE\.poligome-sam`}</code><br /><code>{String.raw`Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '.poligome-sam') -Recurse -Force`}</code></td>
-                    </tr>
-                    <tr>
-                      <th>{sc.uninstallWsl}</th>
-                      <td><Rich text={sc.uninstallWslBody} /></td>
-                    </tr>
-                  </tbody>
-                </table>
-                <p><Rich text={sc.uninstallService} /></p>
-              </details>
-            </section>
-
-          </>}
-
+          {selectedAvailability?.installed && <p className="install-note">{fill(guide.samInstalled, { action: activationLabel })}</p>}
+          {modelMatches || selectedAvailability?.installed
+            ? <details className="sam-install-guide-details install-help"><summary>{guide.installationDetails}</summary>{installationPanel}</details>
+            : installationPanel}
           <section className={`sam-runtime-status ${loadError ? "error" : connectionState} ${!loadError && connectionState === "ready" && !modelMatches ? "mismatch" : ""}`}>
             <span />
             <div>
@@ -593,7 +607,7 @@ export default function SamSetupModal({
             </section>)}
 
             <section className="sam-requirements-grid">
-              <article><span><Terminal size={15} /></span><div><b>{sc.reqStack}</b><p>Python {model.requirements.python.minimum}+ · PyTorch {model.requirements.pytorch.minimum}+{model.requirements.pytorch.torchvisionMinimum ? ` · Torchvision ${model.requirements.pytorch.torchvisionMinimum}+` : ""}.{pythonNotes ? ` ${pythonNotes}` : ""}</p></div></article>
+              <article><span><Terminal size={15} /></span><div><b>{sc.reqStack}</b><p>Python {model.requirements.python.minimum}{model.family === "sam3" ? "" : "+"} · PyTorch {model.requirements.pytorch.minimum}+{model.requirements.pytorch.torchvisionMinimum ? ` · Torchvision ${model.requirements.pytorch.torchvisionMinimum}+` : ""}.{pythonNotes ? ` ${pythonNotes}` : ""}</p></div></article>
               <article><span><Cpu size={15} /></span><div><b>{sc.reqCompute}</b><p>{model.requirements.compute.notes}</p></div></article>
               <article className={model.requirements.cuda.required ? "critical" : ""}><span><Server size={15} /></span><div><b>{sc.reqCuda}</b><p>{model.requirements.cuda.required ? fill(sc.cudaRequired, { version: model.requirements.cuda.minimum ?? "" }) : sc.cudaOptional}{cudaTested ? fill(sc.cudaTested, { version: cudaTested }) : ""}</p></div></article>
               <article><span><Laptop size={15} /></span><div><b>{sc.reqSystem}</b><p>{model.requirements.operatingSystem.official}. {model.requirements.operatingSystem.notes}</p></div></article>
@@ -609,103 +623,6 @@ export default function SamSetupModal({
 
             <div className="sam-official-links"><a href={model.officialSources.repository} target="_blank" rel="noreferrer"><ExternalLink size={12} />{sc.officialRepo}</a><a href={model.officialSources.checkpoint} target="_blank" rel="noreferrer"><ExternalLink size={12} />{sc.officialCheckpoint}</a></div>
           </details>
-
-          {modelMatches && <details className="sam-advanced">
-            <summary>{sc.installTitle}</summary>
-            <section className="sam-install-panel">
-              <div><b>{sc.installTitle}</b><p>{sc.installBody}</p></div>
-              {needsInstall && <p className="sam-needs-install"><AlertTriangle size={14} /><span><b>{fill(sc.needsInstall, { name: model.name })}</b> {sc.needsInstallBody}</span></p>}
-              <div className="sam-os-picker" role="tablist" aria-label={sc.osPicker}>
-                {(["unix", "wsl", "native"] as const).map((key) => <button
-                  key={key}
-                  role="tab"
-                  aria-selected={installOs === key}
-                  className={installOs === key ? "active" : ""}
-                  onClick={() => setInstallOs(key)}
-                >{installPaths[key].label}</button>)}
-              </div>
-              {installOs === "unix" && model.family === "sam3" && <p className="sam-manual-note">{sc.sam3NoMac}</p>}
-              {installOs === "native" && model.family === "sam3" && <p className="sam-manual-note">{sc.sam3Native}</p>}
-
-              <ol className="sam-steps">
-                {chosenPath.steps.map((step, index) => <li key={step.title}>
-                  <b>{step.title}</b>
-                  {step.body && <p>{step.body}</p>}
-                  {index === 0
-                    ? <a className="sam-step-download" href={chosenPath.href} download><Download size={14} />{fill(sc.download, { file: chosenPath.file })}</a>
-                    : step.command ? <CommandCode text={step.command} language={language} /> : null}
-                </li>)}
-              </ol>
-              {/* Escolher CPU deixou de ser folclore de variável de ambiente: o
-                  controle fica aqui e reescreve os três comandos acima com a
-                  sintaxe certa de cada sistema. */}
-              <label className="sam-device-choice">
-                <input type="checkbox" checked={forceCpu} onChange={(event) => setForceCpu(event.target.checked)} />
-                <span><b>{sc.cpuTitle}</b><small>{sc.cpuBody}</small></span>
-              </label>
-              {/* Depois de instalado, o caminho de volta é outro e mais curto. Ele
-                  muda por sistema como o de instalação, então acompanha a aba. */}
-              <div className="sam-relaunch">
-                <b>{sc.relaunchTitle}</b>
-                {installOs === "unix" && <>
-                  <p>{sc.relaunchUnix}</p>
-                  <a className="sam-step-download" href="/poligome-sam-start-macos-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-start-macos-linux.sh" })}</a>
-                  <CommandCode text={`cd ~/Downloads\n${unixCpuPrefix}bash poligome-sam-start-macos-linux.sh`} language={language} />
-                  <p>{sc.relaunchService}</p>
-                  <a className="sam-step-download" href="/poligome-sam-service-linux.sh" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-service-linux.sh" })}</a>
-                  <CommandCode text={`${unixCpuPrefix}bash poligome-sam-service-linux.sh install`} language={language} />
-                </>}
-                {installOs === "wsl" && <>
-                  <p>{sc.relaunchWsl}</p>
-                  <a className="sam-step-download" href="/poligome-sam-start-windows.bat" download><Download size={14} />{fill(sc.download, { file: "poligome-sam-start-windows.bat" })}</a>
-                  {/* Dois cliques não carregam variável de ambiente, e sem ela o
-                      iniciador volta para `auto`. Quem escolheu CPU precisa do
-                      comando, não do atalho. */}
-                  {forceCpu && <>
-                    <p>{sc.relaunchWslCpu}</p>
-                    <CommandCode text={String.raw`cd %USERPROFILE%\Downloads` + "\n" + 'set "POLIGOME_DEVICE=cpu" && poligome-sam-start-windows.bat'} language={language} />
-                  </>}
-                </>}
-                {installOs === "native" && <>
-                  <p>{sc.relaunchNative}</p>
-                  <CommandCode text={nativeWindowsCommand} language={language} />
-                </>}
-              </div>
-              <p className="sam-manual-note">{model.family === "sam3" ? sc.sam3CpuSlow : sc.oldGpuNote}</p>
-              <details className="sam-uninstall sam-platform-details">
-                <summary>{sc.platformDetails}</summary>
-                <p><b>Linux:</b> {model.platformSupport.linux.notes}</p>
-                <p><b>Windows:</b> {model.platformSupport.windows.notes}</p>
-                <p><b>macOS:</b> {model.platformSupport.macos.notes}</p>
-              </details>
-
-              {/* Onde isso fica e como sair: um instalador que não diz como se
-                  desfazer obriga o usuário a caçar gigabytes pelo disco. Tudo mora
-                  numa pasta só por sistema, então apagar a pasta desinstala. */}
-              <details className="sam-uninstall">
-                <summary>{sc.uninstallTitle}</summary>
-                <p><Rich text={sc.uninstallBody} /></p>
-                <table>
-                  <tbody>
-                    <tr>
-                      <th>{sc.uninstallUnix}</th>
-                      <td><code>~/.poligome-sam</code><br /><code>rm -rf ~/.poligome-sam</code></td>
-                    </tr>
-                    <tr>
-                      <th>{sc.uninstallNative}</th>
-                      <td><code>{String.raw`$env:USERPROFILE\.poligome-sam`}</code><br /><code>{String.raw`Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '.poligome-sam') -Recurse -Force`}</code></td>
-                    </tr>
-                    <tr>
-                      <th>{sc.uninstallWsl}</th>
-                      <td><Rich text={sc.uninstallWslBody} /></td>
-                    </tr>
-                  </tbody>
-                </table>
-                <p><Rich text={sc.uninstallService} /></p>
-              </details>
-            </section>
-
-          </details>}
 
           <section className="sam-privacy"><ShieldCheck size={16} /><div><b>{sc.privacyTitle}</b><p>{sc.samPrivacy}</p></div></section>
           </>}

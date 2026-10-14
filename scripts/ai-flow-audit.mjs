@@ -141,6 +141,7 @@ try {
     expect(await models.count()).toBe(10);
     for(let i=0;i<10;i++){await models.nth(i).click();await expect(d.locator(".sam-model-hero h3")).toBeVisible()}
     await d.getByRole("button",{name:/SAM 2.1 Hiera Tiny/}).click();
+    await d.locator('.sam-install-guide-details > summary').click();
     for(const os of ["Linux ou macOS","Windows (WSL2)","Windows · PowerShell"]){await d.getByRole("tab",{name:os,exact:true}).click();await expect(d.getByRole("link",{name:/Baixar poligome-sam/}).first()).toBeVisible()}
     await d.getByRole("tab",{name:"Linux ou macOS",exact:true}).click();await d.getByRole("checkbox",{name:/Usar só CPU/}).check();await expect(d.locator("code").filter({hasText:/POLIGOME_DEVICE=cpu/}).first()).toBeVisible();void cards;
   });

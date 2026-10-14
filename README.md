@@ -43,18 +43,22 @@ The editor organizes AI by how you use it, not by how it runs. Everything sits b
 
 **Pre-annotate**, next to the AI button, runs any Automatic model on the open image, a selected region (Native only) or every image in the project. Options a model cannot honour are disabled with the reason written next to them. Each run ends with a summary that offers to undo everything that run added in one step.
 
-Poligome Runtime is a separate local program that serves one Native model at a time and describes it through a manifest. To try it with the example Faster R-CNN detector (Python 3.12+; on Windows, inside WSL2):
+Poligome Runtime is a separate local program that serves one Native model at a time and describes it through a manifest. Open **AI › Automatic › Native** for the Faster R-CNN setup guide. It offers Windows PowerShell, WSL2, Linux and macOS commands, including prerequisites, restart and connection checks, in Portuguese, English, French and Spanish.
+
+For example, on Linux or inside WSL2, with Git and Python 3.12 installed:
 
 ```bash
 git clone https://github.com/eduardoafonso1089/poligome-runtime.git
 cd poligome-runtime
-python3 -m venv .venv
-.venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-.venv/bin/pip install -e ".[server]" -e adapters/fasterrcnn
-.venv/bin/python examples/serve_runtime.py --adapter fasterrcnn
+python3.12 -m venv .venv
+.venv/bin/python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+.venv/bin/python -m pip install -e ".[server]" -e adapters/fasterrcnn
+.venv/bin/python examples/serve_runtime.py --adapter fasterrcnn --device cpu
 ```
 
-The same steps appear in the editor under **AI › Automatic** while no runtime is running. The editor looks for it at `http://127.0.0.1:7861` by default. The local COG converter uses `7862` (older converter downloads used 7861; the editor still finds them there).
+On macOS, install `torch torchvision` from PyPI without the Linux CPU index. On native Windows, the guide uses `py -3.12` and `.venv\Scripts\python.exe`. Keep the terminal open and click **Check connection** in the guide. The example detects COCO objects; recognizing custom classes requires a model trained for them.
+
+The editor looks for the runtime at `http://127.0.0.1:7861` by default. The local COG converter uses `7862` (older converter downloads used 7861; the editor still finds them there).
 
 ## Local helpers
 

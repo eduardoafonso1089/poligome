@@ -47,10 +47,21 @@ test('runtime rejects image upload to a remote URL before sending any bytes', as
 });
 
 test('a stopped BYOM shows the start command for the connector operating system', () => {
-  const model = { model_id: 'byom-example', name: 'Example', endpoint: 'http://localhost:8080', ready: false, env: {}, notes: '', metadata: null };
+  const model = { model_id: 'byom-example', name: 'Example', image:'example-image', endpoint: 'http://localhost:8080', ready: false, env: {}, notes: '', metadata: null };
   const props = { copy: getAiCopy('pt'), model, busy: false, onPreannotate() {}, onRemove() {}, onSave() {} };
   assert.match(text(render(ContainerModelPanel, { ...props, commandOs: 'native' })), /powershell -ExecutionPolicy Bypass -File .\\poligome-byom-windows\.ps1 start -ModelId byom-example/);
   assert.match(text(render(ContainerModelPanel, { ...props, commandOs: 'unix' })), /bash poligome-byom-macos-linux\.sh start --model-id byom-example/);
+});
+
+test('an imported stopped BYOM explains starting the original container instead of suggesting an unusable CLI start',async()=>{
+  const {getInstallationCopy}=await import('../app/lib/installation-copy.ts');
+  const model={model_id:'byom-imported',name:'Imported',image:'',endpoint:'http://localhost:8080',ready:false,env:{},notes:'',metadata:null};
+  for(const language of ['pt','en','fr','es']){
+    const markup=render(ContainerModelPanel,{copy:getAiCopy(language),language,model,busy:false,onPreannotate(){},onRemove(){},onSave(){},onCheck(){}});
+    assert.ok(!text(markup).includes('start --model-id'));
+    assert.ok(!text(markup).includes('start -ModelId'));
+    assert.ok(text(markup).includes(getInstallationCopy(language).checkConnection));
+  }
 });
 
 test('SAM rejects a saved remote endpoint before preparing or sending an image', async () => {

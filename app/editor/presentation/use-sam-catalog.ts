@@ -248,7 +248,7 @@ export function useSamCatalog(active: boolean) {
 
     switching.current = true;
     setConnectionState("loading");
-    setRuntimeLabel(`carregando ${selectedModelId}…`);
+    setRuntimeLabel(selectedModelId);
     const outcome = await requestModelLoad(base, selectedModelId);
     if (mine !== latest.current) return false;
     if (!outcome.ok) {

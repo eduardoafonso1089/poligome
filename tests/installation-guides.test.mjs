@@ -6,6 +6,8 @@ import { getAiCopy } from '../app/lib/ai-copy.ts';
 import { INSTALL_PLATFORMS, byomSetupCommands, runtimeSetupCommands, preferredInstallPlatform } from '../app/lib/installation-commands.ts';
 import { ByomPanel, ByomSetupGuide } from '../app/components/ByomInstallPanel.tsx';
 import { RuntimeInstallPanel } from '../app/components/AiHubPanels.tsx';
+import SamSetupModal from '../app/components/SamSetupModal.tsx';
+import { fill } from '../app/lib/i18n.ts';
 import { render, text, buttons } from './helpers/render.mjs';
 
 const noop = () => {};
@@ -49,6 +51,10 @@ test('runtime command blocks use the right Python environment and PyTorch source
     } else assert.match(commands.install, /python3\.12 -m venv/);
     assert.equal(commands.install.includes('--index-url https://download.pytorch.org/whl/cpu'), platform !== 'macos');
   }
+});
+
+test('custom BYOM registration uses a different port from both shipped examples',()=>{
+  for(const platform of INSTALL_PLATFORMS)assert.match(byomSetupCommands(platform).register,platform==='windows'?/-Port 8082\b/:/--port 8082\b/);
 });
 
 for (const language of ['pt', 'en', 'fr', 'es']) for (const platform of INSTALL_PLATFORMS) {
@@ -96,3 +102,33 @@ test('new BYOM users start with examples and an actionable connector prerequisit
     assert.ok(!markup.includes('placeholder="byom-my-model"'), 'import form must not compete with the first installation steps');
   }
 });
+
+function samProps(language, overrides = {}) {
+  return { language, tab:'assisted', onTabChange:noop, selectedModelId:'sam2.1-hiera-tiny', loadedModelId:'sam2.1-hiera-small', connectionState:'ready', samActive:true,
+    runtimeLabel:'sam2.1-hiera-small',loadError:null,availability:[{model_id:'sam2.1-hiera-tiny',installed:false}],connectorHost:null,endpoint:'http://localhost:7860/predict',byomModels:[],byomBusy:false,
+    runtime:{state:'offline',endpoint:'http://localhost:7861',manifest:null,setEndpoint:noop,refresh:noop},onSelectModel:noop,onPreannotate:noop,onRegisterByomModel:async()=>({ok:true}),onRemoveByomModel:noop,onUnselectAll:noop,onEndpointChange:noop,onRecheckConnector:noop,onConnect:noop,onClose:noop,...overrides };
+}
+
+for (const language of ['pt','en','fr','es']) {
+  test(`SAM setup explains prerequisites and the actual activation action in ${language}`,()=>{
+    const copy=getInstallationCopy(language), sc=getSamCopy(language);
+    const markup=render(SamSetupModal,samProps(language));
+    assert.ok(text(markup).includes(fill(copy.samBeforeUnix,{version:'3.10+'})));
+    assert.ok(text(markup).includes(fill(copy.samBack,{action:sc.btnLoad})));
+    assert.ok(markup.includes('href="https://www.python.org/downloads/release/python-31210/"'));
+  });
+  test(`SAM 3 setup shows the approval requirement before the download in ${language}`,()=>{
+    const copy=getInstallationCopy(language);
+    const markup=render(SamSetupModal,samProps(language,{selectedModelId:'sam3-concepts',availability:[]}));
+    assert.ok(text(markup).includes(copy.samGatedTitle));
+    assert.ok(markup.includes('href="https://huggingface.co/facebook/sam3"'));
+    assert.ok(markup.indexOf(copy.samGatedTitle)<markup.indexOf('href="/poligome-sam-macos-linux.sh"'));
+  });
+  test(`installed SAM offers activation without repeating installation by default in ${language}`,()=>{
+    const copy=getInstallationCopy(language),sc=getSamCopy(language);
+    const markup=render(SamSetupModal,samProps(language,{availability:[{model_id:'sam2.1-hiera-tiny',installed:true}]}));
+    assert.ok(text(markup).includes(fill(copy.samInstalled,{action:sc.btnLoad})));
+    assert.match(markup,/<details class="sam-install-guide-details install-help">/);
+    assert.equal((markup.match(/class="sam-install-panel install-guide"/g)||[]).length,1);
+  });
+}

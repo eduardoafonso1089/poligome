@@ -28,7 +28,7 @@ cd .\poligome-byom`
     examples: `${cli} examples`,
     list: `${cli} list`,
     build: "docker build -t my-model .",
-    register: native ? `${cli} register -ModelId byom-my-model -Image my-model -Port 8080` : `${cli} register --model-id byom-my-model --image my-model --port 8080`,
+    register: native ? `${cli} register -ModelId byom-my-model -Image my-model -Port 8082` : `${cli} register --model-id byom-my-model --image my-model --port 8082`,
     start: native ? `${cli} start -ModelId byom-my-model` : `${cli} start --model-id byom-my-model`,
     logs: native ? `${cli} logs -ModelId byom-my-model` : `${cli} logs --model-id byom-my-model`,
     exampleLogs: native ? `${cli} logs -ModelId byom-otsu` : `${cli} logs --model-id byom-otsu`,

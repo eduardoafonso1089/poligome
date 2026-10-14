@@ -53,6 +53,20 @@ async function audit(language, width) {
     await page.goto(`${BASE}/annotate/`, {waitUntil:'networkidle'});
     await page.locator('.ai-button').click();
     const dialog = page.getByRole('dialog', {name:ai.hubTitle,exact:true});
+    await dialog.locator('.sam-model-list button').filter({hasText:/^SAM 3/}).click();
+    assert.ok((await dialog.innerText()).includes(guide.samGatedTitle));
+    assert.equal(await dialog.locator('a[href="https://huggingface.co/facebook/sam3"]').first().getAttribute('href'),'https://huggingface.co/facebook/sam3');
+    await dialog.locator('.sam-model-list button').filter({hasText:/^SAM 2.1 Hiera Tiny/}).click();
+    const samGuide=dialog.locator('.sam-install-panel.install-guide');
+    assert.ok(await samGuide.locator('.sam-device-choice small').evaluate(node=>parseFloat(getComputedStyle(node).fontSize)>=13),'CPU instruction is too small');
+    assert.ok(await samGuide.evaluate(node=>Boolean(node.querySelector('.sam-device-choice').compareDocumentPosition(node.querySelector('.sam-steps')) & Node.DOCUMENT_POSITION_FOLLOWING)),'CPU choice must come before command copying');
+    for(const os of [sam.osUnix,sam.osWsl,guide.windows]){
+      await dialog.getByRole('tab',{name:os,exact:true}).click();
+      await verifyCommands(page,samGuide,width);
+    }
+    await dialog.getByRole('checkbox',{name:new RegExp(`^${sam.cpuTitle}`)}).check();
+    assert.ok((await samGuide.locator('code').allTextContents()).some(code=>code.includes("$env:POLIGOME_DEVICE='cpu'")));
+    await page.screenshot({path:`interaction-audit/installation-sam-${language}-${width}.png`,fullPage:true});
     await dialog.getByRole('tab',{name:new RegExp(`^${ai.tabAutomatic}`)}).click();
     await dialog.getByRole('button',{name:new RegExp(ai.autoAddModel)}).click();
     await dialog.getByRole('button',{name:guide.customPath,exact:true}).click();
