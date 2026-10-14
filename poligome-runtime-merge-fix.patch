@@ -1,0 +1,82 @@
+From d450f61d7ce99d2517541d963fe72aee9cc89752 Mon Sep 17 00:00:00 2001
+From: Lucas Betioli <72804564+LucasBetioli123@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 04:41:27 -0300
+Subject: [PATCH] Let only annotations of the same kind suppress each other
+
+A box and a mask of one object share an envelope, so the IoU between them
+is 1 and the higher-scored box removed the mask every time. They are two
+answers the adapter chose to give, not a duplicate from the tile overlap.
+Suppression now compares within a kind; seam duplicates still go.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ poligome_runtime/session.py | 12 +++++++++---
+ tests/test_merge.py         | 17 +++++++++++++++++
+ 2 files changed, 26 insertions(+), 3 deletions(-)
+
+diff --git a/poligome_runtime/session.py b/poligome_runtime/session.py
+index e66ec56..b0f668a 100644
+--- a/poligome_runtime/session.py
++++ b/poligome_runtime/session.py
+@@ -347,6 +347,11 @@ def merge(
+     goes. It is deliberately coarse — polygons and masks deserve better, which
+     is what `tiling="adapter"` is reserved for.
+ 
++    Only annotations of the same kind compete. A box and a mask of one object
++    share an envelope, but they are two answers the adapter chose to give, not
++    a duplicate from the overlap — comparing across kinds made the box swallow
++    every mask.
++
+     `union` assumes the geometry is the tile rather than the object. A
+     classifier has nothing finer to offer, and suppressing there would throw
+     away a real answer about a real area instead of a duplicate.
+@@ -355,14 +360,15 @@ def merge(
+         return _union(annotations)
+     ordered = sorted(annotations, key=lambda a: a.score if a.score is not None else 0.0, reverse=True)
+     kept: list[CanonicalAnnotation] = []
+-    boxes: list[Rect] = []
++    boxes: dict[type, list[Rect]] = {}
+ 
+     for candidate in ordered:
+         envelope = _envelope(candidate)
+-        if any(_iou(envelope, other) >= iou for other in boxes):
++        rivals = boxes.setdefault(type(candidate), [])
++        if any(_iou(envelope, other) >= iou for other in rivals):
+             continue
+         kept.append(candidate)
+-        boxes.append(envelope)
++        rivals.append(envelope)
+     return kept
+ 
+ 
+diff --git a/tests/test_merge.py b/tests/test_merge.py
+index b9e333f..75f5c0b 100644
+--- a/tests/test_merge.py
++++ b/tests/test_merge.py
+@@ -99,6 +99,23 @@ def test_mixed_kinds_coexist():
+     assert len(kept) == 3
+ 
+ 
++def test_a_box_does_not_swallow_the_mask_of_the_same_object():
++    """Same envelope, different kinds: two answers, not a seam duplicate."""
++    kept = merge([
++        box(0, 0, 40, 40, score=0.9),
++        CanonicalMask(bounds=Rect(0, 0, 40, 40), width=40, height=40, rle=[0, 1600], score=0.7),
++    ])
++    assert {type(a) for a in kept} == {Box, CanonicalMask}
++
++
++def test_a_mask_duplicated_on_the_seam_still_disappears():
++    mask = lambda x, score: CanonicalMask(bounds=Rect(x, 0, 40, 40), width=40, height=40,
++                                          rle=[0, 1600], score=score)
++    kept = merge([box(0, 0, 40, 40, score=0.9), mask(0, 0.7), mask(1, 0.6)])
++    assert [type(a) for a in kept] == [Box, CanonicalMask]
++    assert kept[1].score == 0.7
++
++
+ # ---------------------------------------------------------------------------
+ # Union: when the geometry is the tile, not the object
+ # ---------------------------------------------------------------------------
+-- 
+2.45.1.windows.1
+
