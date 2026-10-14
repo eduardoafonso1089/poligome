@@ -110,7 +110,7 @@ test("every documented export format still has a builder", async () => {
 test("the GeoJSON property contract is documented", async () => {
   // The export renames Portuguese keys to English; the table is the only place a
   // downstream consumer can look it up, so its absence is a regression.
-  const doc = sourceOf("docs/RASTER_WORKFLOW.md");
+  const doc = sourceOf("README.md");
   for (const property of ["class", "class_id", "color", "shape", "rotation", "source_image", "source_raster", "crs"]) {
     assert.match(doc, new RegExp(`\`${property}\``), `GeoJSON property ${property} is undocumented`);
   }
