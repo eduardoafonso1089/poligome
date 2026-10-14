@@ -61,7 +61,7 @@ async function fixture(options={}) {
     }
     if(path==="/models")return json(route,{models:(state.allInstalled?samIds:["sam2.1-hiera-small","sam2.1-hiera-tiny"]).map(model_id=>({model_id,family:model_id==="sam3-concepts"?"sam3":"sam2",installed:true}))});
     if(path==="/byom/models")return json(route,{models:state.containers});
-    if(path==="/load") {state.loads++;if(state.loadFail)return json(route,{detail:"checkpoint QA indisponível"},400);state.loaded=request.postDataJSON().model_id;return json(route,{switching:true})}
+    if(path==="/load") {state.loads++;if(state.loadFail)return json(route,{detail:"checkpoint QA indisponível"},400);const target=request.postDataJSON().model_id;const switching=state.loaded!==target;state.loaded=target;state.persisted=target;return json(route,{switching})}
     if(path==="/byom/register") {if(state.registerFail)return json(route,{detail:"Porta QA ocupada"},400);return json(route,{})}
     if(path==="/byom/annotate") {
       const input=request.postDataJSON();
@@ -145,7 +145,7 @@ try {
     for(const os of ["Linux ou macOS","Windows (WSL2)","Windows · PowerShell"]){await d.getByRole("tab",{name:os,exact:true}).click();await expect(d.getByRole("link",{name:/Baixar poligome-sam/}).first()).toBeVisible()}
     await d.getByRole("tab",{name:"Linux ou macOS",exact:true}).click();await d.getByRole("checkbox",{name:/Usar só CPU/}).check();await expect(d.locator("code").filter({hasText:/POLIGOME_DEVICE=cpu/}).first()).toBeVisible();void cards;
   });
-  await check("already loaded SAM closes on Verify without reload",{},async({page,state})=>{const d=await hub(page);await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d).toBeHidden();expect(state.loads).toBe(0)});
+  await check("already loaded SAM persists confirmation without reload",{persisted:"medsam2-latest"},async({page,state})=>{const d=await hub(page);await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d).toBeHidden();expect(state.loads).toBe(1);expect(state.persisted).toBe("sam2.1-hiera-small")});
   await check("SAM model switch succeeds",{},async({page,state})=>{const d=await hub(page);await d.getByRole("button",{name:/SAM 2.1 Hiera Tiny/}).click();await d.getByRole("button",{name:/^(Usar este modelo|Carregar este modelo|Verificar e usar)$/}).click();await expect(d).toBeHidden();expect(state.loaded).toBe("sam2.1-hiera-tiny")});
   await check("all ten SAM models switch while the tool is active and refresh capabilities",{allInstalled:true},async({page,state})=>{
     await activateSam(page);

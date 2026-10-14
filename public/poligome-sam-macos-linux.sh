@@ -6,7 +6,7 @@ POLIGOME_SAM_INSTALLER_API=2
 DEFAULT_SITE_URL="https://poligome.com"
 DEFAULT_ASSET_BASE_URL="https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 DEFAULT_CONNECTOR_URL="${DEFAULT_ASSET_BASE_URL}/poligome-sam-local.py"
-DEFAULT_CONNECTOR_SHA256="9ecf9ba9be0e8952f5322111898e7c65bb8aafa4bb39874ba303eab2f5aab8d3"
+DEFAULT_CONNECTOR_SHA256="f56febb1a2a3940080cec8455e8f8f6a321a76dd5d8b0cd0b9964cdfe23f7359"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE_URL="${POLIGOME_SITE_URL:-${DEFAULT_SITE_URL}}"
 SITE_URL="${SITE_URL%/}"
@@ -1169,7 +1169,9 @@ case "$(server_state)" in
     # Instalar um segundo modelo é o caminho normal de quem já usa o Poligome, e
     # terminar em "erro: porta ocupada" fazia parecer que o download tinha sido
     # perdido — quando na verdade o modelo já está pronto para ser escolhido.
-    save_selection
+    # Instalar não ativa este modelo. Preserve a escolha do conector atual
+    # para o próximo arranque e encerre somente a instalação pendente.
+    rm -f "$PENDING_MODEL_FILE"
     printf '
 Modelo %s instalado.
 ' "$MODEL_ID"

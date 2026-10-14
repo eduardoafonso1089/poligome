@@ -54,6 +54,9 @@ if exist "%PENDING_MODEL_FILE%" (
   exit /b !RESUME_EXIT!
 )
 
+call :sync_wsl_selection
+if errorlevel 1 goto :selection_sync_error
+
 if not exist "%SELECTED_MODEL_FILE%" goto :not_installed
 
 set "MODEL_ID="
@@ -374,5 +377,15 @@ exit /b 1
 echo.
 echo A porta !PORT! está ocupada por um serviço que não é o conector Poligome compatível.
 echo Encerre o serviço nessa porta e tente novamente.
+pause
+exit /b 1
+
+:sync_wsl_selection
+rem A selecao do conector no WSL e a autoridade, inclusive apos troca pelo editor.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$value = & wsl.exe --exec bash -lc 'test -f $HOME/.poligome-sam/selected-model.txt && head -n 1 $HOME/.poligome-sam/selected-model.txt' 2>$null; if ($LASTEXITCODE -ne 0 -or -not $value) { exit 0 }; $model = ($value | Select-Object -Last 1).Trim(); if ($model -notin @('sam2.1-hiera-tiny','sam2.1-hiera-small','sam2.1-hiera-base-plus','sam2.1-hiera-large','medsam2-latest','medsam2-ct-lesion','medsam2-mri-liver-lesion','medsam2-us-heart','medsam2-2411','sam3-concepts')) { exit 0 }; $path = $env:SELECTED_MODEL_FILE; [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($path)) | Out-Null; [System.IO.File]::WriteAllText($path+'.part', $model+[char]10, (New-Object System.Text.UTF8Encoding($false))); Move-Item -LiteralPath ($path+'.part') -Destination $path -Force -ErrorAction Stop" >nul 2>nul
+exit /b %ERRORLEVEL%
+
+:selection_sync_error
+echo Nao foi possivel sincronizar a selecao do WSL em !SELECTED_MODEL_FILE!.
 pause
 exit /b 1

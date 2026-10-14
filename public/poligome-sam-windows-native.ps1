@@ -49,7 +49,7 @@ $POLIGOME_SAM_INSTALLER_API = 2
 
 $DefaultSiteUrl = 'https://poligome.com'
 $DefaultAssetBaseUrl = 'https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public'
-$DefaultConnectorSha256 = '9ecf9ba9be0e8952f5322111898e7c65bb8aafa4bb39874ba303eab2f5aab8d3'
+$DefaultConnectorSha256 = 'f56febb1a2a3940080cec8455e8f8f6a321a76dd5d8b0cd0b9964cdfe23f7359'
 
 $SiteUrl = if ($env:POLIGOME_SITE_URL) { $env:POLIGOME_SITE_URL.TrimEnd('/') } else { $DefaultSiteUrl }
 $AssetBaseUrl = if ($env:POLIGOME_ASSET_BASE_URL) { $env:POLIGOME_ASSET_BASE_URL.TrimEnd('/') } else { $DefaultAssetBaseUrl }
@@ -961,7 +961,7 @@ switch (Get-ServerState $venvPython $modelId) {
     # Instalar um segundo modelo e o caminho normal de quem ja usa o Poligome.
     # Terminar em "erro: porta ocupada" fazia parecer que o download tinha sido
     # perdido, quando o modelo ja esta pronto para ser escolhido.
-    Save-Selection $SelectedModelFile $modelId
+    # Instalar outro modelo nao altera a escolha para o proximo arranque.
     Remove-Item -LiteralPath $PendingModelFile -Force -ErrorAction SilentlyContinue
     Write-Host ''
     Write-Host "Modelo $modelId instalado."

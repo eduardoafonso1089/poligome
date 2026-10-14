@@ -222,7 +222,8 @@ export function useSamCatalog(active: boolean) {
   }, [active, connectionState, refresh]);
 
   /**
-   * Carrega no conector o modelo escolhido, ou apenas o adota se já for o dele.
+   * Confirma a seleção no conector, mesmo se o modelo já estiver carregado,
+   * para que o próximo arranque preserve a escolha feita na interface.
    *
    * Devolve se deu certo para que a tela possa fechar. Sem isso, escolher um
    * modelo que já estava carregado não mudava nada visível e parecia não ter
@@ -249,19 +250,7 @@ export function useSamCatalog(active: boolean) {
       setRuntimeLabel("");
       return false;
     }
-    if (health.model_id === selectedModelId && health.status === "ready") {
-      switching.current = false;
-      setLoadedModelId(health.model_id ?? null);
-      setRuntimeLabel(describeRuntime(health));
-      setCapabilities(Array.isArray(health.capabilities) ? health.capabilities : []);
-      setConnectorHost(describeHost(health));
-      setConnectionState("ready");
-      setSamActive(true);
-      return true;
-    }
-
-    switching.current = true;
-    setConnectionState("loading");
+    setConnectionState(health.model_id === selectedModelId && health.status === "ready" ? "checking" : "loading");
     setRuntimeLabel(selectedModelId);
     const outcome = await requestModelLoad(base, selectedModelId);
     if (mine !== latest.current) return false;

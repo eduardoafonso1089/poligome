@@ -44,6 +44,11 @@ jobs:
       - name: Check real Python argv, HF entry point and health probe
         shell: powershell
         run: ./tests/sam-native-installer.test.ps1
+      - name: Check native connector integrity and Windows selection persistence
+        shell: powershell
+        run: |
+          ./tests/sam-native-connector.test.ps1
+          ./tests/sam-windows-state.test.ps1
 
   # Tier 1: everything that needs no build and no browser. Fails fast so a typo
   # or a broken unit never costs a full build.

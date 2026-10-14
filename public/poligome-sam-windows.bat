@@ -10,7 +10,7 @@ set "POLIGOME_SAM_WINDOWS_INSTALLER_API=2"
 set "DEFAULT_SITE_URL=https://poligome.com"
 set "DEFAULT_ASSET_BASE_URL=https://raw.githubusercontent.com/eduardoafonso1089/poligome/main/public"
 set "DEFAULT_CONNECTOR_URL=%DEFAULT_ASSET_BASE_URL%/poligome-sam-local.py"
-set "DEFAULT_CONNECTOR_SHA256=9ecf9ba9be0e8952f5322111898e7c65bb8aafa4bb39874ba303eab2f5aab8d3"
+set "DEFAULT_CONNECTOR_SHA256=f56febb1a2a3940080cec8455e8f8f6a321a76dd5d8b0cd0b9964cdfe23f7359"
 set "SITE_URL=%POLIGOME_SITE_URL%"
 if not defined SITE_URL set "SITE_URL=%DEFAULT_SITE_URL%"
 if "!SITE_URL:~-1!"=="/" set "SITE_URL=!SITE_URL:~0,-1!"
@@ -276,18 +276,10 @@ if errorlevel 1 exit /b 1
 exit /b 0
 
 :commit_windows_selection
-if not exist "!PENDING_MODEL_FILE!" (
-  if not exist "!SELECTED_MODEL_FILE!" exit /b 1
-  set "ACTIVE_MODEL_ID="
-  set /p "ACTIVE_MODEL_ID="<"!SELECTED_MODEL_FILE!"
-  if "!ACTIVE_MODEL_ID!"=="!MODEL_ID!" exit /b 0
-  exit /b 1
-)
-set "STAGED_MODEL_ID="
-set /p "STAGED_MODEL_ID="<"!PENDING_MODEL_FILE!"
-if not "!STAGED_MODEL_ID!"=="!MODEL_ID!" exit /b 1
-move /Y "!PENDING_MODEL_FILE!" "!SELECTED_MODEL_FILE!" >nul
-if errorlevel 1 exit /b 1
+rem O WSL confirma a instalacao e espelha o modelo realmente selecionado.
+rem Instalar outro checkpoint pode terminar sem ativar o modelo solicitado.
+if exist "!PENDING_MODEL_FILE!" exit /b 1
+if not exist "!SELECTED_MODEL_FILE!" exit /b 1
 exit /b 0
 
 :install_wsl_model
@@ -312,7 +304,7 @@ echo Baixando por HTTPS o instalador canônico para um arquivo temporário no WS
 echo A seleção será confirmada em !SELECTED_MODEL_FILE! somente após a instalação.
 echo.
 start "" "!SITE_URL!"
-wsl.exe --exec bash -lc "set -euo pipefail; set -f; app_dir=$HOME/.poligome-sam; install_dir=$app_dir/bin; mkdir -p $install_dir; final=$install_dir/poligome-sam-macos-linux.sh; partial=$final.part.$$; runner=$final; wsl_selected=$app_dir/selected-model.txt; wsl_pending=$app_dir/pending-model.txt; wsl_pending_tmp=$wsl_pending.part.$$; downloaded=0; monitor_pid=0; valid_installer() { test -s $1 && grep -Fxq 'POLIGOME_SAM_INSTALLER_API=2' $1; }; stage_wsl_pending() { echo !MODEL_ID! >$wsl_pending_tmp; mv -f $wsl_pending_tmp $wsl_pending; }; commit_windows_selection() { local IFS=; if test -f $wsl_pending; then return 1; fi; if test -f $wsl_selected; then wsl_model=$(head -n 1 $wsl_selected | tr -d '\r\n'); else return 1; fi; if test -f $POLIGOME_WINDOWS_PENDING_FILE; then windows_model=$(head -n 1 $POLIGOME_WINDOWS_PENDING_FILE | tr -d '\r\n'); else return 1; fi; if test x$wsl_model = x!MODEL_ID! && test x$windows_model = x!MODEL_ID!; then mv -f $POLIGOME_WINDOWS_PENDING_FILE $POLIGOME_WINDOWS_SELECTED_FILE; return 0; fi; return 1; }; monitor_commit() { while true; do if commit_windows_selection; then return 0; fi; sleep 1; done; }; cleanup() { if test $monitor_pid -ne 0; then kill $monitor_pid >/dev/null 2>&1 || true; wait $monitor_pid >/dev/null 2>&1 || true; fi; rm -f $partial $wsl_pending_tmp; }; trap 'cleanup' EXIT HUP INT TERM; if command -v curl >/dev/null 2>&1 && curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 --retry-delay 2 --output $partial $POLIGOME_BOOTSTRAP_ASSET_BASE_URL/poligome-sam-macos-linux.sh; then downloaded=1; elif command -v wget >/dev/null 2>&1 && wget --https-only --tries=3 --output-document=$partial $POLIGOME_BOOTSTRAP_ASSET_BASE_URL/poligome-sam-macos-linux.sh; then downloaded=1; fi; if test $downloaded -eq 1 && valid_installer $partial; then runner=$partial; else rm -f $partial; valid_installer $final || exit 1; echo 'Download indisponível ou incompatível; usando o instalador WSL2 API 2 validado em cache.' >&2; fi; stage_wsl_pending; monitor_commit & monitor_pid=$(jobs -p); if POLIGOME_SITE_URL=$POLIGOME_SITE_URL bash $runner !MODEL_ID!; then run_status=0; else run_status=$?; fi; commit_windows_selection || true; kill $monitor_pid >/dev/null 2>&1 || true; wait $monitor_pid >/dev/null 2>&1 || true; monitor_pid=0; test $run_status -eq 0; if test $runner = $partial; then chmod 700 $partial; mv -f $partial $final; fi; trap - EXIT HUP INT TERM"
+wsl.exe --exec bash -lc "set -euo pipefail; set -f; app_dir=$HOME/.poligome-sam; install_dir=$app_dir/bin; mkdir -p $install_dir; final=$install_dir/poligome-sam-macos-linux.sh; partial=$final.part.$$; runner=$final; wsl_selected=$app_dir/selected-model.txt; wsl_pending=$app_dir/pending-model.txt; wsl_pending_tmp=$wsl_pending.part.$$; downloaded=0; monitor_pid=0; valid_installer() { test -s $1 && grep -Fxq 'POLIGOME_SAM_INSTALLER_API=2' $1; }; stage_wsl_pending() { echo !MODEL_ID! >$wsl_pending_tmp; mv -f $wsl_pending_tmp $wsl_pending; }; commit_windows_selection() { local IFS=; if test -f $wsl_pending; then return 1; fi; if test -f $wsl_selected; then wsl_model=$(head -n 1 $wsl_selected | tr -d '\r\n'); else return 1; fi; if test -f $POLIGOME_WINDOWS_PENDING_FILE; then windows_model=$(head -n 1 $POLIGOME_WINDOWS_PENDING_FILE | tr -d '\r\n'); else return 1; fi; if test x$windows_model = x!MODEL_ID!; then local mirror=$POLIGOME_WINDOWS_SELECTED_FILE.part.$BASHPID; echo $wsl_model >$mirror || return 1; mv -f $mirror $POLIGOME_WINDOWS_SELECTED_FILE || { rm -f $mirror; return 1; }; rm -f $POLIGOME_WINDOWS_PENDING_FILE || return 1; return 0; fi; return 1; }; monitor_commit() { while true; do if commit_windows_selection; then return 0; fi; sleep 1; done; }; cleanup() { if test $monitor_pid -ne 0; then kill $monitor_pid >/dev/null 2>&1 || true; wait $monitor_pid >/dev/null 2>&1 || true; fi; rm -f $partial $wsl_pending_tmp; }; trap 'cleanup' EXIT HUP INT TERM; if command -v curl >/dev/null 2>&1 && curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 --retry-delay 2 --output $partial $POLIGOME_BOOTSTRAP_ASSET_BASE_URL/poligome-sam-macos-linux.sh; then downloaded=1; elif command -v wget >/dev/null 2>&1 && wget --https-only --tries=3 --output-document=$partial $POLIGOME_BOOTSTRAP_ASSET_BASE_URL/poligome-sam-macos-linux.sh; then downloaded=1; fi; if test $downloaded -eq 1 && valid_installer $partial; then runner=$partial; else rm -f $partial; valid_installer $final || exit 1; echo 'Download indisponível ou incompatível; usando o instalador WSL2 API 2 validado em cache.' >&2; fi; stage_wsl_pending; monitor_commit & monitor_pid=$(jobs -p); if POLIGOME_SITE_URL=$POLIGOME_SITE_URL bash $runner !MODEL_ID!; then run_status=0; else run_status=$?; fi; commit_windows_selection || true; kill $monitor_pid >/dev/null 2>&1 || true; wait $monitor_pid >/dev/null 2>&1 || true; monitor_pid=0; test $run_status -eq 0; if test $runner = $partial; then chmod 700 $partial; mv -f $partial $final; fi; trap - EXIT HUP INT TERM"
 if errorlevel 1 goto :wsl_install_error
 
 call :commit_windows_selection

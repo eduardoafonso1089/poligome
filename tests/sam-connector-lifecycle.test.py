@@ -75,9 +75,21 @@ class LifecycleTests(unittest.TestCase):
             timer.assert_not_called()
 
     def test_already_loaded_model_does_not_restart(self):
+        selected = self.app_dir / "selected-model.txt"
+        selected.write_text("medsam2-latest\n")
         with patch.object(connector.threading, "Timer") as timer:
             response = connector.load(connector.LoadRequest(model_id="sam2.1-hiera-small"))
             self.assertFalse(response["switching"])
+            self.assertEqual(selected.read_text(), "sam2.1-hiera-small\n")
+            timer.assert_not_called()
+
+    def test_unwritable_selection_refuses_confirmation_without_restart(self):
+        with patch.object(connector, "_persist_selection", side_effect=OSError("disk full")), patch.object(connector.threading, "Timer") as timer:
+            with self.assertRaises(connector.HTTPException) as raised:
+                connector.load(connector.LoadRequest(model_id="sam2.1-hiera-small"))
+            self.assertEqual(raised.exception.status_code, 500)
+            self.assertEqual(connector.health()["status"], "ready")
+            self.assertIsNone(connector._switch_target)
             timer.assert_not_called()
 
     def test_second_switch_does_not_overwrite_pending_target(self):
@@ -100,10 +112,11 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(arguments[arguments.index("--app-dir") + 1], str(self.app_dir))
 
     def test_windows_restart_returns_the_agreed_code_to_its_launcher(self):
-        with patch.object(connector.os, "name", "nt"), patch.object(connector.os, "_exit", side_effect=SystemExit) as leave:
-            with self.assertRaises(SystemExit):
-                connector._exec_with_model(connector.MODEL_SPECS["sam3-concepts"], 7860)
-            leave.assert_called_once_with(75)
+        for model in connector.MODEL_SPECS.values():
+            with self.subTest(model=model.model_id), patch.object(connector.os, "name", "nt"), patch.object(connector.os, "_exit", side_effect=SystemExit) as leave:
+                with self.assertRaises(SystemExit):
+                    connector._exec_with_model(model, 7860)
+                leave.assert_called_once_with(75)
 
     def test_byom_catalog_checks_models_concurrently_and_keeps_all_entries(self):
         registry = self.app_dir / "byom"

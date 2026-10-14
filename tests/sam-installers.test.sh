@@ -188,6 +188,10 @@ if [[ "${1:-}" == - && $# -eq 4 ]]; then
     [[ "$probe_program" == *'print("offline")'* ]] && printf 'ready\n'
     exit 0
   fi
+  if [[ -n "${POLIGOME_TEST_HEALTH_OTHER_MODEL:-}" && "$probe_program" == *'print("offline")'* ]]; then
+    printf 'other-model\n'
+    exit 0
+  fi
   if [[ -f "${POLIGOME_TEST_LOG}.connector-running" &&
         "$(<"${POLIGOME_TEST_LOG}.connector-running")" == "${2:-}" ]]; then
     : >"${POLIGOME_TEST_LOG}.connector-stop"
@@ -404,6 +408,7 @@ run_isolated() {
     POLIGOME_TEST_VENV_WITHOUT_PIP="${POLIGOME_TEST_VENV_WITHOUT_PIP:-}" \
     POLIGOME_TEST_GPU_CAP="${POLIGOME_TEST_GPU_CAP:-}" \
     POLIGOME_TEST_HEALTH_MATCH="${POLIGOME_TEST_HEALTH_MATCH:-}" \
+    POLIGOME_TEST_HEALTH_OTHER_MODEL="${POLIGOME_TEST_HEALTH_OTHER_MODEL:-}" \
     POLIGOME_TEST_PORT_IN_USE="${POLIGOME_TEST_PORT_IN_USE:-}" \
     POLIGOME_TEST_UNAME="${POLIGOME_TEST_UNAME:-Linux}" \
     POLIGOME_TEST_ARCH="${POLIGOME_TEST_ARCH:-x86_64}" \
@@ -914,7 +919,7 @@ test_windows_static_matrix() {
   assert_before "$installer_source" 'call :stage_windows_selection' 'goto :install_wsl_model' "pending antes de qualquer instalação Windows"
   assert_contains "$stage_selection" '>"!PENDING_MODEL_FILE!.part" echo !MODEL_ID!' "gravação atômica de pending no Windows"
   assert_contains "$stage_selection" 'move /Y "!PENDING_MODEL_FILE!.part" "!PENDING_MODEL_FILE!"' "ativação atômica de pending no Windows"
-  assert_contains "$commit_selection" 'move /Y "!PENDING_MODEL_FILE!" "!SELECTED_MODEL_FILE!"' "commit pending→selected no Windows"
+  assert_contains "$commit_selection" 'if exist "!PENDING_MODEL_FILE!" exit /b 1' "Windows exige seleção espelhada pelo WSL"
   assert_before "$installer_wsl" 'bash $runner !MODEL_ID!' 'call :commit_windows_selection' "commit Windows somente após sucesso WSL"
   assert_contains "$starter_source" 'if exist "%PENDING_MODEL_FILE%" (' "detecção de pending no iniciador Windows"
   assert_contains "$starter_source" 'call "!INSTALLER!" "!MODEL_ID!"' "retomada Windows com modelo pendente"
@@ -952,7 +957,9 @@ test_windows_static_matrix() {
   assert_contains "$installer_wsl" "grep -Fxq 'POLIGOME_SAM_INSTALLER_API=2'" "marker exato do instalador WSL"
   assert_contains "$starter_wsl" "grep -Fxq 'POLIGOME_SAM_STARTER_API=2'" "marker exato do iniciador WSL"
   assert_contains "$installer_wsl" 'monitor_commit & monitor_pid=' "espelhamento assíncrono da seleção WSL pronta"
-  assert_contains "$installer_wsl" 'mv -f $POLIGOME_WINDOWS_PENDING_FILE $POLIGOME_WINDOWS_SELECTED_FILE' "commit Windows no ready confirmado pelo Bash"
+  assert_contains "$installer_wsl" 'echo $wsl_model >$mirror' "Windows espelha a escolha real do WSL"
+  assert_contains "$installer_wsl" 'rm -f $POLIGOME_WINDOWS_PENDING_FILE' "instalação concluída encerra a retomada Windows"
+  assert_before "$starter_source" 'call :sync_wsl_selection' 'if not exist "%SELECTED_MODEL_FILE%" goto :not_installed' "Windows relê a seleção do WSL antes de iniciar"
   assert_contains "$installer_wsl_urls" 'POLIGOME_WINDOWS_PENDING_FILE/p:POLIGOME_WINDOWS_SELECTED_FILE/p' "tradução segura dos caminhos de estado Windows para WSL"
   assert_contains "$installer_wsl" "--proto '=https' --proto-redir '=https'" "HTTPS restrito no instalador WSL"
   assert_contains "$starter_wsl" "--proto '=https' --proto-redir '=https'" "HTTPS restrito no iniciador WSL"
@@ -1222,6 +1229,32 @@ test_truncated_download_is_fail_closed
 test_health_requires_matching_model
 test_connector_must_be_ready_before_commit
 test_connector_exit_is_propagated
+test_install_another_model_preserves_selection() {
+  local home_dir="${TEMP_ROOT}/home-install-another"
+  local app_dir="${home_dir}/.poligome-sam"
+  local log="${TEMP_ROOT}/install-another.log"
+  local output
+  prepare_model_home sam2.1-hiera-tiny "$home_dir"
+  create_sparse_checkpoint sam2.1-hiera-tiny "$home_dir"
+  create_sparse_checkpoint sam2.1-hiera-small "$home_dir"
+  printf 'sam2.1-hiera-small\n' >"${app_dir}/selected-model.txt"
+  : >"$log"
+  if ! output="$(POLIGOME_TEST_HEALTH_OTHER_MODEL=sam2.1-hiera-small run_isolated "$home_dir" "$log" bash "$INSTALLER" sam2.1-hiera-tiny 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    fail "instalar outro modelo interrompeu o conector existente"
+  fi
+  [[ "$(<"${app_dir}/selected-model.txt")" == sam2.1-hiera-small ]] ||
+    fail "instalar Tiny alterou a escolha Small para o próximo arranque"
+  [[ ! -e "${app_dir}/pending-model.txt" ]] || fail "instalação concluída deixou retomada pendente"
+  assert_contains "$output" 'continua no ar com outro modelo' "modelo instalado sem ativação"
+  assert_no_unexpected_work "$log" "instalar outro modelo"
+  : >"$log"
+  POLIGOME_TEST_HEALTH_MATCH=sam2.1-hiera-small run_isolated "$home_dir" "$log" bash "$STARTER" >/dev/null 2>&1 ||
+    fail "iniciador não preservou o modelo anterior"
+  assert_file_line $'health-model-probe\tsam2.1-hiera-small' "$log" "arranque do modelo anterior"
+  pass "instalar outro modelo preserva a seleção e o próximo arranque"
+}
+test_install_another_model_preserves_selection
 test_windows_static_matrix
 test_sam3_autocast
 test_cross_artifact_matrix
@@ -1326,12 +1359,15 @@ test_native_windows_switch_contract() {
 
 test_native_windows_catalog_matches_bash
 test_native_windows_switch_contract
+python3 "${PROJECT_ROOT}/tests/sam-wsl-state.test.py" || fail "espelhamento real da seleção WSL no BAT"
 
 # A origem do conector no .ps1 nativo é exercitada de verdade pelo pwsh, que
 # existe também no Linux e no macOS. Sem ele, o teste é pulado, não fingido.
 if command -v pwsh >/dev/null 2>&1; then
   pwsh -NoProfile -File "${PROJECT_ROOT}/tests/sam-native-connector.test.ps1" ||
     fail "origem do conector no instalador nativo de Windows"
+  pwsh -NoProfile -File "${PROJECT_ROOT}/tests/sam-windows-state.test.ps1" ||
+    fail "persistência da seleção no Windows nativo e WSL"
 else
   printf 'ok - # SKIP origem do conector no .ps1 nativo: pwsh não está instalado\n'
 fi

@@ -1770,11 +1770,9 @@ def load(payload: LoadRequest):
         raise HTTPException(status_code=400, detail=f"model_id desconhecido: {payload.model_id}")
 
     runtime = _runtime_snapshot()
-    if spec.model_id == runtime.get("model_id") and runtime.get("status") == "ready":
-        return {"status": "ready", "model_id": spec.model_id, "switching": False}
-
-    availability = _model_availability(spec)
-    if not availability["installed"]:
+    already_ready = spec.model_id == runtime.get("model_id") and runtime.get("status") == "ready"
+    availability = _model_availability(spec) if not already_ready else None
+    if availability is not None and not availability["installed"]:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -1796,6 +1794,8 @@ def load(payload: LoadRequest):
             # No Windows o lançador depende deste arquivo para decidir qual
             # modelo subir. Sair sem salvá-lo recarregaria o modelo anterior.
             raise HTTPException(status_code=500, detail=f"não foi possível salvar a seleção; o modelo atual foi mantido: {error}") from error
+        if already_ready:
+            return {"status": "ready", "model_id": spec.model_id, "switching": False}
         _switch_target = spec.model_id
 
     _update_runtime(status="loading", error=None)
