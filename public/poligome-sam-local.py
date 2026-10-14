@@ -18,6 +18,7 @@ import base64
 import binascii
 import contextlib
 import hashlib
+import inspect
 import io
 import json
 import math
@@ -48,6 +49,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from PIL import Image, ImageOps, UnidentifiedImageError
+
+# O SAM 2 chama torch.jit.script ao ser importado, e o PyTorch recente avisa que
+# isso está obsoleto. O aviso é para quem mantém o SAM 2: no terminal de quem
+# anota ele parecia um erro da instalação.
+warnings.filterwarnings(
+    "ignore",
+    message=r"`torch\.jit\.script` is deprecated",
+    category=FutureWarning,
+)
 
 
 SERVICE_NAME = "Poligome SAM local"
@@ -1240,11 +1250,27 @@ class PredictionRequestGuard:
                 )
 
 
-app = FastAPI(title=SERVICE_NAME, version=str(API_VERSION))
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Lifespan no lugar de @app.on_event("startup"), que o FastAPI marca como
+    # obsoleto com um aviso impresso no terminal do usuário a cada início.
+    start_model_loader()
+    yield
+
+
+app = FastAPI(title=SERVICE_NAME, version=str(API_VERSION), lifespan=_lifespan)
 app.add_middleware(
     PredictionRequestGuard,
     max_body_bytes=MAX_REQUEST_BODY_BYTES,
     max_concurrent=MAX_CONCURRENT_PREDICTION_REQUESTS,
+)
+# O Chrome pergunta, num preflight com Access-Control-Request-Private-Network,
+# se uma página pública pode falar com 127.0.0.1. O Starlette recente recusa esse
+# preflight com 400 a menos que a opção esteja ligada; o antigo nem a conhece.
+_private_network_option = (
+    {"allow_private_network": True}
+    if "allow_private_network" in inspect.signature(CORSMiddleware.__init__).parameters
+    else {}
 )
 app.add_middleware(
     CORSMiddleware,
@@ -1254,6 +1280,7 @@ app.add_middleware(
     # DELETE existe para remover um registro BYOM pela interface.
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Accept", "Content-Type"],
+    **_private_network_option,
 )
 
 _app_dir: Path = Path.home() / ".poligome-sam"
@@ -1466,7 +1493,6 @@ def _load_model(config: LoadConfig) -> None:
         print(f"Falha ao carregar o modelo: {message}", flush=True)
 
 
-@app.on_event("startup")
 def start_model_loader() -> None:
     global _loader_started
     with _runtime_lock:
