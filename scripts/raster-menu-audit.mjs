@@ -31,7 +31,7 @@ async function check(name, width, run) {
 }
 
 const openAddressDialog = async (page) => {
-  await page.getByRole("button", { name: "Arquivo" }).click();
+  await page.getByRole("button", { name: "Arquivo", exact: true }).click();
   await page.getByRole("menuitem", { name: /Abrir COG por endereço/ }).click();
   return page.getByRole("dialog", { name: "Abrir COG por endereço" });
 };
@@ -44,7 +44,7 @@ const submit = async (dialog, address) => {
 
 for (const width of [1280, 390]) {
   await check("File menu shows the three GeoTIFF/COG entries", width, async (page) => {
-    await page.getByRole("button", { name: "Arquivo" }).click();
+    await page.getByRole("button", { name: "Arquivo", exact: true }).click();
     for (const name of [/Recortar uma área/, /Abrir inteiro em blocos/, /Abrir COG por endereço/]) {
       const box = await page.getByRole("menuitem", { name }).boundingBox();
       assert.ok(box && box.width > 100 && box.height > 20, `${name} is visible`);
@@ -53,7 +53,7 @@ for (const width of [1280, 390]) {
 
   await check("crop and tiled entries open a file chooser", width, async (page) => {
     for (const name of [/Recortar uma área/, /Abrir inteiro em blocos/]) {
-      await page.getByRole("button", { name: "Arquivo" }).click();
+      await page.getByRole("button", { name: "Arquivo", exact: true }).click();
       const chooser = page.waitForEvent("filechooser", { timeout: 5000 });
       await page.getByRole("menuitem", { name }).click();
       assert.ok(await chooser);
