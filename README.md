@@ -1,8 +1,20 @@
 # Poligome
 
-Free, local-first data annotation for AI. Annotate images in the browser — no account, no dataset upload, and no Poligome server holding your images.
+Turn images into training data with a free, local-first annotation workspace. Draw and refine boxes, polygons, masks, polylines and keypoints in your browser, then export your labels for AI training — no account or dataset upload required.
+
+**[Open Poligome](https://poligome.com/) · [Try the interactive demo](https://poligome.com/annotate/?demo=1) · [Start annotating](https://poligome.com/annotate/)**
+
+Start manually, let **SAM** suggest an object's contour, connect your own Docker model with **BYOM**, or use **Poligome Runtime** for native adapters with tiled, streamed inference. Review and correct the results in the same editor before exporting.
 
 Poligome keeps the annotation workflow on your machine. Images and annotations are processed locally in the browser, while optional helpers and AI models can run as local services on the same computer.
+
+## Get started
+
+1. Open [poligome.com](https://poligome.com/) and try the demo or import your images.
+2. Create classes and annotate with the drawing tools. For AI assistance, open **AI** and follow the local setup guide for your chosen model.
+3. Review the annotations, export COCO, YOLO or georeferenced GeoJSON, and save a `.plgm` project to continue later. Keep the original images: new project files contain references, not image bytes.
+
+The hosted editor needs no installation. AI connectors, model weights and Docker containers are optional local installations; their initial setup needs internet access to download dependencies and weights. Model licenses and hardware requirements vary.
 
 ## Image annotation
 
@@ -13,6 +25,8 @@ Projects can be saved as `.plgm` files containing classes, geometries, layout me
 The landing page also includes a one-click computer-vision demo with synthetic aerial images and example annotations ready to edit or export.
 
 ### Import and export
+
+Use the **drag-and-drop import area in the images panel** to add PNG, JPEG, WebP, BMP or GIF images, COCO/YOLO annotations, or a folder containing both. It highlights when files can be dropped and includes **Choose files** and **Choose folder** buttons for keyboard, touch and browsers without native folder dropping. Folders are read recursively; relative paths are preserved so equally named images in different subfolders can be matched safely. Images in a mixed batch load first, then the annotation import window lets you review and confirm what to add. Unsupported or unreadable files are reported. A single `.plgm` project can also be dropped into this area; GeoTIFF/COG workflows remain under **File**.
 
 Poligome exports annotations as COCO, YOLO and GeoJSON, as well as portable `.plgm` projects.
 
@@ -50,14 +64,14 @@ The editor organizes AI by how you use it, not by how it runs. Everything sits b
 
 | Area | What it does | Runs on |
 | --- | --- | --- |
-| **Assisted** | You point at an object — click, box or, with SAM 3, text — and the AI cuts out just that object. Available as the SAM tool (`S`). | Local SAM connector |
-| **Automatic · Native** | A model built for Poligome annotates the whole image on its own. It splits large images into parts, draws results as they arrive, accepts just a selected region and exposes on-screen settings declared by the model. | Poligome Runtime |
+| **Assisted** | Guide SAM with positive/negative points or a box; SAM 3 also accepts text and can return multiple matching objects. Available as the SAM tool (`S`). | Local SAM connector |
+| **Automatic · Native** | Run a model through a native adapter. The runtime handles tiling and streams results; region support and editable settings depend on the model's manifest. | Poligome Runtime |
 | **Automatic · Container** | Your own model in a Docker container with the SageMaker contract (BYOM). Quick to plug in and portable, but it receives the whole image at once and returns results at the end. | Local connector → your container |
 | **Connections** | Shows the connector, the runtime and the containers, with their addresses and status. | — |
 
 **Pre-annotate**, next to the AI button, runs any Automatic model on the open image, a selected region (Native only) or every image in the project. Options a model cannot honour are disabled with the reason written next to them. Each run ends with a summary that offers to undo everything that run added in one step.
 
-Poligome Runtime is a separate local program that serves one Native model at a time and describes it through a manifest. Open **AI › Automatic › Native** for the Faster R-CNN setup guide. It offers Windows PowerShell, WSL2, Linux and macOS commands, including prerequisites, restart and connection checks, in Portuguese, English, French and Spanish.
+[Poligome Runtime](https://github.com/eduardoafonso1089/poligome-runtime) is a separate local program that serves one Native model at a time and describes it through a manifest. Bring a model by implementing a Python adapter; the runtime handles image regions, tiling and coordinates so the adapter can focus on inference. Open **AI › Automatic › Native** for the Faster R-CNN setup guide. It offers Windows PowerShell, WSL2, Linux and macOS commands, including prerequisites, restart and connection checks, in Portuguese, English, French and Spanish.
 
 For example, on Linux or inside WSL2, with Git and Python 3.12 installed:
 
@@ -82,7 +96,7 @@ Optional helper services run on your own computer and bind to loopback rather th
 
 **Local COG converter** supports large geospatial rasters. `public/poligome-cog-windows.bat` and `public/poligome-cog-macos-linux.sh` install the required Python packages and start the converter on `http://127.0.0.1:7862`. The manual service is `public/poligome-cog-local.py`.
 
-Local connectors accept browser requests from the official Poligome origins and local development by default. A trusted self-hosted instance can set `POLIGOME_ALLOWED_ORIGIN_REGEX` to an anchored regular expression for its own origins.
+Local connectors accept browser requests from the official Poligome origins and local development by default. For a trusted self-hosted instance, the COG converter accepts `POLIGOME_ALLOWED_ORIGIN_REGEX`; the SAM/BYOM connector accepts the explicit origin list `POLIGOME_ALLOWED_ORIGINS`, also configured by its launchers from `POLIGOME_SITE_URL`.
 
 ## Run Poligome locally
 
@@ -122,7 +136,7 @@ For additional Windows troubleshooting, see [REINSTALL_WINDOWS.md](REINSTALL_WIN
 
 ## Local SAM
 
-Poligome uses a FastAPI connector that runs on the user's computer; images and prompts are not sent to the Site. The **Enable local SAM** screen contains a catalog with requirements, license, checkpoint size, platform, and official benchmark — always paired with the hardware on which the figure was measured.
+Poligome uses a FastAPI connector that runs on the user's computer; images and prompts are not sent to the hosted editor's server. Open **AI › Assisted** to choose a model from a catalog with requirements, license, checkpoint size, platform support, and available official benchmarks paired with the hardware on which they were measured.
 
 The installation guide in **AI › Assisted** includes Meta approval for SAM 3. The connector is a local process, must be running whenever AI is used, and does not restart itself after the terminal is closed or the computer restarts. The editor finds a running connector, but no web page can start one. A user service solves this on Linux; there is not yet an equivalent on Windows or macOS.
 
@@ -132,9 +146,11 @@ Available models:
 | --- | --- | --- | --- |
 | SAM 2.1 | Hiera Tiny, Small, Base+, Large | positive/negative points and boxes; Small is the default | Python 3.10+, PyTorch 2.5.1+, Torchvision 0.20.1+; CUDA recommended |
 | MedSAM2 | General medical model, CT lesion, MRI liver lesion, echocardiogram, and the earlier 2411 weights | positive/negative points and boxes | same runtime as SAM 2.1; no additional environment |
-| SAM 3 | Image and concepts | points, boxes, and text with multiple instances | Python 3.12, PyTorch 2.7+; NVIDIA GPU with CUDA 12.6+ or, slower, CPU; gated Hugging Face access |
+| SAM 3 | Image and concepts | points, boxes, and text with multiple instances | Python 3.12 exactly; the installers pin PyTorch 2.10.0 and Torchvision 0.25.0; Linux/WSL2 or native Windows, compatible NVIDIA GPU or slower CPU; gated Hugging Face access |
 
-SAM 2.1 also supports upstream video tracking. SAM 3.1, released by Meta on 2026-03-27, adds Object Multiplex for video, but it is not yet integrated or installed by Poligome. The current editor integrates images only and makes that distinction explicit.
+For SAM 3 on GPU, the current installers use CUDA 12.8 wheels and require compute capability 7.0 or newer plus a compatible driver. SAM 3 is not supported by the macOS installer. SAM 2.1 and MedSAM2 on macOS require Apple Silicon and macOS 14 or newer; the installers reject Intel Macs.
+
+The current editor integrates images only. Upstream video features, including SAM 2.1 tracking and SAM 3.1 Object Multiplex, are not integrated or installed as video annotation features by Poligome.
 
 Installation and startup:
 
@@ -153,10 +169,10 @@ The default endpoint is `http://127.0.0.1:7860/predict`. The connector validates
 
 In addition to the official catalog, Poligome runs segmentation models that you package in a Docker container. Its purpose differs from SAM: there is no prompt. The container receives the entire image and returns an already-labeled COCO document; the editor draws masks, boxes, and points using the classes supplied by the model, ready for review.
 
-The packaging mirrors Amazon SageMaker, so a container prepared for it runs here with little or no change: the image starts with `serve`, listens on port 8080, responds to `GET /ping` with 200 when ready, and receives inference at `POST /invocations`; weights reside at `/opt/ml/model`.
+The serving lifecycle follows Amazon SageMaker conventions: the image starts with `serve`, listens on port 8080, responds to `GET /ping` with 200 when ready, and receives inference at `POST /invocations`; weights reside at `/opt/ml/model`. An existing SageMaker container must also accept the Poligome request format and return the supported COCO response; the serving endpoints alone do not make it compatible. See the runnable [example server](public/byom/serve.py) and [Dockerfile](public/byom/Dockerfile).
 
 - `public/byom/serve.py` and `public/byom/Dockerfile` provide a runnable example with two methods selected by the `METHOD` variable: `otsu`, which merges touching objects into one region, and `watershed`, which separates them into distinct instances. Neither needs a GPU, and both return COCO with a polygon, box, and center point. Use it as a template: replace `predict()` with your model;
-- `public/poligome-byom-macos-linux.sh` manages the lifecycle through `examples`, `build`, `register`, `start`, `stop`, `status`, `list`, `logs`, and `remove`. `examples` builds the image and registers the two versioned official models in `public/byom/examples` — `byom-otsu` and `byom-watershed` — from the same image, changing only `METHOD`. The image is not versioned because its tarball is about 347 MB, versus less than 4 MB for the entire history; instead, the Dockerfile base is pinned by digest, so rebuilding later produces the same image;
+- `public/poligome-byom-macos-linux.sh` manages the lifecycle through `examples`, `build`, `register`, `start`, `stop`, `status`, `list`, `logs`, and `remove`. `examples` builds the image and registers the two example models in `public/byom/examples` — `byom-otsu` and `byom-watershed` — from the same image, changing only `METHOD`. The repository contains the source and registrations, not a prebuilt image tarball. The Dockerfile pins its base by digest and its direct Python dependency versions, reducing build drift without promising bit-for-bit identical images;
 - registration writes `~/.poligome-sam/byom/<id>.json`. The connector does not load the model: it forwards to the container and validates the response before returning it to the editor, turning malformed COCO into a clear message instead of a distorted polygon;
 - the identifier must begin with `byom-`, and the endpoint may only be `127.0.0.1` or `localhost`: a remote address would move images off the user's machine;
 - `segmentation` becomes a polygon, `bbox` becomes a box, and `keypoints` becomes a point, with `categories[].name` defining the class.

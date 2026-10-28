@@ -19,7 +19,8 @@ jobs:
   # contributor runs locally with `npm run test:audit`.
   interaction-audit:
     name: Functional audits in Chromium
-    runs-on: ubuntu-latest
+    # Match the Ubuntu versions supported by the pinned Playwright 1.55 runtime.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4

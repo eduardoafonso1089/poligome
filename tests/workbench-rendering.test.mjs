@@ -36,7 +36,7 @@ test("the shell is announced with the product name and the current project", () 
   assert.ok(main.includes(copy.newProject), "the accessible name carries the project name");
 });
 
-test("the workbench owns one hidden input per kind of file the editor accepts", () => {
+test("the workbench owns hidden file inputs and the drop area offers file and folder pickers", () => {
   const inputs = [...markup.matchAll(/<input[^>]*type="file"[^>]*>/g)].map((match) => match[0]);
   const accepts = inputs.map((input) => input.match(/accept="([^"]*)"/)?.[1]);
 
@@ -49,11 +49,14 @@ test("the workbench owns one hidden input per kind of file the editor accepts", 
     ".tif,.tiff,.geotiff,.btf,.tf8,.btf8,.tfw,.tifw,.wld,.prj,.aux.xml,image/tiff",
     ".tif,.tiff,.geotiff,.btf,.tf8,.btf8,.tfw,.tifw,.wld,.prj,.aux.xml,image/tiff",
     "application/json,application/zip,text/plain,.json,.zip,.txt,.names",
+    "image/png,image/jpeg,image/webp,image/bmp,image/gif,.json,.zip,.txt,.names,.yaml,.yml,.plgm",
+    undefined, // Folder pickers read all children and report unsupported formats.
   ]);
   assert.ok(inputs.every((input) => input.includes("hidden")), "file inputs are opened by buttons, never shown");
   // Images, rasters and annotations all arrive in batches. A project file does
   // not: opening one replaces the session, so there is nothing to batch.
-  assert.deepEqual(inputs.map((input) => input.includes("multiple")), [false, true, true, true, true, true]);
+  assert.deepEqual(inputs.map((input) => input.includes("multiple")), [false, true, true, true, true, true, true, true]);
+  assert.ok(inputs.at(-1).includes("webkitdirectory"));
 });
 
 test("a new project starts empty, with the way in offered on the stage", () => {

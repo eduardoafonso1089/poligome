@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { AlertTriangle, Check, X } from "lucide-react";
 import type { Asset, Label } from "../../lib/types";
@@ -78,7 +78,7 @@ type PendingCoco = {
 
 const FORMAT_NAMES: Record<AnnotationPackageFormat, string> = { coco: "COCO", yolo: "YOLO", mixed: "COCO + YOLO" };
 
-export type CocoImportHandle = { open: () => void };
+export type CocoImportHandle = { open: () => void; importFiles: (files: File[], scope?: Asset[]) => Promise<boolean> };
 
 /** One file shows its name; a selection shows how many came in. */
 function sourceLabel(files: File[], manyLabel: string) {
@@ -94,6 +94,7 @@ type CocoImportControlProps = {
   disabled?: boolean;
   showTrigger?: boolean;
   onImported: (result: { labels: Label[]; annotations: EditorAnnotation[]; append?: boolean; message: string }) => void;
+  onActivityChange?: (active: boolean) => void;
 };
 
 export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlProps>(function CocoImportControl({
@@ -105,6 +106,7 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
   disabled = false,
   showTrigger = true,
   onImported,
+  onActivityChange,
 }, ref) {
   const inputRef = useRef<HTMLInputElement>(null);
   const importingRef = useRef(false);
@@ -119,7 +121,8 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
   const [tab, setTab] = useState<"categories" | "annotations">("categories");
   const copy = getCopy(language ?? storedLanguage());
 
-  useImperativeHandle(ref, () => ({ open: () => inputRef.current?.click() }), []);
+  useImperativeHandle(ref, () => ({ open: () => inputRef.current?.click(), importFiles: inspectFiles }));
+  useEffect(() => { onActivityChange?.(busy || importing || pending !== null); }, [busy, importing, pending, onActivityChange]);
 
   const visibleCandidates = useMemo(() => pending?.plan.candidates.filter((candidate) =>
     candidate.geometries.some((geometry) => geometryTypes.includes(geometry)),
@@ -128,21 +131,23 @@ export const CocoImportControl = forwardRef<CocoImportHandle, CocoImportControlP
   const canImport = activeImportSelection.geometryTypes.length > 0 && activeImportSelection.selectedIndexes.length > 0;
   const issueSummary = useMemo(() => summarizeImageIssues(pending?.inspection.issues ?? []), [pending]);
 
-  async function inspectFiles(files: File[]) {
-    if (!files.length) return;
+  async function inspectFiles(files: File[], scope = assets) {
+    if (!files.length || busy || pending || importingRef.current) return false;
     setBusy(true);
     try {
-      const inspection = await inspectAnnotationFiles(files, assets);
-      const plan = planCocoDocument(inspection.document, assets, { unlabeledName: copy.unlabeled });
+      const inspection = await inspectAnnotationFiles(files, scope);
+      const plan = planCocoDocument(inspection.document, scope, { unlabeledName: copy.unlabeled });
       setPending({ files, document: inspection.document, plan, inspection });
       updateImportSelection(plan.geometryTypes, plan.candidates.map((candidate) => candidate.index), false);
       setTab("categories");
+      return true;
     } catch (error) {
       onImported({
         labels,
         annotations,
         message: translateErrorCode(error, copy, copy.projectOpenError),
       });
+      return false;
     } finally {
       setBusy(false);
     }

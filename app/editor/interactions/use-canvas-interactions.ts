@@ -10,6 +10,7 @@ import { VERTEX_SCREEN_DISTANCE, resizeBoxFromCorner } from "../geometry/annotat
 import { snapPointToAnnotations } from "../geometry/vector-operations";
 import { clientPointToImage, screenPixelsToImageUnits } from "../viewport/svg-image-space";
 import { selectRange, selectSingle, selectionFromMarquee, type SelectionMarquee } from "../selection/selection-model";
+import { dragIntent, passedDragThreshold, type DragIntent } from "./pointer-drag";
 
 export type CanvasInteractionOptions = {
   svgRef: RefObject<SVGSVGElement | null>;
@@ -25,9 +26,13 @@ export type CanvasInteractionOptions = {
   snap?: { enabled: boolean; tolerance: number; annotations: EditorAnnotation[] };
 };
 
-type DragState = { pointerId: number; last: { x: number; y: number }; annotationIds: string[] };
-type VertexDragState = { pointerId: number; annotationId: string; vertexId: string };
-type BoxTransformState = {
+type DragState = DragIntent & {
+  pointerId: number;
+  last: { x: number; y: number };
+  annotationIds: string[];
+};
+type VertexDragState = DragIntent & { pointerId: number; annotationId: string; vertexId: string; inserted?: boolean };
+type BoxTransformState = DragIntent & {
   pointerId: number;
   annotation: Extract<EditorAnnotation, { type: "box" }>;
   kind: "resize" | "rotate";
@@ -83,50 +88,74 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
       dispatch({ type: "toggle-selection", id: annotation.id });
       return;
     }
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    // Selection repaints/reorders the shape and adds handles. Capture on the
+    // stable SVG so the release cannot disappear with the original hit target.
+    (svgRef.current ?? event.currentTarget).setPointerCapture?.(event.pointerId);
     const ids = selectedIds.includes(annotation.id) ? selectedIds : [annotation.id];
     if (!selectedIds.includes(annotation.id)) dispatch({ type: "set-selection", selection: selectSingle(annotation.id) });
-    dispatch({ type: "begin-gesture" });
-    annotationDrag.current = { pointerId: event.pointerId, last: point, annotationIds: ids };
+    annotationDrag.current = {
+      pointerId: event.pointerId,
+      ...dragIntent(event),
+      last: point,
+      annotationIds: ids,
+    };
   }, [addToSelection, dispatch, imageSize, selectedIds, selectionScope, state.selection, svgRef, toggleOnly]);
-
-  const moveAnnotation = useCallback((event: ReactPointerEvent<SVGElement>) => {
-    const drag = annotationDrag.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const point = eventPoint(svgRef, imageSize, event);
-    if (!point) return;
-    const dx = point.x - drag.last.x;
-    const dy = point.y - drag.last.y;
-    if (!dx && !dy) return;
-    dispatch({ type: "translate-annotations", ids: drag.annotationIds, dx, dy });
-    drag.last = point;
-  }, [dispatch, imageSize, svgRef]);
 
   const finishAnnotation = useCallback((event: ReactPointerEvent<SVGElement>) => {
     const drag = annotationDrag.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     annotationDrag.current = null;
-    dispatch({ type: "commit-gesture" });
+    if (drag.started) dispatch({ type: "commit-gesture" });
   }, [dispatch]);
 
+  const moveAnnotation = useCallback((event: ReactPointerEvent<SVGElement>) => {
+    const drag = annotationDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    // Also recover when a release occurred outside the browser or capture was
+    // interrupted: hovering must never translate an annotation.
+    if ((event.buttons & 1) === 0) { finishAnnotation(event); return; }
+    if (!drag.started && !passedDragThreshold(drag, event)) return;
+    const point = eventPoint(svgRef, imageSize, event);
+    if (!point) return;
+    const dx = point.x - drag.last.x;
+    const dy = point.y - drag.last.y;
+    if (!dx && !dy) return;
+    if (!drag.started) {
+      dispatch({ type: "begin-gesture" });
+      drag.started = true;
+    }
+    dispatch({ type: "translate-annotations", ids: drag.annotationIds, dx, dy });
+    drag.last = point;
+  }, [dispatch, finishAnnotation, imageSize, svgRef]);
+
   const beginVertexDrag = useCallback((event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation, vertexId: string) => {
+    if (event.button !== 0) return;
     if (annotation.type !== "polygon" && annotation.type !== "line") return;
     if (addToSelection) { toggleOnly(event, annotation.id); return; }
     event.stopPropagation();
     (svgRef.current ?? event.currentTarget).setPointerCapture?.(event.pointerId);
     dispatch({ type: "select-vertex", vertex: { annotationId: annotation.id, vertexId } });
-    dispatch({ type: "begin-gesture" });
-    vertexDrag.current = { pointerId: event.pointerId, annotationId: annotation.id, vertexId };
+    vertexDrag.current = { ...dragIntent(event), pointerId: event.pointerId, annotationId: annotation.id, vertexId };
   }, [addToSelection, dispatch, svgRef, toggleOnly]);
 
   const moveVertex = useCallback((event: ReactPointerEvent<SVGElement>) => {
     const drag = vertexDrag.current;
     if (!drag || drag.pointerId !== event.pointerId) return false;
+    if ((event.buttons & 1) === 0) {
+      vertexDrag.current = null;
+      if (drag.started || drag.inserted) dispatch({ type: "commit-gesture" });
+      return true;
+    }
+    if (!drag.started && !passedDragThreshold(drag, event)) return true;
     const raw = eventPoint(svgRef, imageSize, event);
     if (!raw) return true;
     const point = snap?.enabled
       ? snapPointToAnnotations(raw, snap.annotations, drag.annotationId, snap.tolerance)
       : raw;
+    if (!drag.started) {
+      if (!drag.inserted) dispatch({ type: "begin-gesture" });
+      drag.started = true;
+    }
     dispatch({ type: "update-vertex", annotationId: drag.annotationId, vertexId: drag.vertexId, point, minDistance: vertexMinDistance });
     return true;
   }, [dispatch, imageSize, snap, svgRef, vertexMinDistance]);
@@ -135,11 +164,12 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     const drag = vertexDrag.current;
     if (!drag || drag.pointerId !== event.pointerId) return false;
     vertexDrag.current = null;
-    dispatch({ type: "commit-gesture" });
+    if (drag.started || drag.inserted) dispatch({ type: "commit-gesture" });
     return true;
   }, [dispatch]);
 
   const insertVertex = useCallback((event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation, afterVertexId: string, x: number, y: number) => {
+    if (event.button !== 0) return;
     if (addToSelection) { toggleOnly(event, annotation.id); return; }
     event.stopPropagation();
     const raw = { x, y };
@@ -148,35 +178,44 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     (svgRef.current ?? event.currentTarget).setPointerCapture?.(event.pointerId);
     dispatch({ type: "begin-gesture" });
     dispatch({ type: "insert-vertex", annotationId: annotation.id, afterVertexId, vertexId, point, minDistance: vertexMinDistance });
-    vertexDrag.current = { pointerId: event.pointerId, annotationId: annotation.id, vertexId };
+    vertexDrag.current = { ...dragIntent(event), pointerId: event.pointerId, annotationId: annotation.id, vertexId, inserted: true };
   }, [addToSelection, dispatch, makeId, snap, svgRef, toggleOnly, vertexMinDistance]);
 
   const resizeStart = useCallback((event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation, corner: BoxCorner) => {
+    if (event.button !== 0) return;
     if (annotation.type !== "box") return;
     if (addToSelection) { toggleOnly(event, annotation.id); return; }
     event.preventDefault();
     event.stopPropagation();
     (svgRef.current ?? event.currentTarget).setPointerCapture?.(event.pointerId);
-    dispatch({ type: "begin-gesture" });
     boxTransform.current = {
+      ...dragIntent(event),
       pointerId: event.pointerId,
       annotation,
       kind: "resize",
       corner,
       center: { x: annotation.x + annotation.width / 2, y: annotation.y + annotation.height / 2 },
     };
-  }, [addToSelection, dispatch, svgRef, toggleOnly]);
+  }, [addToSelection, svgRef, toggleOnly]);
 
   const resizeMove = useCallback((event: ReactPointerEvent<SVGElement>) => {
     const transform = boxTransform.current;
     if (!transform || transform.kind !== "resize" || transform.pointerId !== event.pointerId || !transform.corner) return;
+    if ((event.buttons & 1) === 0) {
+      boxTransform.current = null;
+      if (transform.started) dispatch({ type: "commit-gesture" });
+      return;
+    }
+    if (!transform.started && !passedDragThreshold(transform, event)) return;
     event.preventDefault();
     const point = eventPoint(svgRef, imageSize, event);
     if (!point) return;
+    if (!transform.started) { dispatch({ type: "begin-gesture" }); transform.started = true; }
     dispatch({ type: "replace-annotation", annotation: resizeBoxFromCorner(transform.annotation, transform.corner, point) });
   }, [dispatch, imageSize, svgRef]);
 
   const rotateStart = useCallback((event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation) => {
+    if (event.button !== 0) return;
     if (annotation.type !== "box") return;
     if (addToSelection) { toggleOnly(event, annotation.id); return; }
     const point = eventPoint(svgRef, imageSize, event);
@@ -185,23 +224,30 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     event.stopPropagation();
     (svgRef.current ?? event.currentTarget).setPointerCapture?.(event.pointerId);
     const center = { x: annotation.x + annotation.width / 2, y: annotation.y + annotation.height / 2 };
-    dispatch({ type: "begin-gesture" });
     boxTransform.current = {
+      ...dragIntent(event),
       pointerId: event.pointerId,
       annotation,
       kind: "rotate",
       center,
       startAngle: Math.atan2(point.y - center.y, point.x - center.x) - (annotation.rotation ?? 0),
     };
-  }, [addToSelection, dispatch, imageSize, svgRef, toggleOnly]);
+  }, [addToSelection, imageSize, svgRef, toggleOnly]);
 
   const transformMove = useCallback((event: ReactPointerEvent<SVGElement>) => {
     const transform = boxTransform.current;
     if (!transform || transform.kind !== "rotate" || transform.pointerId !== event.pointerId) return;
+    if ((event.buttons & 1) === 0) {
+      boxTransform.current = null;
+      if (transform.started) dispatch({ type: "commit-gesture" });
+      return;
+    }
+    if (!transform.started && !passedDragThreshold(transform, event)) return;
     event.preventDefault();
     const point = eventPoint(svgRef, imageSize, event);
     if (!point) return;
     const rotation = Math.atan2(point.y - transform.center.y, point.x - transform.center.x) - (transform.startAngle ?? 0);
+    if (!transform.started) { dispatch({ type: "begin-gesture" }); transform.started = true; }
     dispatch({ type: "replace-annotation", annotation: { ...transform.annotation, rotation } });
   }, [dispatch, imageSize, svgRef]);
 
@@ -209,7 +255,7 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
     const transform = boxTransform.current;
     if (!transform || transform.pointerId !== event.pointerId) return;
     boxTransform.current = null;
-    dispatch({ type: "commit-gesture" });
+    if (transform.started) dispatch({ type: "commit-gesture" });
   }, [dispatch]);
 
   const selectAtCanvas = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
@@ -228,6 +274,12 @@ export function useCanvasInteractions({ svgRef, imageSize, state, dispatch, make
 
   const moveCanvasSelection = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
     if (marqueePointerRef.current !== event.pointerId || !marqueeRef.current) return;
+    if ((event.buttons & 1) === 0) {
+      marqueePointerRef.current = null;
+      marqueeRef.current = null;
+      setSelectionMarquee(null);
+      return;
+    }
     const point = clientPointToImage(event.currentTarget, event.clientX, event.clientY, imageSize);
     const marquee = { ...marqueeRef.current, currentX: point.x, currentY: point.y };
     marqueeRef.current = marquee;
