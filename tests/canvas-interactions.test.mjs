@@ -38,8 +38,9 @@ test('marquee selection is scoped to the active asset and rendered from canonica
 test('modifier clicks update selection without starting a drag transaction', () => {
   const shiftBranch = source.indexOf('if (event.shiftKey)');
   const additiveBranch = source.indexOf('if (additive)');
-  const beginGesture = source.indexOf('dispatch({ type: "begin-gesture" })', additiveBranch);
-  assert.ok(shiftBranch >= 0 && additiveBranch > shiftBranch && beginGesture > additiveBranch);
+  const moveAnnotation = source.indexOf('const moveAnnotation');
+  const beginGesture = source.indexOf('dispatch({ type: "begin-gesture" })', moveAnnotation);
+  assert.ok(shiftBranch >= 0 && additiveBranch > shiftBranch && beginGesture > moveAnnotation);
   assert.match(source, /toggle-selection/);
   assert.match(source, /selectRange/);
 });

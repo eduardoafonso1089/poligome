@@ -1,0 +1,16 @@
+.zone { margin: 10px 12px; padding: 16px 10px 12px; display: flex; flex-direction: column; align-items: center; gap: 7px; border: 1.5px dashed color-mix(in srgb, var(--accent, #8068b2) 48%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--accent, #8068b2) 5%, transparent); color: inherit; text-align: center; transition: background .15s, border-color .15s; }
+.zone > svg { color: var(--accent, #8068b2); }
+.zone strong { font-size: 12px; line-height: 1.45; }
+.zone p { margin: 0; font-size: 11px; line-height: 1.5; opacity: .8; }
+.zone small { font-size: 10px; line-height: 1.5; opacity: .7; }
+.active { background: color-mix(in srgb, var(--accent, #8068b2) 17%, transparent); border-color: var(--accent, #8068b2); border-style: solid; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #8068b2) 12%, transparent); }
+.zone[aria-disabled=true] { opacity: .65; }
+.actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; width: 100%; margin-top: 3px; }
+.actions button { display: inline-flex; justify-content: center; align-items: center; gap: 4px; flex: 1 1 auto; min-height: 32px; padding: 5px 7px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 7px; background: transparent; color: inherit; font: inherit; font-size: 11px; cursor: pointer; }
+.actions button:hover:not(:disabled), .actions button:focus-visible { background: color-mix(in srgb, var(--accent, #8068b2) 13%, transparent); outline: 2px solid var(--accent, #8068b2); outline-offset: 2px; }
+.actions button:disabled { cursor: wait; }
+.zone .status { padding-top: 7px; border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent); opacity: 1; overflow-wrap: anywhere; }
+.zone .error { color: var(--danger, #b54141); }
+.spinner { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } .zone { transition: none; } }

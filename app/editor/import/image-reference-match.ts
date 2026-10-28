@@ -38,6 +38,19 @@ export function matchImageReference(
   const exact = uniqueMatch(reference, assets.filter((asset) => normalizedPath(asset.name) === normalized));
   if (exact) return exact;
 
+  // Folder pickers include their outer directory; a COCO reference often starts
+  // one level below it. Keep the rest of the path to distinguish repeated names.
+  const byPath = uniqueMatch(reference, assets.filter((asset) => normalizedPath(asset.name).endsWith(`/${normalized}`)));
+  if (byPath) return byPath;
+
+  if (options.allowStem) {
+    const byPathStem = uniqueMatch(reference, assets.filter((asset) => {
+      const path = normalizedPath(asset.name).replace(/\.[^/.]+$/, "");
+      return path === normalized || path.endsWith(`/${normalized}`);
+    }));
+    if (byPathStem) return byPathStem;
+  }
+
   const fileName = basename(normalized);
   const byBasename = uniqueMatch(reference, assets.filter((asset) => basename(asset.name) === fileName));
   if (byBasename) return byBasename;

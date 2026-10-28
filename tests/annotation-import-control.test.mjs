@@ -24,7 +24,7 @@ test("the image-panel COCO action opens the canonical annotation importer", () =
   assert.match(workbench, /annotationImportRef = useRef<CocoImportHandle>\(null\)/);
   assert.match(workbench, /showTrigger=\{false\}/);
   assert.match(workbench, /onImportAnnotations=\{\(\) => annotationImportRef\.current\?\.open\(\)\}/);
-  assert.match(importer, /useImperativeHandle\(ref, \(\) => \(\{ open: \(\) => inputRef\.current\?\.click\(\) \}\), \[\]\)/);
+  assert.match(importer, /useImperativeHandle\(ref, \(\) => \(\{ open: \(\) => inputRef\.current\?\.click\(\), importFiles: inspectFiles \}\)\)/);
 });
 
 test("the panel can select every image at once before importing", () => {

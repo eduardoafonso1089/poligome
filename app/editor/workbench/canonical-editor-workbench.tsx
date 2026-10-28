@@ -17,6 +17,9 @@ import { ExportControls } from "../export/export-controls";
 import { useEditorState } from "../state/use-editor-state";
 import { useAnnotationIndex } from "../state/annotation-index";
 import { useCanvasInteractions } from "../interactions/use-canvas-interactions";
+import { FileDropZone } from "../import/file-drop-zone";
+import { classifyImportFiles } from "../import/dropped-files";
+import { fileDropCopy } from "../import/file-drop-copy";
 import { useAdvancedVectorInteractions, type AdvancedVectorResult } from "../interactions/use-advanced-vector-interactions";
 import { EditorCanvas } from "../canvas/editor-canvas";
 import { DrawingDraftLayer } from "../drawing/drawing-draft-layer";
@@ -136,6 +139,7 @@ export function CanonicalEditorWorkbench() {
   const [hiddenAnnotationIds, setHiddenAnnotationIds] = useState<Set<string>>(() => new Set());
   const [hiddenLabelIds, setHiddenLabelIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(false);
+  const [annotationImportActive, setAnnotationImportActive] = useState(false);
   const [sessionDirty, setSessionDirty] = useState(false);
   const [message, setMessage] = useState("");
   const [demoTutorialStep, setDemoTutorialStep] = useState<DemoTutorialStep | null>(null);
@@ -304,6 +308,7 @@ export function CanonicalEditorWorkbench() {
   }
 
   function resetInteractionState() {
+    interactions.cancel();
     setTool("select");
     setVectorTool(null);
     setAddToSelection(false);
@@ -948,7 +953,7 @@ export function CanonicalEditorWorkbench() {
   }
 
   async function addImages(files: File[]) {
-    if (!files.length) return;
+    if (!files.length) return [];
     setLoading(true);
     try {
       const loaded = await loadLocalImageAssets(files, makeId);
@@ -960,9 +965,38 @@ export function CanonicalEditorWorkbench() {
       }
       const rejectionSummary = loaded.rejections.map(({ file, reason }) => `${file.name}: ${reason === "unsupported" ? copy.imageImportUnsupported : copy.imageImportUnreadable}`).join("; ");
       setMessage(`${copy.importImages}: ${loaded.assets.length}.${rejectionSummary ? ` ${fill(copy.imageImportRejected, { files: rejectionSummary })}` : ""}`);
+      return loaded.assets;
     } finally {
       setLoading(false);
     }
+  }
+
+  async function importDroppedFiles(files: File[]): Promise<string> {
+    const dropCopy = fileDropCopy(language);
+    const parts = classifyImportFiles(files);
+    if (parts.projects.length) {
+      if (files.length !== 1) throw new Error(dropCopy.projectOnly);
+      if (!projectDirty || window.confirm(copy.replaceUnsavedProject)) await openProject(parts.projects[0]);
+      return "";
+    }
+    if (!parts.images.length && !parts.annotations.length) throw new Error(dropCopy.empty);
+    const added = await addImages(parts.images);
+    const scope = [...assets, ...added];
+    const summary: string[] = [];
+    if (parts.images.length) {
+      summary.push(fill(dropCopy.images, { n: added.length }));
+      if (added.length < parts.images.length) summary.push(fill(dropCopy.unreadable, { n: parts.images.length - added.length }));
+    }
+    if (parts.annotations.length) {
+      if (!scope.length) throw new Error(dropCopy.needsImages);
+      const inspected = await annotationImportRef.current?.importFiles(parts.annotations, scope);
+      if (!inspected) throw new Error(copy.annotationPackageUnsupported);
+      summary.push(dropCopy.review);
+    }
+    if (parts.unsupported.length) summary.push(fill(dropCopy.skipped, { n: parts.unsupported.length }));
+    const feedback = summary.join(" ");
+    if (!parts.annotations.length) setMessage(feedback);
+    return feedback;
   }
 
   async function relinkProjectImages(files: File[]) {
@@ -1019,6 +1053,7 @@ export function CanonicalEditorWorkbench() {
   }
 
   function chooseTool(next: DrawingTool) {
+    if (next !== tool || vectorTool) interactions.cancel();
     if (next === "sam") samCatalog.activateSam();
     // Sair da ferramenta SAM descarta os prompts e a proposta: guardá-los faria a
     // máscara reaparecer numa ferramenta que não a produziu.
@@ -1045,6 +1080,7 @@ export function CanonicalEditorWorkbench() {
 
   function selectAsset(id: string) {
     if (!assets.some((item) => item.id === id)) return;
+    interactions.cancel();
     clearSamPrompts();
     drawing.cancelDraft();
     advanced.cancel();
@@ -1430,6 +1466,7 @@ export function CanonicalEditorWorkbench() {
       // Arrastar uma caixa e clicar um ponto são o mesmo gesto: o modo escolhido
       // no painel decide qual dos dois este toque é.
       if (activeSamMode === "box") {
+        if (event.button !== 0) return;
         setSamBoxStart(imagePoint);
         setSamBox({ ...imagePoint, w: 0, h: 0, label: 1 });
         event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -1447,6 +1484,11 @@ export function CanonicalEditorWorkbench() {
   function routePointerMove(event: ReactPointerEvent<SVGSVGElement>) {
     const pan = mousePanRef.current;
     if (pan?.pointerId === event.pointerId) {
+      if ((event.buttons & 5) === 0) {
+        mousePanRef.current = null;
+        setMousePanning(false);
+        return;
+      }
       const dx = event.clientX - pan.x;
       const dy = event.clientY - pan.y;
       if (dx || dy) viewport.panBy(dx, dy);
@@ -1456,6 +1498,7 @@ export function CanonicalEditorWorkbench() {
     }
     if (coordinatesGuide && event.pointerType !== "touch") setCursorPoint(clientPointToImage(event.currentTarget, event.clientX, event.clientY, imageSize));
     if (tool === "sam" && samBoxStart) {
+      if ((event.buttons & 1) === 0) { setSamBoxStart(null); setSamBox(null); return; }
       const point = clientPointToImage(event.currentTarget, event.clientX, event.clientY, imageSize);
       setSamBox({
         x: Math.min(samBoxStart.x, point.x),
@@ -1497,6 +1540,15 @@ export function CanonicalEditorWorkbench() {
     if (vectorEditing) advanced.cancel();
     else if (selecting) interactions.cancel();
     else drawing.cancelDraft();
+  }
+
+  function routeLostPointerCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    if (mousePanRef.current?.pointerId === event.pointerId) {
+      mousePanRef.current = null;
+      setMousePanning(false);
+    }
+    advanced.onLostPointerCapture(event);
+    drawing.onLostPointerCapture(event);
   }
 
   function routePointerMoveCapture(event: ReactPointerEvent<SVGSVGElement>) {
@@ -1596,7 +1648,17 @@ export function CanonicalEditorWorkbench() {
     onOpenRightPanel: () => window.dispatchEvent(new CustomEvent("poligome:open-right")),
   } satisfies PreRefactorChromeProps;
 
-  return <main className="shell" aria-label={`${copy.appTitle}: ${projectName}`}>
+  return <main className="shell" aria-label={`${copy.appTitle}: ${projectName}`}
+    onDragOver={event => {
+      if (Array.from(event.dataTransfer.types).includes("Files")) event.preventDefault();
+    }}
+    onDrop={event => {
+      if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+      event.preventDefault();
+      setMessage(fileDropCopy(language).dropHere);
+      window.dispatchEvent(new CustomEvent("poligome:open-images"));
+    }}
+  >
     {preannotateProgress
       ? <PreannotateProgressBar progress={preannotateProgress} language={language} onCancel={() => preannotateRunRef.current?.abort()} />
       : preannotateSummary && <PreannotateSummaryCard summary={preannotateSummary} language={language} onKeep={() => setPreannotateSummary(null)} onUndo={undoPreannotation} />}
@@ -1610,7 +1672,7 @@ export function CanonicalEditorWorkbench() {
     {/* Fora do menu de propósito: o menu desmonta ao fechar, e o controle tem de
         sobreviver ao seletor de arquivos e ao diálogo de recorte que vem depois. */}
     <RasterImportControl makeId={makeId} language={language} disabled={loading} showTrigger={false} onImported={applyRasterImport} onMessage={setMessage} />
-    <CocoImportControl ref={annotationImportRef} assets={assets} labels={labels} annotations={editor.annotations} makeId={makeId} language={language} disabled={loading} showTrigger={false} onImported={applyCocoImport} />
+    <CocoImportControl ref={annotationImportRef} assets={assets} labels={labels} annotations={editor.annotations} makeId={makeId} language={language} disabled={loading} showTrigger={false} onImported={applyCocoImport} onActivityChange={setAnnotationImportActive} />
 
     <div className="workspace">
       <EditorManagementPanels
@@ -1628,6 +1690,7 @@ export function CanonicalEditorWorkbench() {
         copy={copy}
         loading={loading}
         onImportImages={() => imageInputRef.current?.click()}
+        importArea={<FileDropZone language={language} disabled={loading || annotationImportActive} onImport={importDroppedFiles} />}
         onImportAnnotations={() => annotationImportRef.current?.open()}
         onSelectAsset={selectAsset}
         onMoveAsset={moveAsset}
@@ -1722,6 +1785,7 @@ export function CanonicalEditorWorkbench() {
                   onPointerMove={routePointerMove}
                   onPointerUp={routePointerUp}
                   onPointerCancel={routePointerCancel}
+                  onLostPointerCapture={routeLostPointerCapture}
                   onPointerLeave={() => setCursorPoint(null)}
                   onContextMenu={finishWithContextMenu}
                   onDoubleClick={finishWithDoubleClick}

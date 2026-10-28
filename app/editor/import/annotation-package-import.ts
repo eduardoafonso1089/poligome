@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { importFilePath } from "./dropped-files";
 import type { Asset } from "../../lib/types";
 import type { CocoDocumentInput } from "./coco-document-import";
 import { matchImageReference, type ImageMatchIssue } from "./image-reference-match";
@@ -135,7 +136,7 @@ function imageIssues(document: CocoDocumentInput, assets: Asset[]) {
   return [...issues.values()];
 }
 
-const LOOSE_LABEL = /\.(txt|names)$/i;
+const LOOSE_LABEL = /\.(txt|names|ya?ml)$/i;
 
 function issueKey(issue: ImageMatchIssue) {
   return `${issue.reason}:${normalizePath(issue.reference).toLocaleLowerCase()}`;
@@ -152,9 +153,21 @@ export async function inspectAnnotationFiles(files: File[], assets: Asset[]): Pr
   const looseLabels: YoloLabelFile[] = [];
   const failures: unknown[] = [];
 
-  for (const file of files) {
+  // A folder preserves its layout, including data.yaml and labels subfolders.
+  // Feed it to the same package parser as a ZIP, without bundling image bytes.
+  const folderFiles = files.filter(file => file.webkitRelativePath && !/\.zip$/i.test(file.name));
+  if (folderFiles.length) {
+    const folder = new JSZip();
+    for (const file of folderFiles) folder.file(importFilePath(file), await file.arrayBuffer());
+    try {
+      const archive = await folder.generateAsync({ type: "arraybuffer" });
+      parts.push(await inspectAnnotationFile(new File([archive], "folder-annotations.zip", { type: "application/zip" }), assets));
+    } catch (error) { failures.push(error); }
+  }
+
+  for (const file of files.filter(file => !folderFiles.includes(file))) {
     if (LOOSE_LABEL.test(file.name)) {
-      looseLabels.push({ path: file.name, text: await file.text() });
+      looseLabels.push({ path: importFilePath(file), text: await file.text() });
       continue;
     }
     // One unreadable file among many must not lose the rest of the selection;
@@ -194,7 +207,7 @@ export async function inspectAnnotationFile(file: File, assets: Asset[]): Promis
   if (/\.json$/i.test(file.name) || file.type === "application/json") {
     const parsed = cocoDocumentFrom(JSON.parse(await file.text()) as unknown);
     if (!parsed) throw new Error("annotationPackageUnsupported");
-    const document = completeCocoDocument(parsed, file.name, assets);
+    const document = completeCocoDocument(parsed, importFilePath(file), assets);
     return { format: "coco", roots: [file.name], document, issues: imageIssues(document, assets) };
   }
 

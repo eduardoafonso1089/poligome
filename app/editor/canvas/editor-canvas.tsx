@@ -41,6 +41,7 @@ export type EditorCanvasProps = {
   onPointerUp: (event: ReactPointerEvent<SVGSVGElement>) => void;
   onPointerCancel: () => void;
   onPointerLeave?: (event: ReactPointerEvent<SVGSVGElement>) => void;
+  onLostPointerCapture?: (event: ReactPointerEvent<SVGSVGElement>) => void;
   onContextMenu?: (event: ReactMouseEvent<SVGSVGElement>) => void;
   onDoubleClick?: (event: ReactMouseEvent<SVGSVGElement>) => void;
   onBeginAnnotationDrag: (event: ReactPointerEvent<SVGElement>, annotation: EditorAnnotation) => void;
@@ -77,6 +78,7 @@ export function EditorCanvas(props: EditorCanvasProps) {
   function handlePointerMoveCapture(event: ReactPointerEvent<SVGSVGElement>) {
     props.onPointerMoveCapture?.(event);
     if (event.isPropagationStopped()) return;
+    props.onMoveAnnotation(event);
     props.onResizeMove(event);
     props.onTransformMove(event);
   }
@@ -84,8 +86,17 @@ export function EditorCanvas(props: EditorCanvasProps) {
   function handlePointerUpCapture(event: ReactPointerEvent<SVGSVGElement>) {
     props.onPointerUpCapture?.(event);
     if (event.isPropagationStopped()) return;
+    props.onFinishAnnotation(event);
     props.onResizeEnd(event);
     props.onTransformEnd(event);
+  }
+
+  function handleLostPointerCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    props.onFinishAnnotation(event);
+    props.onFinishVertex(event);
+    props.onResizeEnd(event);
+    props.onTransformEnd(event);
+    props.onLostPointerCapture?.(event);
   }
 
   return <svg
@@ -103,6 +114,7 @@ export function EditorCanvas(props: EditorCanvasProps) {
     onPointerMove={props.onPointerMove}
     onPointerUp={props.onPointerUp}
     onPointerCancel={props.onPointerCancel}
+    onLostPointerCapture={handleLostPointerCapture}
     onPointerLeave={props.onPointerLeave}
     onContextMenu={props.onContextMenu}
     onDoubleClick={props.onDoubleClick}

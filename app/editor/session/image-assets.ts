@@ -1,5 +1,6 @@
 import type { Asset } from "../../lib/types";
 import { createTiledRasterAsset } from "../raster/tiled-raster-asset";
+import { importFilePath } from "../import/dropped-files";
 
 export type LoadedImageAssets = {
   assets: Asset[];
@@ -25,7 +26,7 @@ function imageDimensions(src: string) {
 }
 
 function acceptedImage(file: File) {
-  return file.type.startsWith("image/") && !/tiff?/i.test(file.type);
+  return (file.type.startsWith("image/") && !/tiff?/i.test(file.type)) || (!file.type && /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name));
 }
 
 function normalizedName(name: string) {
@@ -115,7 +116,7 @@ export async function loadLocalImageAssets(
       objectUrls.push(src);
       assets.push({
         id: makeId("image"),
-        name: file.name,
+        name: importFilePath(file),
         src,
         local: true,
         byteSize: file.size,

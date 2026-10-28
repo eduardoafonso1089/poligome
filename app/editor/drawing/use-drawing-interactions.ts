@@ -175,6 +175,7 @@ export function useDrawingInteractions({
   const onPointerMove = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
     const start = startRef.current;
     if (!start || start.pointerId !== event.pointerId) return;
+    if ((event.buttons & 1) === 0) { cancelDraft(); return; }
     if (Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) > 8) start.moved = true;
     if (start.pointerType === "touch" && (tool === "point" || tool === "polygon" || tool === "line")) return;
 
@@ -201,7 +202,7 @@ export function useDrawingInteractions({
         return { type: "freehand", points: [...current.points, ...flatPoint(point)] };
       });
     }
-  }, [imageSize, svgRef, tool, updateDraft]);
+  }, [cancelDraft, imageSize, svgRef, tool, updateDraft]);
 
   const onPointerUp = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
     const start = startRef.current;
@@ -225,6 +226,10 @@ export function useDrawingInteractions({
     }
   }, [appendDiscretePoint, assetId, commit, draft, labelId, makeId, tool, updateDraft]);
 
+  const onLostPointerCapture = useCallback((event: ReactPointerEvent<SVGSVGElement>) => {
+    if (startRef.current?.pointerId === event.pointerId) cancelDraft();
+  }, [cancelDraft]);
+
   return {
     draft,
     canFinish,
@@ -233,6 +238,7 @@ export function useDrawingInteractions({
     onPointerDown,
     onPointerMove,
     onPointerUp,
+    onLostPointerCapture,
     finishDraft,
     removeLastPoint,
     cancelDraft,

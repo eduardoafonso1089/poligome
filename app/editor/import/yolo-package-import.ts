@@ -322,12 +322,16 @@ export async function parseYoloPackage(zip: JSZip, assets: Asset[]): Promise<Par
  * is paired with the loaded image that shares its stem.
  */
 export function parseYoloLabelFiles(inputs: YoloLabelFile[], assets: Asset[]): ParsedYoloPackage | null {
-  const labels = inputs.filter((input) => !CLASS_LIST_NAMES.has(pathName(input.path)) && !NON_LABEL_NAMES.has(pathName(input.path)));
+  const labels = inputs.filter((input) => !CLASS_LIST_NAMES.has(pathName(input.path)) && !NON_LABEL_NAMES.has(pathName(input.path)) && !YAML_NAMES.has(pathName(input.path)));
   if (!labels.length) return null;
 
   const context = createContext();
   const classList = inputs.find((input) => CLASS_LIST_NAMES.has(pathName(input.path)));
-  const classes = classList ? declaredClasses(context, classListNames(classList.text)) : null;
+  const yaml = inputs.find((input) => YAML_NAMES.has(pathName(input.path)));
+  const yamlConfig = yaml ? parseYaml(yaml.text) as YoloYaml | null : null;
+  const yamlNames = classNames(yamlConfig?.names);
+  const classes = yamlNames.length ? declaredClasses(context, yamlNames)
+    : classList ? declaredClasses(context, classListNames(classList.text)) : null;
 
   for (const label of labels) {
     const labelPath = normalizePath(label.path);

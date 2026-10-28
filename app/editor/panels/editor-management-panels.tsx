@@ -34,6 +34,7 @@ type Props = {
   loading?: boolean;
   onImportImages?: () => void;
   onImportAnnotations?: () => void;
+  importArea?: ReactNode;
   onSelectAsset: (id: string) => void;
   onMoveAsset: (id: string, delta: -1 | 1) => void;
   onDeleteAsset: (id: string) => void;
@@ -199,6 +200,7 @@ export function EditorManagementPanels(props: Props) {
   }
 
   function dropAsset(event: DragEvent<HTMLDivElement>, targetId: string) {
+    if (!assetReorder && Array.from(event.dataTransfer.types).includes("Files")) return;
     event.preventDefault();
     event.stopPropagation();
     if (!assetReorder || assetReorder.sourceId === targetId) {
@@ -246,7 +248,7 @@ export function EditorManagementPanels(props: Props) {
           <button title={copy.deleteSelectedAnnotations} aria-label={copy.deleteSelectedAnnotations} disabled={!currentAsset && !selectedImageIds.size} onClick={confirmSelectedAssetsDelete}><Trash2 size={16} /></button>
         </div>
       </div>
-      {props.onImportImages && <button type="button" className="import" disabled={props.loading} onClick={props.onImportImages}><ImagePlus size={16} />{copy.importImages}</button>}
+      {props.importArea ?? (props.onImportImages && <button type="button" className="import" disabled={props.loading} onClick={props.onImportImages}><ImagePlus size={16} />{copy.importImages}</button>)}
       {props.onImportAnnotations && <button type="button" className="import coco-import-action" disabled={props.loading || !assets.length} onClick={props.onImportAnnotations}><FileText size={16} /><span>{sentenceCase(copy.annotations)}</span></button>}
       <label className="search"><Search size={14} /><input aria-label={copy.searchImage} value={imageSearch} onChange={(event) => setImageSearch(event.target.value)} placeholder={copy.searchImage} /></label>
       <div className="progress"><div><span>{copy.progress}</span><b>{completed} {copy.of} {assets.length}</b></div><i><em style={{ width: `${assets.length ? completed / assets.length * 100 : 0}%` }} /></i></div>
