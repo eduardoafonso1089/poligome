@@ -215,7 +215,7 @@ type StepNode = {
   edge: StepEdge; removed: boolean; version: number;
 };
 type StepEdge = { a: StepNode; b: StepNode };
-type Candidate = { node: StepNode; version: number; area: number; distance: number };
+type Candidate = { node: StepNode; version: number; area: number };
 
 // A lazy min-heap orders dense freehand outlines without sorting after every edit.
 class RemovalQueue {
@@ -281,28 +281,22 @@ function canRemove(node: StepNode, index: RBush<StepEdge>, area: number) {
   return true;
 }
 
-/** One interactive Visvalingam-style step: remove up to 20% of each ring, least-impact first. */
+/** One count-driven step. Repeated clicks may deliberately change the silhouette, down to triangles. */
 export function simplifyPolygonStep(annotation: PolygonAnnotation): PolygonAnnotation {
   const sourceRings = [annotation.vertices, ...annotation.holes];
   const rings = sourceRings.map(cleanRing);
-  if (!validTopology(rings)) return annotation;
-  const areas = rings.map(ring => Math.abs(signedArea(ring)));
-  const filledArea = areas[0] - areas.slice(1).reduce((sum, area) => sum + area, 0);
-  if (filledArea <= 0) return annotation;
-  const budgets = areas.map(area => area * MAX_CHANGED_AREA);
-  let budget = filledArea * MAX_CHANGED_AREA;
+  if (rings.some(ring => ring.length < 3 || ring.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y)))) return annotation;
+  // Hand traces can already cross themselves. Do not refuse to simplify the entire drawing.
+  // Valid masks retain valid topology; pre-existing crossings can change as the user reduces them.
+  const preserveTopology = validTopology(rings);
   const remaining = rings.map((ring, i) => Math.min(ring.length - 3,
     Math.max(1, Math.floor(sourceRings[i].length * 0.2)) - (sourceRings[i].length - ring.length)));
-  // Bound local displacement relative to object thickness, independent of viewport zoom.
-  const distances = rings.map(ring => ringTolerance(ring, Infinity) * 4);
+  const sizes = rings.map(ring => ring.length);
   const index = new RBush<StepEdge>();
   const queue = new RemovalQueue();
-  const corners = rings.map((ring, i) => new Set(protectedCorners(ring, distances[i] / 4)));
-  const protectedNodes = new Set<StepNode>();
   const nodes = rings.map((ring, r) => {
     const list = ring.map(vertex => ({ vertex, ring: r, removed: false, version: 0 } as StepNode));
     list.forEach((node, i) => {
-      if (corners[r].has(i)) protectedNodes.add(node);
       node.previous = list[(i + list.length - 1) % list.length]; node.next = list[(i + 1) % list.length];
       node.edge = { a: node, b: node.next };
       index.insert(edgeBounds(node.vertex, node.next.vertex), node.edge);
@@ -310,34 +304,31 @@ export function simplifyPolygonStep(annotation: PolygonAnnotation): PolygonAnnot
     return list;
   });
   const enqueue = (node: StepNode) => {
-    if (protectedNodes.has(node)) return;
     node.version++;
     const a = node.previous.vertex, b = node.vertex, c = node.next.vertex;
     const area = Math.abs((a.x - b.x) * (c.y - b.y) - (a.y - b.y) * (c.x - b.x)) / 2;
-    queue.push({ node, version: node.version, area, distance: Math.sqrt(distanceSquared(b, a, c)) });
+    queue.push({ node, version: node.version, area });
   };
   nodes.forEach(ring => ring.forEach(enqueue));
   for (let candidate = queue.pop(); candidate; candidate = queue.pop()) {
-    const { node, version, area, distance } = candidate, r = node.ring;
+    const { node, version, area } = candidate, r = node.ring;
     if (node.removed || version !== node.version || remaining[r] <= 0 ||
-        area > budgets[r] || area > budget || distance > distances[r] || !canRemove(node, index, area)) continue;
+        (preserveTopology && !canRemove(node, index, area))) continue;
+    // Even a crossed source must not finish as three collinear points with no visible mask.
+    if (sizes[r] === 4 && signedArea([node.previous.vertex, node.next.vertex, node.next.next.vertex]) === 0) continue;
     const previous = node.previous, next = node.next;
     index.remove(previous.edge); index.remove(node.edge);
     previous.next = next; next.previous = previous; node.removed = true;
     previous.edge = { a: previous, b: next };
     index.insert(edgeBounds(previous.vertex, next.vertex), previous.edge);
-    remaining[r]--; budgets[r] -= area; budget -= area;
+    remaining[r]--; sizes[r]--;
     enqueue(previous); enqueue(next);
   }
   const simplified = nodes.map((ring, i) => {
     const retained = ring.filter(node => !node.removed).map(node => node.vertex);
     return retained.length === sourceRings[i].length ? sourceRings[i] : retained;
   });
-  if (simplified.every((ring, i) => ring === sourceRings[i]) || !validTopology(simplified)) return annotation;
-  // The sum of swept triangles already bounds the symmetric difference; verify the full mask too.
-  try {
-    if (changedArea(clippingPolygon(rings), clippingPolygon(simplified)) > filledArea * MAX_CHANGED_AREA) return annotation;
-  } catch { return annotation; }
+  if (simplified.every((ring, i) => ring === sourceRings[i]) || (preserveTopology && !validTopology(simplified))) return annotation;
   return { ...annotation, vertices: simplified[0], holes: simplified.slice(1) };
 }
 

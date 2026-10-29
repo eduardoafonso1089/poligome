@@ -47,7 +47,7 @@ export type EditorAction =
   | { type: "delete-vertex"; annotationId: string; vertexId: string }
   | { type: "translate-annotations"; ids: string[]; dx: number; dy: number }
   | { type: "replace-annotation"; annotation: EditorAnnotation }
-  | { type: "replace-annotations-by-id"; annotations: EditorAnnotation[]; expected?: EditorAnnotation[] }
+  | { type: "replace-annotations-by-id"; annotations: EditorAnnotation[]; expected?: EditorAnnotation[]; extendHistory?: boolean }
   /**
    * Troca rascunhos por resultado, decidindo sobre o estado de agora.
    *
@@ -73,20 +73,20 @@ export function createEditorState(annotations: EditorAnnotation[] = []): EditorS
   };
 }
 
-function snapshot(state: EditorState): EditorState {
+function snapshot(state: EditorState, limit = 25): EditorState {
   return {
     ...state,
-    history: [...state.history.slice(-24), state.annotations],
+    history: [...state.history.slice(-(limit - 1)), state.annotations],
     redo: [],
     gesture: null,
     saved: false,
   };
 }
 
-function mutate(state: EditorState, annotations: EditorAnnotation[]): EditorState {
+function mutate(state: EditorState, annotations: EditorAnnotation[], historyLimit = 25): EditorState {
   if (annotations === state.annotations) return state;
   if (state.gesture) return { ...state, annotations, saved: false };
-  const next = snapshot(state);
+  const next = snapshot(state, historyLimit);
   return { ...next, annotations };
 }
 
@@ -349,7 +349,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       const replacements = new Map(action.annotations.map((annotation) => [annotation.id, annotation]));
       if (!state.annotations.some((annotation) => replacements.has(annotation.id))) return state;
       const annotations = state.annotations.map((annotation) => replacements.get(annotation.id) ?? annotation);
-      return mutate(state, annotations);
+      // A dense mask can need more than 25 clicks to reach a triangle. Keep that chain reversible.
+      return mutate(state, annotations, action.extendHistory ? 128 : 25);
     }
 
     case "undo": {
@@ -359,8 +360,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         ...state,
         annotations: previous,
         history: state.history.slice(0, -1),
-        redo: [...state.redo.slice(-24), state.annotations],
-        selection: { selected: null, multiSelected: [], anchorId: null },
+        redo: [...state.redo, state.annotations],
+        ...keepExistingSelection(state, previous),
         selectedVertex: null,
         saved: false,
       };
@@ -372,9 +373,9 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return {
         ...state,
         annotations: restored,
-        history: [...state.history.slice(-24), state.annotations],
+        history: [...state.history, state.annotations],
         redo: state.redo.slice(0, -1),
-        selection: { selected: null, multiSelected: [], anchorId: null },
+        ...keepExistingSelection(state, restored),
         selectedVertex: null,
         saved: false,
       };

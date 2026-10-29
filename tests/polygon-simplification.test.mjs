@@ -40,7 +40,6 @@ test('successive clicks progressively simplify an irregular freehand mask, with 
     const removed = p.vertices.length - q.vertices.length;
     assert.ok(removed > 0, `click ${click + 1}: ${p.vertices.length} points did not simplify`);
     assert.ok(removed <= Math.max(1, Math.floor(p.vertices.length * 0.2)));
-    assert.ok(difference(p, q) <= maskArea(p) * 0.02 + 1e-7);
     assert.ok(isValidRing(q.vertices));
     assert.ok(q.vertices.every(v => p.vertices.includes(v)));
     state = editorReducer(state, { type: 'replace-annotations-by-id', annotations: [q], expected: [p] });
@@ -80,25 +79,69 @@ test('interactive hole simplification preserves every hole and ring validity ove
   }
 });
 
-test('interactive simplification stops safely at essential corners and narrow projections', () => {
+test('interactive simplification intentionally passes the old area and corner limits down to triangles', () => {
   const rectangle = polygon(ring([[0,0], [100,0], [100,100], [0,100]]));
   const spike = polygon(ring([[0,0], [500,0], [500,248], [550,248], [550,252], [500,252], [500,500], [0,500]]));
-  assert.equal(simplifyPolygonStep(rectangle), rectangle);
-  assert.equal(simplifyPolygonStep(spike), spike);
+  const triangle = simplifyPolygonStep(rectangle);
+  assert.equal(triangle.vertices.length, 3);
+  assert.ok(difference(rectangle, triangle) > maskArea(rectangle) * 0.4);
+  assert.equal(simplifyPolygonStep(triangle), triangle);
   const crossed = polygon(ring([[0,0], [100,100], [0,100], [100,0]]));
-  assert.equal(simplifyPolygonStep(crossed), crossed);
-  let p = polygon(circle(180, 100));
-  let changes = 0;
-  for (let click = 0; click < 30; click++) {
-    const q = simplifyPolygonStep(p);
-    if (q === p) break;
-    assert.ok(q.vertices.length < p.vertices.length);
-    assert.ok(difference(p, q) <= maskArea(p) * 0.02 + 1e-6);
-    p = q; changes++;
+  assert.equal(simplifyPolygonStep(crossed).vertices.length, 3);
+  for (let p of [spike, polygon(circle(180, 100)), freehand(360)]) {
+    for (let click = 0; p.vertices.length > 3 && click < 60; click++) {
+      const q = simplifyPolygonStep(p);
+      assert.ok(q.vertices.length < p.vertices.length, `stalled with ${p.vertices.length} points`);
+      assert.ok(isValidRing(q.vertices));
+      p = q;
+    }
+    assert.equal(p.vertices.length, 3);
+    assert.equal(simplifyPolygonStep(p), p);
   }
-  assert.ok(changes > 5);
-  assert.ok(p.vertices.length >= 3);
-  assert.equal(simplifyPolygonStep(p), p);
+});
+
+test('self-crossing freehand traces and repeated positions continue simplifying without moving retained vertices', () => {
+  const p = freehandFromDraft({ id: 'p', asset: 'image', label: 'object' }, Array.from({ length: 900 }, (_, i) => {
+    const t = i / 900 * Math.PI * 2;
+    return [300 + 200 * Math.sin(t), 300 + 120 * Math.sin(2 * t)];
+  }).flat());
+  let current = p;
+  for (let step = 0; step < 40 && current.vertices.length > 3; step++) {
+    const q = simplifyPolygonStep(current);
+    assert.ok(q.vertices.length < current.vertices.length);
+    assert.ok(q.vertices.every(v => p.vertices.includes(v)));
+    current = q;
+  }
+  assert.equal(current.vertices.length, 3);
+  assert.ok(isValidRing(current.vertices));
+  const repeated = polygon(ring([[0,0], [100,0], [100,100], [100,100], [50,50], [100,0], [0,100], [0,0]]));
+  assert.ok(simplifyPolygonStep(repeated).vertices.length < repeated.vertices.length);
+  const invalid = polygon(ring([[0,0], [100,0], [NaN,100], [0,100]]));
+  assert.equal(simplifyPolygonStep(invalid), invalid);
+});
+
+test('long simplification chains retain every undo/redo step and selection, including the original drawing', () => {
+  const original = freehand(1500);
+  let state = editorReducer(createEditorState([original]), { type: 'select-single', id: original.id });
+  const steps = [original];
+  while (state.annotations[0].vertices.length > 3) {
+    const p = state.annotations[0], q = simplifyPolygonStep(p);
+    assert.notEqual(q, p);
+    state = editorReducer(state, { type: 'replace-annotations-by-id', annotations: [q], expected: [p], extendHistory: true });
+    steps.push(q);
+  }
+  assert.ok(state.history.length > 25);
+  for (let i = steps.length - 2; i >= 0; i--) {
+    state = editorReducer(state, { type: 'undo' });
+    assert.equal(state.annotations[0], steps[i]);
+    assert.equal(state.selection.selected, original.id);
+  }
+  assert.equal(state.annotations[0], original);
+  for (let i = 1; i < steps.length; i++) {
+    state = editorReducer(state, { type: 'redo' });
+    assert.equal(state.annotations[0], steps[i]);
+    assert.equal(state.selection.selected, original.id);
+  }
 });
 
 test('coiled narrow freehand outlines keep their gaps while simplifying in repeated steps', () => {
