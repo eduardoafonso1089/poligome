@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { edgeMidpoints } from "../geometry/annotation-geometry";
 import type { Vertex } from "../models/vertex-model";
+import { visibleVertexIndices } from "./vertex-handle-visibility";
 
 export type SelectedVertex = { annotationId: string; vertexId: string } | null;
 type Direction = { x: number; y: number };
@@ -103,9 +104,11 @@ export function VertexHandles({
   const midpoints = useMemo(() => edgeMidpoints(vertices, open, minEdgeLength), [vertices, open, minEdgeLength]);
   // Each cursor is an encoded SVG data URI. Building one per vertex on every
   // render made a pointermove over a dense polygon rebuild hundreds of strings.
-  const cursors = useMemo(
-    () => vertices.map((_vertex, index) => vertexMoveCursor(vertices, index, open)),
-    [vertices, open],
+  const selectedId = selectedVertex?.annotationId === annotationId ? selectedVertex.vertexId : undefined;
+  const handles = useMemo(
+    () => visibleVertexIndices(vertices, markerRadius, markerAspect, selectedId, open)
+      .map(index => ({ vertex: vertices[index], cursor: vertexMoveCursor(vertices, index, open) })),
+    [vertices, open, markerRadius, markerAspect, selectedId],
   );
 
   return <>
@@ -140,9 +143,8 @@ export function VertexHandles({
         strokeWidth={markerRadius * .22}
       />
     </g>)}
-    {vertices.map((vertex, index) => {
+    {handles.map(({ vertex, cursor }) => {
       const isSelected = selectedVertex?.annotationId === annotationId && selectedVertex.vertexId === vertex.id;
-      const cursor = cursors[index];
       return <g key={vertex.id} data-vertex-id={vertex.id}>
         {touchMode && <ellipse
           className="touch-handle-hit"

@@ -5,6 +5,7 @@ import { simplifyPolygonAnnotation, simplifyPolygonBatch } from '../app/editor/g
 import { canAddPolygonHole, isValidRing } from '../app/editor/geometry/vector-operations.ts';
 import { runPolygonSimplification } from '../app/editor/interactions/polygon-simplification-task.ts';
 import { createEditorState, editorReducer } from '../app/editor/state/editor-state.ts';
+import { visibleVertexIndices } from '../app/editor/layers/vertex-handle-visibility.ts';
 
 const ring = (pairs, prefix = 'v') => pairs.map(([x, y], i) => ({ id: `${prefix}${i}`, x, y }));
 const circle = (n, radius, cx = 0, cy = 0, prefix = 'v') => ring(Array.from({ length: n }, (_, i) => {
@@ -161,4 +162,17 @@ test('background simplification never overwrites newer edits and remains one exa
   assert.equal(editorReducer(edited, { type: 'replace-annotations-by-id', annotations: [result], expected: [original] }), edited);
   const drawing = editorReducer(state, { type: 'begin-gesture' });
   assert.equal(editorReducer(drawing, { type: 'replace-annotations-by-id', annotations: [result], expected: [original] }), drawing);
+});
+
+test('dense-mask edit handles remain sparse at overview zoom without modifying any vertices', () => {
+  const vertices = circle(50_000, 1000);
+  const before = vertices.map(v => ({ ...v }));
+  const overview = visibleVertexIndices(vertices, 5, 1, 'v17');
+  const close = visibleVertexIndices(vertices, 0.5, 1, 'v17');
+  assert.ok(overview.length < 500);
+  assert.ok(close.length > overview.length);
+  assert.ok(overview.includes(17));
+  assert.deepEqual(vertices, before);
+  const line = visibleVertexIndices(vertices, 5, 1, undefined, true);
+  assert.ok(line.includes(0) && line.includes(vertices.length - 1));
 });
