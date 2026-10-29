@@ -210,11 +210,143 @@ export function simplifyPolygonAnnotation(annotation: PolygonAnnotation, toleran
   return annotation;
 }
 
-export type SimplificationJob = { annotation: PolygonAnnotation; tolerance: number };
+type StepNode = {
+  vertex: Vertex; ring: number; previous: StepNode; next: StepNode;
+  edge: StepEdge; removed: boolean; version: number;
+};
+type StepEdge = { a: StepNode; b: StepNode };
+type Candidate = { node: StepNode; version: number; area: number; distance: number };
+
+// A lazy min-heap orders dense freehand outlines without sorting after every edit.
+class RemovalQueue {
+  private items: Candidate[] = [];
+  private before(a: Candidate, b: Candidate) {
+    return a.area < b.area || (a.area === b.area && before(a.node.vertex, b.node.vertex));
+  }
+  push(value: Candidate) {
+    let i = this.items.length;
+    this.items.push(value);
+    while (i) {
+      const parent = (i - 1) >>> 1;
+      if (!this.before(value, this.items[parent])) break;
+      this.items[i] = this.items[parent]; i = parent;
+    }
+    this.items[i] = value;
+  }
+  pop() {
+    const first = this.items[0], last = this.items.pop();
+    if (this.items.length && last) {
+      let i = 0;
+      while (i * 2 + 1 < this.items.length) {
+        let child = i * 2 + 1;
+        if (child + 1 < this.items.length && this.before(this.items[child + 1], this.items[child])) child++;
+        if (!this.before(this.items[child], last)) break;
+        this.items[i] = this.items[child]; i = child;
+      }
+      this.items[i] = last;
+    }
+    return first;
+  }
+}
+
+function edgeBounds(a: Point, b: Point) {
+  return [Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y)];
+}
+
+function intersects(a: Point, b: Point, c: Point, d: Point) {
+  if (Math.max(a.x, b.x) < Math.min(c.x, d.x) || Math.max(c.x, d.x) < Math.min(a.x, b.x) ||
+      Math.max(a.y, b.y) < Math.min(c.y, d.y) || Math.max(c.y, d.y) < Math.min(a.y, b.y)) return false;
+  return orientation(a, b, c) * orientation(a, b, d) <= 0 && orientation(c, d, a) * orientation(c, d, b) <= 0;
+}
+
+function canRemove(node: StepNode, index: RBush<StepEdge>, area: number) {
+  const a = node.previous.vertex, b = node.vertex, c = node.next.vertex;
+  const bounds = [Math.min(a.x, b.x, c.x), Math.min(a.y, b.y, c.y), Math.max(a.x, b.x, c.x), Math.max(a.y, b.y, c.y)];
+  for (const edge of index.getInExtent(bounds)) {
+    if (edge === node.previous.edge || edge === node.edge) continue;
+    const p = edge.a.vertex, q = edge.b.vertex;
+    // A shortcut may meet its two surviving neighbors, but cannot overlap their edges.
+    const shared = p === a || p === c ? p : q === a || q === c ? q : null;
+    if (shared) {
+      const other = shared === p ? q : p;
+      if (!orientation(a, c, other) && distanceSquared(other, a, c) === 0) return false;
+    } else if (intersects(a, c, p, q)) return false;
+    // Testing the swept triangle also prevents swallowing an entire hole or narrow peninsula.
+    if (area > 0) for (const point of [p, q]) {
+      if (point === a || point === c) continue;
+      const turns = [orientation(a, b, point), orientation(b, c, point), orientation(c, a, point)];
+      if (turns.every(t => t >= 0) || turns.every(t => t <= 0)) return false;
+    }
+  }
+  return true;
+}
+
+/** One interactive Visvalingam-style step: remove up to 20% of each ring, least-impact first. */
+export function simplifyPolygonStep(annotation: PolygonAnnotation): PolygonAnnotation {
+  const sourceRings = [annotation.vertices, ...annotation.holes];
+  const rings = sourceRings.map(cleanRing);
+  if (!validTopology(rings)) return annotation;
+  const areas = rings.map(ring => Math.abs(signedArea(ring)));
+  const filledArea = areas[0] - areas.slice(1).reduce((sum, area) => sum + area, 0);
+  if (filledArea <= 0) return annotation;
+  const budgets = areas.map(area => area * MAX_CHANGED_AREA);
+  let budget = filledArea * MAX_CHANGED_AREA;
+  const remaining = rings.map((ring, i) => Math.min(ring.length - 3,
+    Math.max(1, Math.floor(sourceRings[i].length * 0.2)) - (sourceRings[i].length - ring.length)));
+  // Bound local displacement relative to object thickness, independent of viewport zoom.
+  const distances = rings.map(ring => ringTolerance(ring, Infinity) * 4);
+  const index = new RBush<StepEdge>();
+  const queue = new RemovalQueue();
+  const corners = rings.map((ring, i) => new Set(protectedCorners(ring, distances[i] / 4)));
+  const protectedNodes = new Set<StepNode>();
+  const nodes = rings.map((ring, r) => {
+    const list = ring.map(vertex => ({ vertex, ring: r, removed: false, version: 0 } as StepNode));
+    list.forEach((node, i) => {
+      if (corners[r].has(i)) protectedNodes.add(node);
+      node.previous = list[(i + list.length - 1) % list.length]; node.next = list[(i + 1) % list.length];
+      node.edge = { a: node, b: node.next };
+      index.insert(edgeBounds(node.vertex, node.next.vertex), node.edge);
+    });
+    return list;
+  });
+  const enqueue = (node: StepNode) => {
+    if (protectedNodes.has(node)) return;
+    node.version++;
+    const a = node.previous.vertex, b = node.vertex, c = node.next.vertex;
+    const area = Math.abs((a.x - b.x) * (c.y - b.y) - (a.y - b.y) * (c.x - b.x)) / 2;
+    queue.push({ node, version: node.version, area, distance: Math.sqrt(distanceSquared(b, a, c)) });
+  };
+  nodes.forEach(ring => ring.forEach(enqueue));
+  for (let candidate = queue.pop(); candidate; candidate = queue.pop()) {
+    const { node, version, area, distance } = candidate, r = node.ring;
+    if (node.removed || version !== node.version || remaining[r] <= 0 ||
+        area > budgets[r] || area > budget || distance > distances[r] || !canRemove(node, index, area)) continue;
+    const previous = node.previous, next = node.next;
+    index.remove(previous.edge); index.remove(node.edge);
+    previous.next = next; next.previous = previous; node.removed = true;
+    previous.edge = { a: previous, b: next };
+    index.insert(edgeBounds(previous.vertex, next.vertex), previous.edge);
+    remaining[r]--; budgets[r] -= area; budget -= area;
+    enqueue(previous); enqueue(next);
+  }
+  const simplified = nodes.map((ring, i) => {
+    const retained = ring.filter(node => !node.removed).map(node => node.vertex);
+    return retained.length === sourceRings[i].length ? sourceRings[i] : retained;
+  });
+  if (simplified.every((ring, i) => ring === sourceRings[i]) || !validTopology(simplified)) return annotation;
+  // The sum of swept triangles already bounds the symmetric difference; verify the full mask too.
+  try {
+    if (changedArea(clippingPolygon(rings), clippingPolygon(simplified)) > filledArea * MAX_CHANGED_AREA) return annotation;
+  } catch { return annotation; }
+  return { ...annotation, vertices: simplified[0], holes: simplified.slice(1) };
+}
+
+export type SimplificationJob = { annotation: PolygonAnnotation } &
+  ({ progressive: true } | { progressive?: false; tolerance: number });
 
 export function simplifyPolygonBatch(jobs: SimplificationJob[]) {
-  return jobs.flatMap(({ annotation, tolerance }) => {
-    const result = simplifyPolygonAnnotation(annotation, tolerance);
-    return result === annotation ? [] : [result];
+  return jobs.flatMap(job => {
+    const result = job.progressive ? simplifyPolygonStep(job.annotation) : simplifyPolygonAnnotation(job.annotation, job.tolerance);
+    return result === job.annotation ? [] : [result];
   });
 }
