@@ -47,7 +47,7 @@ export type EditorAction =
   | { type: "delete-vertex"; annotationId: string; vertexId: string }
   | { type: "translate-annotations"; ids: string[]; dx: number; dy: number }
   | { type: "replace-annotation"; annotation: EditorAnnotation }
-  | { type: "replace-annotations-by-id"; annotations: EditorAnnotation[] }
+  | { type: "replace-annotations-by-id"; annotations: EditorAnnotation[]; expected?: EditorAnnotation[] }
   /**
    * Troca rascunhos por resultado, decidindo sobre o estado de agora.
    *
@@ -342,6 +342,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     }
 
     case "replace-annotations-by-id": {
+      if (action.expected) {
+        const current = new Map(state.annotations.map(annotation => [annotation.id, annotation]));
+        if (state.gesture || action.expected.some(annotation => current.get(annotation.id) !== annotation)) return state;
+      }
       const replacements = new Map(action.annotations.map((annotation) => [annotation.id, annotation]));
       if (!state.annotations.some((annotation) => replacements.has(annotation.id))) return state;
       const annotations = state.annotations.map((annotation) => replacements.get(annotation.id) ?? annotation);

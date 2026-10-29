@@ -2,6 +2,7 @@ import polygonClipping from "polygon-clipping";
 import type { Size2D } from "../../lib/editor-viewport";
 import type { EditorAnnotation, PolygonAnnotation } from "../models/annotation-model";
 import type { Vertex } from "../models/vertex-model";
+export { simplifyPolygonAnnotation } from "./polygon-simplification";
 
 export type Point = { x: number; y: number };
 export type ReshapeReason = "mixed" | "crossings" | "direction" | null;
@@ -147,30 +148,6 @@ export function snapPointToAnnotations(
     }
   }
   return bestEdge;
-}
-
-function perpendicularDistance(point: Point, start: Point, end: Point) {
-  return segmentProjection(point, start, end).distance;
-}
-
-function rdp<T extends Point>(points: T[], tolerance: number): T[] {
-  if (points.length <= 2) return points;
-  let maxDistance = 0;
-  let splitIndex = 0;
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const distance = perpendicularDistance(points[index], points[0], points.at(-1)!);
-    if (distance > maxDistance) { maxDistance = distance; splitIndex = index; }
-  }
-  if (maxDistance <= tolerance) return [points[0], points.at(-1)!];
-  return [...rdp(points.slice(0, splitIndex + 1), tolerance).slice(0, -1), ...rdp(points.slice(splitIndex), tolerance)];
-}
-
-export function simplifyPolygonAnnotation(annotation: PolygonAnnotation, tolerance: number) {
-  if (annotation.vertices.length < 4 || tolerance <= 0) return annotation;
-  const closed = [...annotation.vertices, annotation.vertices[0]];
-  const simplified = rdp(closed, tolerance).slice(0, -1);
-  if (simplified.length < 3 || !isValidRing(simplified)) return annotation;
-  return { ...annotation, vertices: simplified };
 }
 
 function clippingPolygon(annotation: PolygonAnnotation): polygonClipping.Polygon {

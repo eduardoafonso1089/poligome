@@ -66,7 +66,8 @@ import { EditorManagementPanels } from "../panels/editor-management-panels";
 import { createLabel as createPanelLabel, ensureUnlabeledLabel, normalizeAnnotationLabels, moveItemById, recolorLabel, renameLabel, stackAnnotationsByLabel, UNLABELED_ID } from "../panels/panel-model";
 import { selectRange } from "../selection/selection-model";
 import { commandFromKeyboard, isEditableShortcutTarget, type VectorTool } from "../commands/editor-shortcuts";
-import { simplifyPolygonAnnotation, unionPolygonAnnotations } from "../geometry/vector-operations";
+import { unionPolygonAnnotations } from "../geometry/vector-operations";
+import { runPolygonSimplification } from "../interactions/polygon-simplification-task";
 import { PreRefactorStatus, PreRefactorToolbar, PreRefactorTopbar, type PreRefactorChromeProps } from "../presentation/pre-refactor-chrome";
 import {
   DemoTutorialChrome,
@@ -140,6 +141,9 @@ export function CanonicalEditorWorkbench() {
   const [hiddenLabelIds, setHiddenLabelIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(false);
   const [annotationImportActive, setAnnotationImportActive] = useState(false);
+  const [simplifying, setSimplifying] = useState(false);
+  const simplifyRunRef = useRef<AbortController | null>(null);
+  useEffect(() => () => simplifyRunRef.current?.abort(), []);
   const [sessionDirty, setSessionDirty] = useState(false);
   const [message, setMessage] = useState("");
   const [demoTutorialStep, setDemoTutorialStep] = useState<DemoTutorialStep | null>(null);
@@ -308,6 +312,7 @@ export function CanonicalEditorWorkbench() {
   }
 
   function resetInteractionState() {
+    simplifyRunRef.current?.abort();
     interactions.cancel();
     setTool("select");
     setVectorTool(null);
@@ -1080,6 +1085,7 @@ export function CanonicalEditorWorkbench() {
 
   function selectAsset(id: string) {
     if (!assets.some((item) => item.id === id)) return;
+    simplifyRunRef.current?.abort();
     interactions.cancel();
     clearSamPrompts();
     drawing.cancelDraft();
@@ -1251,19 +1257,37 @@ export function CanonicalEditorWorkbench() {
     setSessionDirty(true);
   }
 
-  function simplifySelected() {
-    if (!selectedPolygons.length) return;
-    const simplified = selectedPolygons
-      .map((polygon) => {
+  async function simplifySelected() {
+    if (!selectedPolygons.length || simplifyRunRef.current) return;
+    const controller = new AbortController();
+    simplifyRunRef.current = controller;
+    setSimplifying(true);
+    setMessage(copy.simplifyWorking);
+    const originals = selectedPolygons;
+    try {
+      const jobs = originals.map((polygon) => {
         const source = assetById.get(polygon.asset);
         const polygonImage = { width: Number(source?.width) || imageSize.width, height: Number(source?.height) || imageSize.height };
         const tolerance = screenPixelsToImageUnits(4, polygonImage, viewport.layout.width);
-        return simplifyPolygonAnnotation(polygon, tolerance);
-      })
-      .filter((polygon, index) => polygon !== selectedPolygons[index]);
-    if (!simplified.length) return;
-    editor.dispatch({ type: "replace-annotations-by-id", annotations: simplified });
-    setMessage(copy.toastSimplified);
+        return { annotation: polygon, tolerance };
+      });
+      const simplified = await runPolygonSimplification(jobs, controller.signal);
+      if (controller.signal.aborted) return;
+      const current = new Map(annotationsRef.current.map(annotation => [annotation.id, annotation]));
+      if (originals.some(annotation => current.get(annotation.id) !== annotation)) {
+        setMessage(copy.simplifyCancelled); return;
+      }
+      if (!simplified.length) { setMessage(copy.simplifyUnchanged); return; }
+      editor.dispatch({ type: "replace-annotations-by-id", annotations: simplified, expected: originals });
+      const count = (polygon: typeof originals[number]) => polygon.vertices.length + polygon.holes.reduce((n, ring) => n + ring.length, 0);
+      const byId = new Map(originals.map(annotation => [annotation.id, annotation]));
+      const removed = simplified.reduce((n, polygon) => n + count(byId.get(polygon.id)!) - count(polygon), 0);
+      setMessage(fill(copy.toastSimplified, { n: removed }));
+    } catch {
+      if (!controller.signal.aborted) setMessage(copy.simplifyFailed);
+    } finally {
+      if (simplifyRunRef.current === controller) { simplifyRunRef.current = null; setSimplifying(false); }
+    }
   }
 
   function duplicatePolygon(source: Extract<EditorAnnotation, { type: "polygon" }>): EditorAnnotation {
@@ -1601,7 +1625,7 @@ export function CanonicalEditorWorkbench() {
     canFinishDraft: vectorTool === "hole" ? advanced.canFinish : drawing.canFinish,
     canRemoveDraftPoint: vectorTool === "hole" ? advanced.canRemoveLastPoint : drawing.canRemoveLastPoint,
     hasDraft: drawing.hasDraft || advanced.hasDraft,
-    canSimplify: selectedPolygons.length >= 1,
+    canSimplify: selectedPolygons.length >= 1 && !simplifying,
     canDuplicate: selectedPolygons.length >= 1,
     canMerge: selectedPolygons.length >= 2,
     canEditPolygon: Boolean(activePolygon),
