@@ -22,6 +22,8 @@ The image editor is available at `/annotate` and supports boxes, polygons, masks
 
 Projects can be saved as `.plgm` files containing classes, geometries, layout metadata and image references. Image bytes are not included in newly exported projects. When reopening a project, select the original images with the same names. Older `.plgm` files that already contain bundled images remain readable.
 
+**Simplify polygon** works progressively on selected polygons, including irregular freehand outlines and holes. Each click removes up to 20% of the current vertices, starting with the least visible detail; click again to reduce further, or **Undo** to restore one step. Each step limits changed mask area to 2%, preserves holes and rejects intersecting or invalid boundaries. Dense masks run in a background worker so the editor remains responsive. The tool stops when no further safe reduction is available.
+
 The landing page also includes a one-click computer-vision demo with synthetic aerial images and example annotations ready to edit or export.
 
 ### Import and export

@@ -208,7 +208,6 @@ export function CanonicalEditorWorkbench() {
     () => editor.selection.multiSelected.length ? editor.selection.multiSelected : editor.selection.selected ? [editor.selection.selected] : [],
     [editor.selection.multiSelected, editor.selection.selected],
   );
-  const assetById = useMemo(() => new Map(assets.map((item) => [item.id, item])), [assets]);
   const selectedPolygons = useMemo(
     () => editor.annotations.filter((annotation): annotation is Extract<EditorAnnotation, { type: "polygon" }> => selectedIds.includes(annotation.id) && annotation.type === "polygon"),
     [editor.annotations, selectedIds],
@@ -1265,12 +1264,7 @@ export function CanonicalEditorWorkbench() {
     setMessage(copy.simplifyWorking);
     const originals = selectedPolygons;
     try {
-      const jobs = originals.map((polygon) => {
-        const source = assetById.get(polygon.asset);
-        const polygonImage = { width: Number(source?.width) || imageSize.width, height: Number(source?.height) || imageSize.height };
-        const tolerance = screenPixelsToImageUnits(4, polygonImage, viewport.layout.width);
-        return { annotation: polygon, tolerance };
-      });
+      const jobs = originals.map(annotation => ({ annotation, progressive: true as const }));
       const simplified = await runPolygonSimplification(jobs, controller.signal);
       if (controller.signal.aborted) return;
       const current = new Map(annotationsRef.current.map(annotation => [annotation.id, annotation]));
@@ -1282,7 +1276,8 @@ export function CanonicalEditorWorkbench() {
       const count = (polygon: typeof originals[number]) => polygon.vertices.length + polygon.holes.reduce((n, ring) => n + ring.length, 0);
       const byId = new Map(originals.map(annotation => [annotation.id, annotation]));
       const removed = simplified.reduce((n, polygon) => n + count(byId.get(polygon.id)!) - count(polygon), 0);
-      setMessage(fill(copy.toastSimplified, { n: removed }));
+      const before = originals.reduce((n, polygon) => n + count(polygon), 0);
+      setMessage(fill(copy.toastSimplified, { before, after: before - removed }));
     } catch {
       if (!controller.signal.aborted) setMessage(copy.simplifyFailed);
     } finally {

@@ -122,6 +122,47 @@ try {
     return `${beforeSegments} -> ${afterSegments} segments`;
   });
 
+  await check("Repeated Simplify clicks reduce a real irregular freehand trace, with exact Undo and Redo", async () => {
+    await loadDemo(page);
+    await (await button(page, /Polígono à mão livre|Freehand polygon/i)).click();
+    const idsBefore = await page.locator('[data-annotation-id]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-annotation-id')));
+    const { box } = await canvas(page);
+    const points = Array.from({ length: 720 }, (_, i) => {
+      const t = i / 720 * 2 * Math.PI;
+      const r = 0.12 + 0.03 * Math.sin(7 * t + 0.2) + 0.012 * Math.cos(13 * t) + 0.004 * Math.sin(37 * t);
+      return screenPoint(box, 0.65 + r * Math.cos(t), 0.60 + r * Math.sin(t));
+    });
+    await page.mouse.move(points[0].x, points[0].y);
+    await page.mouse.down();
+    for (const point of points.slice(1)) await page.mouse.move(point.x, point.y);
+    await page.mouse.up();
+    const newIds = await page.locator('[data-annotation-id]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-annotation-id')));
+    const id = newIds.find(id => !idsBefore.includes(id));
+    if (!id) throw new Error('freehand trace was not committed');
+    await selectAnnotation(page, id);
+    const paths = [await polygonPath(page, id)];
+    const count = d => (d.match(/ L /g) ?? []).length + 1;
+    if (count(paths[0]) < 100) throw new Error(`expected a dense hand trace, got ${count(paths[0])} points`);
+    for (let click = 0; click < 5; click++) {
+      await (await button(page, /Simplificar polígono|Simplify/i)).click();
+      await page.waitForFunction(({ id, before }) => document.querySelector(`[data-annotation-id="${id}"] path`)?.getAttribute('d') !== before,
+        { id, before: paths.at(-1) }, { timeout: 15000 });
+      const after = await polygonPath(page, id);
+      if (count(after) >= count(paths.at(-1))) throw new Error(`click ${click + 1} did not reduce vertices`);
+      paths.push(after);
+    }
+    for (let i = paths.length - 2; i >= 0; i--) {
+      await (await button(page, /^Desfazer$|^Undo$/i)).click();
+      if (await polygonPath(page, id) !== paths[i]) throw new Error(`Undo did not restore step ${i}`);
+    }
+    for (let i = 1; i < paths.length; i++) {
+      await (await button(page, /^Refazer$|^Redo$/i)).click();
+      if (await polygonPath(page, id) !== paths[i]) throw new Error(`Redo did not restore step ${i}`);
+    }
+    await page.screenshot({ path: 'interaction-audit/progressive-freehand.png', fullPage: true });
+    return paths.map(count).join(' -> ');
+  });
+
   await check("Merge unions two overlapping selected polygons", async () => {
     await loadDemo(page);
     const first = await drawPolygon(page, [[.40,.56],[.54,.56],[.54,.72],[.40,.72]]);
