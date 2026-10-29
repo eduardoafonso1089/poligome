@@ -1258,6 +1258,7 @@ export function CanonicalEditorWorkbench() {
 
   async function simplifySelected() {
     if (!selectedPolygons.length || simplifyRunRef.current) return;
+    chooseTool("select");
     const controller = new AbortController();
     simplifyRunRef.current = controller;
     setSimplifying(true);
@@ -1272,7 +1273,7 @@ export function CanonicalEditorWorkbench() {
         setMessage(copy.simplifyCancelled); return;
       }
       if (!simplified.length) { setMessage(copy.simplifyUnchanged); return; }
-      editor.dispatch({ type: "replace-annotations-by-id", annotations: simplified, expected: originals });
+      editor.dispatch({ type: "replace-annotations-by-id", annotations: simplified, expected: originals, extendHistory: true });
       const count = (polygon: typeof originals[number]) => polygon.vertices.length + polygon.holes.reduce((n, ring) => n + ring.length, 0);
       const byId = new Map(originals.map(annotation => [annotation.id, annotation]));
       const removed = simplified.reduce((n, polygon) => n + count(byId.get(polygon.id)!) - count(polygon), 0);

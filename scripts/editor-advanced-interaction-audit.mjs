@@ -139,11 +139,10 @@ try {
     const newIds = await page.locator('[data-annotation-id]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-annotation-id')));
     const id = newIds.find(id => !idsBefore.includes(id));
     if (!id) throw new Error('freehand trace was not committed');
-    await selectAnnotation(page, id);
     const paths = [await polygonPath(page, id)];
     const count = d => (d.match(/ L /g) ?? []).length + 1;
     if (count(paths[0]) < 100) throw new Error(`expected a dense hand trace, got ${count(paths[0])} points`);
-    for (let click = 0; click < 5; click++) {
+    for (let click = 0; count(paths.at(-1)) > 3 && click < 60; click++) {
       await (await button(page, /Simplificar polígono|Simplify/i)).click();
       await page.waitForFunction(({ id, before }) => document.querySelector(`[data-annotation-id="${id}"] path`)?.getAttribute('d') !== before,
         { id, before: paths.at(-1) }, { timeout: 15000 });
@@ -151,9 +150,15 @@ try {
       if (count(after) >= count(paths.at(-1))) throw new Error(`click ${click + 1} did not reduce vertices`);
       paths.push(after);
     }
+    if (count(paths.at(-1)) !== 3) throw new Error(`simplification stopped at ${count(paths.at(-1))} vertices`);
+    const handles = await page.locator(`[data-annotation-id="${id}"] g[data-vertex-id]`).count();
+    if (handles !== 3) throw new Error(`expected three visible vertex handles, got ${handles}`);
+    await (await button(page, /Simplificar polígono|Simplify/i)).click();
+    if (await polygonPath(page, id) !== paths.at(-1)) throw new Error('a triangle should be a no-op');
     for (let i = paths.length - 2; i >= 0; i--) {
       await (await button(page, /^Desfazer$|^Undo$/i)).click();
       if (await polygonPath(page, id) !== paths[i]) throw new Error(`Undo did not restore step ${i}`);
+      if (await (await button(page, /Simplificar polígono|Simplify/i)).isDisabled()) throw new Error('Undo lost the selected polygon');
     }
     for (let i = 1; i < paths.length; i++) {
       await (await button(page, /^Refazer$|^Redo$/i)).click();
@@ -161,6 +166,35 @@ try {
     }
     await page.screenshot({ path: 'interaction-audit/progressive-freehand.png', fullPage: true });
     return paths.map(count).join(' -> ');
+  });
+
+  await check("A self-crossing freehand trace simplifies directly after drawing and can be fully restored", async () => {
+    await loadDemo(page);
+    await (await button(page, /Polígono à mão livre|Freehand polygon/i)).click();
+    const idsBefore = await page.locator('[data-annotation-id]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-annotation-id')));
+    const { box } = await canvas(page);
+    const points = Array.from({ length: 720 }, (_, i) => {
+      const t = i / 720 * Math.PI * 2;
+      return screenPoint(box, 0.65 + 0.14 * Math.sin(t), 0.60 + 0.11 * Math.sin(2 * t));
+    });
+    await page.mouse.move(points[0].x, points[0].y);
+    await page.mouse.down();
+    for (const point of points.slice(1)) await page.mouse.move(point.x, point.y);
+    await page.mouse.up();
+    const idsAfter = await page.locator('[data-annotation-id]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-annotation-id')));
+    const id = idsAfter.find(id => !idsBefore.includes(id));
+    if (!id) throw new Error('crossing freehand trace was not committed');
+    const original = await polygonPath(page, id);
+    await (await button(page, /Simplificar polígono|Simplify/i)).click();
+    await page.waitForFunction(({ id, original }) => document.querySelector(`[data-annotation-id="${id}"] path`)?.getAttribute('d') !== original,
+      { id, original }, { timeout: 15000 });
+    const simplified = await polygonPath(page, id);
+    if ((simplified.match(/ L /g) ?? []).length >= (original.match(/ L /g) ?? []).length) throw new Error('crossing trace did not lose points');
+    await (await button(page, /^Desfazer$|^Undo$/i)).click();
+    if (await polygonPath(page, id) !== original) throw new Error('Undo changed the original crossing trace');
+    await (await button(page, /^Refazer$|^Redo$/i)).click();
+    if (await polygonPath(page, id) !== simplified) throw new Error('Redo did not restore the simplified crossing trace');
+    return `${(original.match(/ L /g) ?? []).length + 1} -> ${(simplified.match(/ L /g) ?? []).length + 1} vertices`;
   });
 
   await check("Merge unions two overlapping selected polygons", async () => {
